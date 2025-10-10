@@ -1,7 +1,7 @@
 # WordPress + Docker Compose 项目 (GitHub Actions 自动化版)
-
+---
 本项目使用 Docker Compose 部署 WordPress 生产环境，采用多阶段构建优化镜像，并集成 GitHub Actions 实现 CI/CD 自动化，确保环境一致性、稳定性和部署效率。
-
+---
 ## 项目结构
 
 ```
