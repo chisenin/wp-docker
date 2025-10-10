@@ -123,7 +123,7 @@ wordpress-project/
 ## 步骤一：创建 Docker Compose 配置 (`docker-compose.yml`)
 
 这是整个架构的“剧本”，定义了各个服务如何协同工作。  
-**注意**：在生产环境中，将 `build` 部分替换为 `image` 以使用从 Docker Hub 拉取的自定义镜像，例如 `yourusername/wordpress-php:8.2.12` 和 `yourusername/wordpress-nginx:1.25.4`。
+**注意**：在生产环境中，将 `build` 部分替换为 `image` 以使用从 Docker Hub 拉取的自定义镜像，例如 `chisenin/wordpress-php:8.2.12` 和 `chisenin/wordpress-nginx:1.25.4`。
 
 **文件: `wordpress-project/docker-compose.yml`**
 
@@ -163,7 +163,7 @@ services:
 
   # --- PHP-FPM 服务 ---
   wp:
-    image: yourusername/wordpress-php:8.2.12  # <--- 从 Docker Hub 拉取自定义镜像（开发时用 build）
+    image: chisenin/wordpress-php:8.2.12  # <--- 从 Docker Hub 拉取自定义镜像（开发时用 build）
     # build:  # 开发时启用
     #   context: ./Dockerfiles/php
     #   dockerfile: Dockerfile
@@ -189,7 +189,7 @@ services:
 
   # --- Nginx 服务 ---
   nginx:
-    image: yourusername/wordpress-nginx:1.25.4  # <--- 从 Docker Hub 拉取自定义镜像（开发时用 build）
+    image: chisenin/wordpress-nginx:1.25.4  # <--- 从 Docker Hub 拉取自定义镜像（开发时用 build）
     # build:  # 开发时启用
     #   context: ./Dockerfiles/nginx
     #   dockerfile: Dockerfile
@@ -408,7 +408,7 @@ server {
 ## 步骤四：GitHub Actions 自动化构建工作流
 
 **文件: `wordpress-project/.github/workflows/build-and-push.yml`**  
-这个工作流在推送至 `main` 分支时触发：检出代码、登录 Docker Hub、构建多阶段 PHP 和 Nginx 镜像，并推送带标签的版本（例如 `yourusername/wordpress-php:8.2.12`）。支持多平台构建（linux/amd64, linux/arm64）以兼容不同环境。
+这个工作流在推送至 `main` 分支时触发：检出代码、登录 Docker Hub、构建多阶段 PHP 和 Nginx 镜像，并推送带标签的版本（例如 `chisenin/wordpress-php:8.2.12`）。支持多平台构建（linux/amd64, linux/arm64）以兼容不同环境。
 
 ```yaml
 name: Build and Push Docker Images
@@ -446,8 +446,8 @@ jobs:
         file: ./Dockerfiles/php/Dockerfile
         push: true
         tags: |
-          yourusername/wordpress-php:8.2.12
-          yourusername/wordpress-php:latest
+          chisenin/wordpress-php:8.2.12
+chisenin/wordpress-php:latest
         platforms: linux/amd64,linux/arm64
         build-args: |
           USE_CN_MIRROR=false
@@ -461,8 +461,8 @@ jobs:
         file: ./Dockerfiles/nginx/Dockerfile
         push: true
         tags: |
-          yourusername/wordpress-nginx:1.25.4
-          yourusername/wordpress-nginx:latest
+          chisenin/wordpress-nginx:1.25.4
+chisenin/wordpress-nginx:latest
         platforms: linux/amd64,linux/arm64
         build-args: |
           USE_CN_MIRROR=false
@@ -551,14 +551,14 @@ jobs:
 docker build \
   -f ./Dockerfiles/php/Dockerfile \
   --build-arg USE_CN_MIRROR=true \
-  -t yourusername/wordpress-php:dev \
+  -t chisenin/wordpress-php:dev \
   ./Dockerfiles/php
 
 # Nginx 镜像构建
 docker build \
   -f ./Dockerfiles/nginx/Dockerfile \
   --build-arg USE_CN_MIRROR=true \
-  -t yourusername/wordpress-nginx:dev \
+  -t chisenin/wordpress-nginx:dev \
   ./Dockerfiles/nginx
 ```
 

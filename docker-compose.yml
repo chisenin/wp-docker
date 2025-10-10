@@ -33,7 +33,7 @@ services:
 
   # --- PHP-FPM 服务 ---
   wp:
-    image: yourusername/wordpress-php:8.2.12  # <--- 从 Docker Hub 拉取自定义镜像（开发时用 build）
+    image: chisenin/wordpress-php:8.2.12  # <--- 从 Docker Hub 拉取自定义镜像（开发时用 build）
     # build:  # 开发时启用
     #   context: ./Dockerfiles/php
     #   dockerfile: Dockerfile
@@ -59,7 +59,7 @@ services:
 
   # --- Nginx 服务 ---
   nginx:
-    image: yourusername/wordpress-nginx:1.25.4  # <--- 从 Docker Hub 拉取自定义镜像（开发时用 build）
+    image: chisenin/wordpress-nginx:1.25.4  # <--- 从 Docker Hub 拉取自定义镜像（开发时用 build）
     # build:  # 开发时启用
     #   context: ./Dockerfiles/nginx
     #   dockerfile: Dockerfile

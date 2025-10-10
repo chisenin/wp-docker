@@ -33,8 +33,8 @@ jobs:
         file: ./Dockerfiles/php/Dockerfile
         push: true
         tags: |
-          yourusername/wordpress-php:8.2.12
-          yourusername/wordpress-php:latest
+          chisenin/wordpress-php:8.2.12
+          chisenin/wordpress-php:latest
         platforms: linux/amd64,linux/arm64
         cache-from: type=gha
         cache-to: type=gha,mode=max
@@ -46,8 +46,8 @@ jobs:
         file: ./Dockerfiles/nginx/Dockerfile
         push: true
         tags: |
-          yourusername/wordpress-nginx:1.25.4
-          yourusername/wordpress-nginx:latest
+          chisenin/wordpress-nginx:1.25.4
+          chisenin/wordpress-nginx:latest
         platforms: linux/amd64,linux/arm64
         cache-from: type=gha
         cache-to: type=gha,mode=max
