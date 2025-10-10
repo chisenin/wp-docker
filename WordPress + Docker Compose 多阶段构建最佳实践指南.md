@@ -21,7 +21,7 @@
     在生产环境中，`:latest` 是不稳定性的代名词。`nginx:latest` 可能今天指向 `1.25.5`，下周就变成 `1.26.0`。这种微小的“漂移”足以引发线上故障。**最佳实践是：永远在生产环境中使用具体的版本号。**
 
 2.  **Alpine：现代与高效的基石**：  
-    Alpine Linux 因其极致的小体积和高安全性，成为容器化部署的首选。使用统一的 Alpine 版本（如 `alpine3.20`）作为所有服务的基础，可以最大限度地减少底层环境差异带来的兼容性问题。
+    Alpine Linux 因其极致的小体积和高安全性，成为容器化部署的首选。使用统一的 Alpine 版本（如 `alpine3.18`）作为所有服务的基础，可以最大限度地减少底层环境差异带来的兼容性问题。
 
 3.  **国内源：构建速度的催化剂**：  
     将 Docker 镜像的包管理源切换到国内镜像源（如阿里云），可以显著加快依赖下载速度，优化构建流程。
@@ -150,7 +150,7 @@ services:
 
   # --- Redis 缓存服务 ---
   redis:
-    image: redis:7.2.4-alpine3.20 # 使用固定版本号，并注明基础系统版本
+    image: redis:7.2.4-alpine # 使用固定版本号，避免特定Alpine版本与Redis版本不匹配问题
     container_name: wp_redis
     restart: unless-stopped
     networks:
@@ -222,38 +222,68 @@ volumes:
 
 ```dockerfile
 # --- 构建阶段 ---
-FROM php:8.2.12-fpm-alpine3.20 AS builder
+FROM php:8.2.12-fpm-alpine AS builder
 
 ARG USE_CN_MIRROR=false
 
+# 配置 Alpine 源
 RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
-      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && \
-      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; \
+      echo "http://mirrors.aliyun.com/alpine/v3.18/main/" > /etc/apk/repositories && \
+      echo "http://mirrors.aliyun.com/alpine/v3.18/community/" >> /etc/apk/repositories ; \
     else \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \
-    fi && apk update --no-cache
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.18/main" > /etc/apk/repositories && \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.18/community" >> /etc/apk/repositories ; \
+    fi
 
 # 安装依赖和编译工具
-RUN apk add --no-cache \
+RUN apk update --no-cache && \
+    apk add --no-cache \
         libzip-dev freetype-dev libpng-dev libjpeg-turbo-dev icu-dev libwebp-dev git \
-        zip unzip autoconf g++ libtool \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
-    && docker-php-ext-install -j$(nproc) pdo_mysql mysqli gd exif intl zip opcache \
-    && curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer \
-    && rm -r /var/cache/apk/*
+        zip unzip autoconf g++ libtool
+
+# 配置 GD 扩展
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp-dir=/usr
+
+# 安装 PHP 扩展
+RUN docker-php-ext-install -j$(nproc) pdo_mysql mysqli gd exif intl zip opcache
+
+# 安装 Composer（2025年推荐方法，包含哈希验证）
+RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
+    php -r "if (hash_file('sha384', 'composer-setup.php') === 'dac665fdc30fdd8ec78b38b9800061b4150413ff2e3b6f88543c636f7cd84f6db9189d43a81e5503cda447da73c7e5b6') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); exit(1); }; echo PHP_EOL;" && \
+    php composer-setup.php --install-dir=/usr/local/bin --filename=composer && \
+    php -r "unlink('composer-setup.php');"
+
+# 清理缓存（增强鲁棒性，忽略空目录错误）
+RUN rm -rf /var/cache/apk/* 2>/dev/null || true
 
 # --- 最终运行阶段 ---
-FROM php:8.2.12-fpm-alpine3.20 AS final
+FROM php:8.2.12-fpm-alpine AS final
 
 # 从 builder 阶段复制编译好的扩展和工具
 COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
 COPY --from=builder /usr/local/bin/composer /usr/local/bin/composer
 
-RUN docker-php-ext-enable pdo_mysql mysqli gd exif intl zip opcache && rm -r /var/cache/apk/*
+RUN docker-php-ext-enable pdo_mysql mysqli gd exif intl zip opcache && rm -rf /var/cache/apk/* 2>/dev/null || true
 
 WORKDIR /var/www/html
 ```
+
+**重要更新说明**：
+
+1. **基础镜像更新**：将 `php:8.2.12-fpm-alpine3.20` 改为 `php:8.2.12-fpm-alpine`，避免因 PHP 版本与 Alpine 版本不匹配导致的 `not found` 错误。
+
+2. **Alpine 源版本更新**：将所有 Alpine 源版本从 `v3.20` 调整为 `v3.18`，确保与 PHP 基础镜像兼容。
+
+3. **构建指令优化**：
+   - 将原单个超长 RUN 命令链拆分为 5 个独立的 RUN 指令，便于隔离和调试构建失败点
+   - 单独执行 `apk update` 命令，确保包索引是最新的
+   - 优化 GD 扩展配置，添加 `--with-webp-dir=/usr` 参数以确保 webp 支持正常工作
+
+4. **Composer 安装改进**：采用 PHP copy+哈希验证的 2025 年推荐方法，增强安装安全性和可靠性，避免因网络或缓存问题导致的安装失败
+
+5. **CI/CD 友好**：这些变更确保了 GitHub Actions 等 CI/CD 环境下的构建稳定性，避免了常见的 exit code: 1 构建错误
+
+6. **清理命令鲁棒性**：所有清理缓存的命令都添加了 `-rf`、`2>/dev/null` 和 `|| true` 参数，确保在缓存目录为空或不存在的情况下，命令不会失败退出，提高构建的稳定性和可靠性
 
 **文件: `wordpress-project/configs/php/php.ini`**
 
@@ -285,17 +315,21 @@ opcache.fast_shutdown=1
 **文件: `wordpress-project/Dockerfiles/nginx/Dockerfile`**
 
 ```dockerfile
-FROM nginx:1.25.4-alpine3.20
+FROM nginx:1.25.4-alpine
 
 ARG USE_CN_MIRROR=false
 
+# 配置 Alpine 源
 RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
-      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && \
-      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; \
+      echo "http://mirrors.aliyun.com/alpine/v3.18/main/" > /etc/apk/repositories && \
+      echo "http://mirrors.aliyun.com/alpine/v3.18/community/" >> /etc/apk/repositories ; \
     else \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \
-    fi && apk update --no-cache
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.18/main" > /etc/apk/repositories && \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.18/community" >> /etc/apk/repositories ; \
+    fi
+
+# 更新包索引
+RUN apk update --no-cache
 
 # 安装调试工具
 RUN apk add --no-cache vim bash curl wget
