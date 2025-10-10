@@ -26,14 +26,13 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Build PHP image (temp)
+    - name: Build and push PHP temp (multi-platform)
       id: php-build
       uses: docker/build-push-action@v6
       with:
         context: ./Dockerfiles/php
         file: ./Dockerfiles/php/Dockerfile
-        push: false
-        load: true
+        push: true
         tags: ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp
         platforms: linux/amd64,linux/arm64
         build-args: |
@@ -41,9 +40,10 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    - name: Extract PHP version and push
+    - name: Pull amd64 variant and extract PHP version
       run: |
-        ACTUAL_PHP_VERSION=$(docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp cat /tmp/php_version)
+        docker pull --platform linux/amd64 ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp
+        ACTUAL_PHP_VERSION=$(docker run --rm --platform linux/amd64 ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp cat /tmp/php_version)
         docker tag ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${ACTUAL_PHP_VERSION}
         docker tag ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:latest
         docker push ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${ACTUAL_PHP_VERSION}
@@ -53,14 +53,13 @@ jobs:
     - name: Verify Nginx base image exists
       run: docker pull nginx:1.27-alpine3.20
 
-    - name: Build Nginx image (temp)
+    - name: Build and push Nginx temp (multi-platform)
       id: nginx-build
       uses: docker/build-push-action@v6
       with:
         context: ./Dockerfiles/nginx
         file: ./Dockerfiles/nginx/Dockerfile
-        push: false
-        load: true
+        push: true
         tags: ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp
         platforms: linux/amd64,linux/arm64
         build-args: |
@@ -68,9 +67,10 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    - name: Extract Nginx version and push
+    - name: Pull amd64 variant and extract Nginx version
       run: |
-        ACTUAL_NGINX_VERSION=$(docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp cat /tmp/nginx_version)
+        docker pull --platform linux/amd64 ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp
+        ACTUAL_NGINX_VERSION=$(docker run --rm --platform linux/amd64 ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp cat /tmp/nginx_version)
         docker tag ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${ACTUAL_NGINX_VERSION}
         docker tag ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:latest
         docker push ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${ACTUAL_NGINX_VERSION}
