@@ -30,8 +30,8 @@ RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" &&
     php composer-setup.php --install-dir=/usr/local/bin --filename=composer && \
     php -r "unlink('composer-setup.php');"
 
-# 拆分：清理（可选，但保持）
-RUN rm -r /var/cache/apk/*
+# 拆分：清理（可选，但保持；添加错误忽略以处理空目录）
+RUN rm -rf /var/cache/apk/* 2>/dev/null || true
 
 # --- 最终运行阶段 ---
 FROM php:8.2.12-fpm-alpine AS final
@@ -40,6 +40,6 @@ FROM php:8.2.12-fpm-alpine AS final
 COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
 COPY --from=builder /usr/local/bin/composer /usr/local/bin/composer
 
-RUN docker-php-ext-enable pdo_mysql mysqli gd exif intl zip opcache && rm -r /var/cache/apk/*
+RUN docker-php-ext-enable pdo_mysql mysqli gd exif intl zip opcache && rm -rf /var/cache/apk/* 2>/dev/null || true
 
 WORKDIR /var/www/html
