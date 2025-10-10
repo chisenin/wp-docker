@@ -39,6 +39,9 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
+    - name: Verify Nginx base image exists
+      run: docker pull nginx:1.25.4-alpine3.18
+    
     - name: Build and push Nginx image
       uses: docker/build-push-action@v6
       with:
