@@ -5,6 +5,7 @@ FROM php:8.3-fpm-alpine3.20 AS builder
 RUN php -v | head -1 | cut -d' ' -f2 | cut -d'-' -f1 > /tmp/php_version || echo "8.3" > /tmp/php_version
 
 ARG USE_CN_MIRROR=false
+ARG COMPOSER_HASH
 
 # 配置 Alpine 源
 RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
@@ -28,9 +29,9 @@ RUN docker-php-ext-configure gd \
 # 拆分：安装 PHP 扩展
 RUN docker-php-ext-install -j$(nproc) pdo_mysql mysqli gd exif intl zip opcache
 
-# 拆分：安装 Composer（2025年推荐方法，包含哈希验证；定期从 https://getcomposer.org/download/ 更新哈希）
+# 拆分：安装 Composer（使用传入的 COMPOSER_HASH 参数验证安装器，无需手动更新哈希）
 RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
-    php -r "if (hash_file('sha384', 'composer-setup.php') === 'e21205b207c3ff031906575712edab6f13eb0cfd52269f24b0b568c74c09f58d66f963ee5be44d1d0c0bf0c6ff63c579b') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); exit(1); }; echo PHP_EOL;" && \
+    php -r "if (hash_file('sha384', 'composer-setup.php') === getenv('COMPOSER_HASH')) { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); exit(1); }; echo PHP_EOL;" && \
     php composer-setup.php --install-dir=/usr/local/bin --filename=composer && \
     php -r "unlink('composer-setup.php');"
 
