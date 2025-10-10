@@ -1,0 +1,23 @@
+# --- Docker 相关 ---
+# 忽略所有容器、镜像、网络、数据卷这些"环境"产物
+.dockerignore
+*.log
+
+# --- WordPress 相关 ---
+# WordPress 自动生成的核心配置文件
+html/wp-config.php
+# 忽略 wp-content 下的插件和主题，除非它们是项目的一部分
+# html/wp-content/plugins/
+# html/wp-content/themes/
+# html/wp-content/uploads/ (如果上传内容需要备份，可以通过卷挂载并单独备份)
+
+# --- 敏感信息 ---
+# 绝对不要将密码、API Key 等敏感信息提交到代码库！
+.env
+*.key
+*.pem
+
+# --- IDE 文件 ---
+.vscode/
+.idea/
+*.swp
