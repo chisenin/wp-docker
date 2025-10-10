@@ -1,12 +1,15 @@
 # --- 构建阶段 ---
 FROM php:8.2.12-fpm-alpine3.20 AS builder
 
-# 配置国内源 (官方源优先，阿里云源为辅)
-RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
-    echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories && \
-    echo "http://mirrors.aliyun.com/alpine/v3.20/main/" >> /etc/apk/repositories && \
-    echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories && \
-    apk update --no-cache
+ARG USE_CN_MIRROR=false
+
+RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; \
+    else \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \
+    fi && apk update --no-cache
 
 # 安装依赖和编译工具
 RUN apk add --no-cache \

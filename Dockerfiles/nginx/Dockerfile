@@ -1,11 +1,15 @@
 FROM nginx:1.25.4-alpine3.20
+FROM nginx:1.25.4-alpine3.20
 
-# 配置国内源
-RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
-    echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories && \
-    echo "http://mirrors.aliyun.com/alpine/v3.20/main/" >> /etc/apk/repositories && \
-    echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories && \
-    apk update --no-cache
+ARG USE_CN_MIRROR=false
+
+RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; \
+    else \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \
+    fi && apk update --no-cache
 
 # 安装调试工具
 RUN apk add --no-cache vim bash curl wget

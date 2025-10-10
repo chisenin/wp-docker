@@ -1,27 +1,35 @@
-# **WordPress + Docker Compose 多阶段构建与生产环境最佳实践指南 (GitHub Actions 自动化版)**
+# WordPress + Docker Compose 多阶段构建与生产环境最佳实践指南 (GitHub Actions 自动化版)
 
 本文档旨在提供一个现代化、稳健、安全且易于团队协作管理的 WordPress 生产环境部署方案。我们使用 Docker Compose 进行服务编排，并结合 Docker 的多阶段构建功能，为 PHP-FPM 和 Nginx 服务创建优化的、自定义的基础镜像，并全面采用 Git 进行版本控制。
 
 **新增：GitHub Actions 自动化构建**  
 为了实现 CI/CD 自动化，我们将构建过程集成到 GitHub Actions 中。在推送代码到 `main` 分支时，自动构建自定义 PHP 和 Nginx 镜像，并推送至 Docker Hub（或 GitHub Container Registry）。这确保了镜像的一致性和可重复性，减少手动构建的错误。MariaDB 和 Redis 继续使用官方固定版本镜像，无需自定义构建。
 
+> **目标：** 构建一个现代化、可扩展、安全且自动化的 WordPress 生产部署体系，适配多架构，兼顾本地开发、CI/CD 和线上部署。
+
+**更新内容概览（根据讨论）**  
+- ✅ 引入 **build-arg 参数化构建源**：支持构建时动态切换国内 / 官方源；  
+- ✅ 明确 **GitHub Actions 仅用于构建**，部署阶段只需拉取镜像；  
+- ✅ 引导本地构建时可使用国内源加速；  
+- ✅ 拆分构建与部署职责，保证构建镜像的可复用性与生产稳定性。
+
 ## 核心理念：工程化基石
 
 在开始之前，理解本方案背后的设计哲学至关重要。这关乎于 **“确定性”** 与 **“协作性”** 之间的权衡。
 
-1.  **彻底避免 `:latest` 的不确定性**：
+1.  **彻底避免 `:latest` 的不确定性**：  
     在生产环境中，`:latest` 是不稳定性的代名词。`nginx:latest` 可能今天指向 `1.25.5`，下周就变成 `1.26.0`。这种微小的“漂移”足以引发线上故障。**最佳实践是：永远在生产环境中使用具体的版本号。**
 
-2.  **Alpine：现代与高效的基石**：
+2.  **Alpine：现代与高效的基石**：  
     Alpine Linux 因其极致的小体积和高安全性，成为容器化部署的首选。使用统一的 Alpine 版本（如 `alpine3.20`）作为所有服务的基础，可以最大限度地减少底层环境差异带来的兼容性问题。
 
-3.  **国内源：构建速度的催化剂**：
+3.  **国内源：构建速度的催化剂**：  
     将 Docker 镜像的包管理源切换到国内镜像源（如阿里云），可以显著加快依赖下载速度，优化构建流程。
 
-4.  **多阶段构建：优化最终镜像**：
+4.  **多阶段构建：优化最终镜像**：  
     使用多阶段构建分离开发环境（包含编译工具）和运行环境，最终交付一个干净、轻量且仅包含必要组件的生产镜像。
 
-5.  **配置即代码 (Infrastructure as Code)**：
+5.  **配置即代码 (Infrastructure as Code)**：  
     **所有配置文件（`docker-compose.yml`, `nginx.conf`, `php.ini`）都必须纳入版本控制系统（如 Git）**。这是确保环境一致性、可追溯性和团队协作的根本。任何环境变更都应通过代码审查流程（Pull Request）完成。
 
 6.  **CI/CD 自动化：GitHub Actions 的力量**  
@@ -39,7 +47,7 @@ wordpress-project/
 ├── .gitignore                             # Git 忽略规则 (至关重要)
 ├── README.md                              # 项目说明文档 (强烈建议创建)
 ├── docker-compose.yml                     # 服务编排核心定义
-├── .github/                               # <--- 新增：GitHub Actions 工作流目录
+├── .github/                               # GitHub Actions 工作流目录
 │   └── workflows/
 │       └── build-and-push.yml             # 自动化构建工作流
 ├── configs/                               # 所有服务的配置文件统一存放
@@ -210,18 +218,21 @@ volumes:
 
 ## 步骤二：构建自定义 PHP-FPM 镜像
 
-**文件: `wordpress-project/Dockerfiles/php/Dockerfile`**（不变）
+**文件: `wordpress-project/Dockerfiles/php/Dockerfile`**
 
 ```dockerfile
 # --- 构建阶段 ---
 FROM php:8.2.12-fpm-alpine3.20 AS builder
 
-# 配置国内源 (官方源优先，阿里云源为辅)
-RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
-    echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories && \
-    echo "http://mirrors.aliyun.com/alpine/v3.20/main/" >> /etc/apk/repositories && \
-    echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories && \
-    apk update --no-cache
+ARG USE_CN_MIRROR=false
+
+RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; \
+    else \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \
+    fi && apk update --no-cache
 
 # 安装依赖和编译工具
 RUN apk add --no-cache \
@@ -244,7 +255,7 @@ RUN docker-php-ext-enable pdo_mysql mysqli gd exif intl zip opcache && rm -r /va
 WORKDIR /var/www/html
 ```
 
-**文件: `wordpress-project/configs/php/php.ini`**（不变）
+**文件: `wordpress-project/configs/php/php.ini`**
 
 ```ini
 [PHP]
@@ -271,17 +282,20 @@ opcache.fast_shutdown=1
 
 ## 步骤三：构建自定义 Nginx 镜像
 
-**文件: `wordpress-project/Dockerfiles/nginx/Dockerfile`**（不变）
+**文件: `wordpress-project/Dockerfiles/nginx/Dockerfile`**
 
 ```dockerfile
 FROM nginx:1.25.4-alpine3.20
 
-# 配置国内源
-RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
-    echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories && \
-    echo "http://mirrors.aliyun.com/alpine/v3.20/main/" >> /etc/apk/repositories && \
-    echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories && \
-    apk update --no-cache
+ARG USE_CN_MIRROR=false
+
+RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; \
+    else \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \
+    fi && apk update --no-cache
 
 # 安装调试工具
 RUN apk add --no-cache vim bash curl wget
@@ -295,7 +309,7 @@ EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 ```
 
-**文件: `wordpress-project/configs/nginx/nginx.conf`**（不变）
+**文件: `wordpress-project/configs/nginx/nginx.conf`**
 
 ```nginx
 user  nginx;
@@ -325,7 +339,7 @@ http {
 }
 ```
 
-**文件: `wordpress-project/configs/nginx/conf.d/default.conf`**（不变）
+**文件: `wordpress-project/configs/nginx/conf.d/default.conf`**
 
 ```nginx
 server {
@@ -401,6 +415,8 @@ jobs:
           yourusername/wordpress-php:8.2.12
           yourusername/wordpress-php:latest
         platforms: linux/amd64,linux/arm64
+        build-args: |
+          USE_CN_MIRROR=false
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -414,6 +430,8 @@ jobs:
           yourusername/wordpress-nginx:1.25.4
           yourusername/wordpress-nginx:latest
         platforms: linux/amd64,linux/arm64
+        build-args: |
+          USE_CN_MIRROR=false
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -492,6 +510,43 @@ jobs:
 5.  **配置 Redis 缓存**:
     在 WordPress 后台安装并启用 "Redis Object Cache" 插件，它会自动连接到容器。
 
+## 🧪 本地构建（使用国内源）
+
+```bash
+# PHP 镜像构建
+docker build \
+  -f ./Dockerfiles/php/Dockerfile \
+  --build-arg USE_CN_MIRROR=true \
+  -t yourusername/wordpress-php:dev \
+  ./Dockerfiles/php
+
+# Nginx 镜像构建
+docker build \
+  -f ./Dockerfiles/nginx/Dockerfile \
+  --build-arg USE_CN_MIRROR=true \
+  -t yourusername/wordpress-nginx:dev \
+  ./Dockerfiles/nginx
+```
+
+## 🚀 部署阶段（无构建，仅拉取）
+
+```bash
+docker-compose pull    # 拉取 GitHub Actions 推送的镜像
+docker-compose up -d   # 启动服务
+```
+
+## 🧩 加速器配置建议（生产环境）
+
+**文件：`/etc/docker/daemon.json`**
+
+```json
+{
+  "registry-mirrors": ["https://mirror.ccs.tencentyun.com"]
+}
+sudo systemctl daemon-reexec
+sudo systemctl restart docker
+```
+
 ---
 
 ## 总结
@@ -505,3 +560,9 @@ jobs:
 *   **GitHub Actions 自动化** 实现了无摩擦的 CI/CD 管道，每次 PR 合并即构建并推送镜像。
 
 遵循此指南，您将能够构建一个**稳定、高效、可维护、团队友好**的 WordPress 生产环境，从容应对未来的业务增长和团队协作挑战。
+
+| 阶段           | 是否构建 | 是否用国内源   | 镜像处理方式        |
+| -------------- | -------- | -------------- | ------------------- |
+| GitHub Actions | ✅ 是     | ❌ 否（官方源） | ✅ 构建并推送镜像    |
+| 本地开发       | ✅ 可选   | ✅ 推荐使用     | 构建 dev 标签镜像   |
+| 生产部署服务器 | ❌ 不构建 | ✅ 拉取加速     | 仅 `pull + up` 操作 |
