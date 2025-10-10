@@ -1,14 +1,14 @@
 # --- 构建阶段 ---
-FROM php:8.2.12-fpm-alpine3.20 AS builder
+FROM php:8.2.12-fpm-alpine AS builder
 
 ARG USE_CN_MIRROR=false
 
 RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
-      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && \
-      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; \
+      echo "http://mirrors.aliyun.com/alpine/v3.18/main/" > /etc/apk/repositories && \
+      echo "http://mirrors.aliyun.com/alpine/v3.18/community/" >> /etc/apk/repositories ; \
     else \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.18/main" > /etc/apk/repositories && \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.18/community" >> /etc/apk/repositories ; \
     fi && apk update --no-cache
 
 # 安装依赖和编译工具
@@ -21,7 +21,7 @@ RUN apk add --no-cache \
     && rm -r /var/cache/apk/*
 
 # --- 最终运行阶段 ---
-FROM php:8.2.12-fpm-alpine3.20 AS final
+FROM php:8.2.12-fpm-alpine AS final
 
 # 从 builder 阶段复制编译好的扩展和工具
 COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
