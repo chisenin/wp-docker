@@ -1,14 +1,18 @@
 # --- 构建阶段 ---
-FROM php:8.2.12-fpm-alpine AS builder
+FROM php:8.3-fpm-alpine3.20 AS builder
+
+# 提取实际 PHP 版本（写入 /tmp/php_version，用于动态标签）
+RUN php -v | head -1 | cut -d' ' -f2 | cut -d'-' -f1 > /tmp/php_version || echo "8.3" > /tmp/php_version
 
 ARG USE_CN_MIRROR=false
 
+# 配置 Alpine 源
 RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
-      echo "http://mirrors.aliyun.com/alpine/v3.18/main/" > /etc/apk/repositories && \
-      echo "http://mirrors.aliyun.com/alpine/v3.18/community/" >> /etc/apk/repositories ; \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; \
     else \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.18/main" > /etc/apk/repositories && \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.18/community" >> /etc/apk/repositories ; \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \
     fi && apk update --no-cache
 
 # 拆分：独立安装依赖（添加 update 以防缓存过期）
@@ -24,9 +28,9 @@ RUN docker-php-ext-configure gd \
 # 拆分：安装 PHP 扩展
 RUN docker-php-ext-install -j$(nproc) pdo_mysql mysqli gd exif intl zip opcache
 
-# 拆分：安装 Composer（更新为 2025 年推荐方法：PHP copy + 验证 + 安装）
+# 拆分：安装 Composer（2025年推荐方法，包含哈希验证；定期从 https://getcomposer.org/download/ 更新哈希）
 RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
-    php -r "if (hash_file('sha384', 'composer-setup.php') === 'ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); exit(1); }" && \
+    php -r "if (hash_file('sha384', 'composer-setup.php') === 'e21205b207c3ff031906575712edab6f13eb0cfd52269f24b0b568c74c09f58d66f963ee5be44d1d0c0bf0c6ff63c579b') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); exit(1); }; echo PHP_EOL;" && \
     php composer-setup.php --install-dir=/usr/local/bin --filename=composer && \
     php -r "unlink('composer-setup.php');"
 
@@ -34,11 +38,12 @@ RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" &&
 RUN rm -rf /var/cache/apk/* 2>/dev/null || true
 
 # --- 最终运行阶段 ---
-FROM php:8.2.12-fpm-alpine AS final
+FROM php:8.3-fpm-alpine3.20 AS final
 
-# 从 builder 阶段复制编译好的扩展和工具
+# 从 builder 阶段复制编译好的扩展、工具和版本文件
 COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
 COPY --from=builder /usr/local/bin/composer /usr/local/bin/composer
+COPY --from=builder /tmp/php_version /tmp/php_version
 
 RUN docker-php-ext-enable pdo_mysql mysqli gd exif intl zip opcache && rm -rf /var/cache/apk/* 2>/dev/null || true
 

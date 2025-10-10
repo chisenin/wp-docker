@@ -26,34 +26,56 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Build and push PHP image
+    - name: Build PHP image (temp)
+      id: php-build
       uses: docker/build-push-action@v6
       with:
         context: ./Dockerfiles/php
         file: ./Dockerfiles/php/Dockerfile
-        push: true
-        tags: |
-          ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:8.2.12
-          ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:latest
+        push: false
+        load: true
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp
         platforms: linux/amd64,linux/arm64
+        build-args: |
+          USE_CN_MIRROR=false
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
+    - name: Extract PHP version and push
+      run: |
+        ACTUAL_PHP_VERSION=$(docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp cat /tmp/php_version)
+        docker tag ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${ACTUAL_PHP_VERSION}
+        docker tag ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:latest
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${ACTUAL_PHP_VERSION}
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:latest
+        echo "php_version=${ACTUAL_PHP_VERSION}" >> $GITHUB_OUTPUT
+
     - name: Verify Nginx base image exists
-      run: docker pull nginx:1.25.4-alpine3.18
-    
-    - name: Build and push Nginx image
+      run: docker pull nginx:1.27-alpine3.20
+
+    - name: Build Nginx image (temp)
+      id: nginx-build
       uses: docker/build-push-action@v6
       with:
         context: ./Dockerfiles/nginx
         file: ./Dockerfiles/nginx/Dockerfile
-        push: true
-        tags: |
-          ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:1.25.4
-          ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:latest
+        push: false
+        load: true
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp
         platforms: linux/amd64,linux/arm64
+        build-args: |
+          USE_CN_MIRROR=false
         cache-from: type=gha
         cache-to: type=gha,mode=max
+
+    - name: Extract Nginx version and push
+      run: |
+        ACTUAL_NGINX_VERSION=$(docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp cat /tmp/nginx_version)
+        docker tag ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${ACTUAL_NGINX_VERSION}
+        docker tag ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:latest
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${ACTUAL_NGINX_VERSION}
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:latest
+        echo "nginx_version=${ACTUAL_NGINX_VERSION}" >> $GITHUB_OUTPUT
 
     - name: Run docker-compose for validation (optional)
       run: |
