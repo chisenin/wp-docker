@@ -16,6 +16,7 @@ html/wp-config.php
 .env
 *.key
 *.pem
+docker_hub_key.txt
 
 # --- IDE 文件 ---
 .vscode/
