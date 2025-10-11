@@ -27,7 +27,7 @@ RUN apk add --no-cache \
         zip unzip autoconf g++ libtool
 
 # 配置 GD 扩展
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp-dir=/usr
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp
 
 # 安装 PHP 扩展
 RUN docker-php-ext-install -j$(nproc) pdo_mysql mysqli gd exif intl zip opcache
