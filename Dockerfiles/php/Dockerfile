@@ -10,7 +10,13 @@ RUN php -v | head -1 | cut -d' ' -f2 | cut -d'-' -f1 > /tmp/php_version || echo 
 ARG USE_CN_MIRROR=false
 
 # 配置 Alpine 源
-RUN if [ "$USE_CN_MIRROR" = "true" ]; then \n      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && \n      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; \n    else \n      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \n      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \n    fi
+RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; \
+    else \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \
+    fi
 
 # 更新包索引
 RUN apk update --no-cache
