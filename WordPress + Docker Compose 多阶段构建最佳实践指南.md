@@ -11,17 +11,18 @@
 - ✅ 引入 **build-arg 参数化构建源**：支持构建时动态切换国内 / 官方源；  
 - ✅ 明确 **GitHub Actions 仅用于构建**，部署阶段只需拉取镜像；  
 - ✅ 引导本地构建时可使用国内源加速；  
-- ✅ 拆分构建与部署职责，保证构建镜像的可复用性与生产稳定性。
+- ✅ 拆分构建与部署职责，保证构建镜像的可复用性与生产稳定性；  
+- ✅ **动态版本标签提取**：为避免基础镜像标签 "not found" 错误，使用 minor 版本 + Alpine 3.20 的 latest 拉取，构建中提取实际 patch 版本，推送时使用精确标签，确保基于现代 Alpine 3.20 的确定性锁定。
 
 ## 核心理念：工程化基石
 
 在开始之前，理解本方案背后的设计哲学至关重要。这关乎于 **“确定性”** 与 **“协作性”** 之间的权衡。
 
 1.  **彻底避免 `:latest` 的不确定性**：  
-    在生产环境中，`:latest` 是不稳定性的代名词。`nginx:latest` 可能今天指向 `1.25.5`，下周就变成 `1.26.0`。这种微小的“漂移”足以引发线上故障。**最佳实践是：永远在生产环境中使用具体的版本号。**
+    在生产环境中，`:latest` 是不稳定性的代名词。`nginx:latest` 可能今天指向 `1.27.2`，下周就变成 `1.28.0`。这种微小的“漂移”足以引发线上故障。**最佳实践是：永远在生产环境中使用具体的版本号。** 为此，我们引入动态提取机制：在构建时使用 minor 版本 latest 拉取基础镜像，提取实际版本后推送精确标签。
 
 2.  **Alpine：现代与高效的基石**：  
-    Alpine Linux 因其极致的小体积和高安全性，成为容器化部署的首选。使用统一的 Alpine 版本（如 `alpine3.18`）作为所有服务的基础，可以最大限度地减少底层环境差异带来的兼容性问题。
+    Alpine Linux 因其极致的小体积和高安全性，成为容器化部署的首选。使用统一的 Alpine 版本（如 `alpine3.20`）作为所有服务的基础，可以最大限度地减少底层环境差异带来的兼容性问题，并受益于最新的安全补丁。
 
 3.  **国内源：构建速度的催化剂**：  
     将 Docker 镜像的包管理源切换到国内镜像源（如阿里云），可以显著加快依赖下载速度，优化构建流程。
@@ -33,7 +34,7 @@
     **所有配置文件（`docker-compose.yml`, `nginx.conf`, `php.ini`）都必须纳入版本控制系统（如 Git）**。这是确保环境一致性、可追溯性和团队协作的根本。任何环境变更都应通过代码审查流程（Pull Request）完成。
 
 6.  **CI/CD 自动化：GitHub Actions 的力量**  
-    通过 GitHub Actions 实现自动构建、测试和镜像推送，确保每次代码变更后，生产镜像立即可用。这与 Git 工作流无缝集成，支持团队协作。
+    通过 GitHub Actions 实现自动构建、测试和镜像推送，确保每次代码变更后，生产镜像立即可用。这与 Git 工作流无缝集成，支持团队协作。动态标签提取进一步提升了构建鲁棒性，避免手动维护标签的痛点。
 
 ---
 
@@ -123,7 +124,7 @@ wordpress-project/
 ## 步骤一：创建 Docker Compose 配置 (`docker-compose.yml`)
 
 这是整个架构的“剧本”，定义了各个服务如何协同工作。  
-**注意**：在生产环境中，将 `build` 部分替换为 `image` 以使用从 Docker Hub 拉取的自定义镜像。为了避免硬编码用户名，可以使用环境变量 `${DOCKERHUB_USERNAME}`，例如 `${DOCKERHUB_USERNAME:-chisenin}/wordpress-php:8.2.12` 和 `${DOCKERHUB_USERNAME:-chisenin}/wordpress-nginx:1.25.4`（冒号后为默认值）。
+**注意**：在生产环境中，将 `build` 部分替换为 `image` 以使用从 Docker Hub 拉取的自定义镜像。为了避免硬编码用户名，可以使用环境变量 `${DOCKERHUB_USERNAME}`，例如 `${DOCKERHUB_USERNAME:-chisenin}/wordpress-php:8.3` 和 `${DOCKERHUB_USERNAME:-chisenin}/wordpress-nginx:1.27`（动态提取的实际 patch 版本）。
 
 **文件: `wordpress-project/docker-compose.yml`**
 
@@ -150,7 +151,7 @@ services:
 
   # --- Redis 缓存服务 ---
   redis:
-    image: redis:7.2.4-alpine # 使用固定版本号，避免特定Alpine版本与Redis版本不匹配问题
+    image: redis:7.2.4-alpine3.20 # 使用固定版本号，并注明基础系统版本
     container_name: wp_redis
     restart: unless-stopped
     networks:
@@ -163,7 +164,7 @@ services:
 
   # --- PHP-FPM 服务 ---
   wp:
-    image: ${DOCKERHUB_USERNAME:-chisenin}/wordpress-php:8.2.12  # <--- 从 Docker Hub 拉取自定义镜像（使用环境变量，默认值为chisenin）
+    image: ${DOCKERHUB_USERNAME:-chisenin}/wordpress-php:8.3  # <--- 从 Docker Hub 拉取自定义镜像（使用环境变量，默认值为chisenin；实际标签为动态提取的 8.3.x）
     # build:  # 开发时启用
     #   context: ./Dockerfiles/php
     #   dockerfile: Dockerfile
@@ -189,7 +190,7 @@ services:
 
   # --- Nginx 服务 ---
   nginx:
-    image: ${DOCKERHUB_USERNAME:-chisenin}/wordpress-nginx:1.25.4  # <--- 从 Docker Hub 拉取自定义镜像（使用环境变量，默认值为chisenin）
+    image: ${DOCKERHUB_USERNAME:-chisenin}/wordpress-nginx:1.27  # <--- 从 Docker Hub 拉取自定义镜像（使用环境变量，默认值为chisenin；实际标签为动态提取的 1.27.x）
     # build:  # 开发时启用
     #   context: ./Dockerfiles/nginx
     #   dockerfile: Dockerfile
@@ -221,23 +222,30 @@ volumes:
 **文件: `wordpress-project/Dockerfiles/php/Dockerfile`**
 
 ```dockerfile
-# --- 构建阶段 ---
-FROM php:8.2.12-fpm-alpine AS builder
+FROM php:8.3-fpm-alpine3.20 AS builder
+
+# 定义 ARG 以支持动态哈希传入（默认为空，回退时可硬编码）
+ARG COMPOSER_HASH=""
+
+# 提取实际 PHP 版本（写入 /tmp/php_version，用于动态标签）
+RUN php -v | head -1 | cut -d' ' -f2 | cut -d'-' -f1 > /tmp/php_version || echo "8.3" > /tmp/php_version
 
 ARG USE_CN_MIRROR=false
 
 # 配置 Alpine 源
-RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
-      echo "http://mirrors.aliyun.com/alpine/v3.18/main/" > /etc/apk/repositories && \
-      echo "http://mirrors.aliyun.com/alpine/v3.18/community/" >> /etc/apk/repositories ; \
-    else \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.18/main" > /etc/apk/repositories && \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.18/community" >> /etc/apk/repositories ; \
+RUN if [ "$USE_CN_MIRROR" = "true" ]; then 
+      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && 
+      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; 
+    else 
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && 
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; 
     fi
 
+# 更新包索引
+RUN apk update --no-cache
+
 # 安装依赖和编译工具
-RUN apk update --no-cache && \
-    apk add --no-cache \
+RUN apk add --no-cache \
         libzip-dev freetype-dev libpng-dev libjpeg-turbo-dev icu-dev libwebp-dev git \
         zip unzip autoconf g++ libtool
 
@@ -247,9 +255,10 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp-dir=/usr
 # 安装 PHP 扩展
 RUN docker-php-ext-install -j$(nproc) pdo_mysql mysqli gd exif intl zip opcache
 
-# 安装 Composer（2025年推荐方法，包含哈希验证）
+# 安装 Composer（使用动态 COMPOSER_HASH 参数验证安装器；如果为空，使用硬编码回退）
 RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
-    php -r "if (hash_file('sha384', 'composer-setup.php') === 'dac665fdc30fdd8ec78b38b9800061b4150413ff2e3b6f88543c636f7cd84f6db9189d43a81e5503cda447da73c7e5b6') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); exit(1); }; echo PHP_EOL;" && \
+    EXPECTED_HASH=$( [ -n "$COMPOSER_HASH" ] && echo "$COMPOSER_HASH" || echo "ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792" ) && \
+    php -r "if (hash_file('sha384', 'composer-setup.php') === getenv('EXPECTED_HASH')) { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); exit(1); }; echo PHP_EOL;" && \
     php composer-setup.php --install-dir=/usr/local/bin --filename=composer && \
     php -r "unlink('composer-setup.php');"
 
@@ -257,11 +266,12 @@ RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" &&
 RUN rm -rf /var/cache/apk/* 2>/dev/null || true
 
 # --- 最终运行阶段 ---
-FROM php:8.2.12-fpm-alpine AS final
+FROM php:8.3-fpm-alpine3.20 AS final
 
-# 从 builder 阶段复制编译好的扩展和工具
+# 从 builder 阶段复制编译好的扩展、工具和版本文件
 COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
 COPY --from=builder /usr/local/bin/composer /usr/local/bin/composer
+COPY --from=builder /tmp/php_version /tmp/php_version
 
 RUN docker-php-ext-enable pdo_mysql mysqli gd exif intl zip opcache && rm -rf /var/cache/apk/* 2>/dev/null || true
 
@@ -270,20 +280,24 @@ WORKDIR /var/www/html
 
 **重要更新说明**：
 
-1. **基础镜像更新**：将 `php:8.2.12-fpm-alpine3.20` 改为 `php:8.2.12-fpm-alpine`，避免因 PHP 版本与 Alpine 版本不匹配导致的 `not found` 错误。
+1. **基础镜像更新**：切换到 `php:8.3-fpm-alpine3.20`（支持 Alpine 3.20 的最新稳定 PHP 系列），避免旧版本标签不匹配问题。
 
-2. **Alpine 源版本更新**：将所有 Alpine 源版本从 `v3.20` 调整为 `v3.18`，确保与 PHP 基础镜像兼容。
+2. **Alpine 源版本更新**：统一为 `v3.20`，确保包兼容性和安全补丁。
 
-3. **构建指令优化**：
-   - 将原单个超长 RUN 命令链拆分为 5 个独立的 RUN 指令，便于隔离和调试构建失败点
+3. **动态版本提取**：添加 `RUN` 指令提取实际 PHP 版本（e.g., 8.3.14），存储在 `/tmp/php_version`，供 Actions 后续标签使用。这实现了“拉取 latest minor，推送精确 patch”的机制。
+
+4. **构建指令优化**：
+   - 将原单个超长 RUN 命令链拆分为独立指令，便于隔离和调试构建失败点
    - 单独执行 `apk update` 命令，确保包索引是最新的
    - 优化 GD 扩展配置，添加 `--with-webp-dir=/usr` 参数以确保 webp 支持正常工作
 
-4. **Composer 安装改进**：采用 PHP copy+哈希验证的 2025 年推荐方法，增强安装安全性和可靠性，避免因网络或缓存问题导致的安装失败
+5. **Composer 安装改进**：采用 PHP copy+哈希验证的 2025 年推荐方法，增强安装安全性和可靠性，避免因网络或缓存问题导致的安装失败。哈希对应 v2.8.12（定期验证）。
 
-5. **CI/CD 友好**：这些变更确保了 GitHub Actions 等 CI/CD 环境下的构建稳定性，避免了常见的 exit code: 1 构建错误
+6. **CI/CD 友好**：这些变更确保了 GitHub Actions 等 CI/CD 环境下的构建稳定性，避免了常见的 exit code: 1 构建错误。动态提取减少手动标签维护负担。
 
-6. **清理命令鲁棒性**：所有清理缓存的命令都添加了 `-rf`、`2>/dev/null` 和 `|| true` 参数，确保在缓存目录为空或不存在的情况下，命令不会失败退出，提高构建的稳定性和可靠性
+7. **清理命令鲁棒性**：所有清理缓存的命令都添加了 `-rf`、`2>/dev/null` 和 `|| true` 参数，确保在缓存目录为空或不存在的情况下，命令不会失败退出，提高构建的稳定性和可靠性。
+
+8. **动态 Composer 哈希获取优化**：集成 GitHub Actions 动态提取最新哈希，避免硬编码；添加验证回退机制，确保构建在网络波动下稳定。当前哈希（2025-10-11）：ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792。
 
 **文件: `wordpress-project/configs/php/php.ini`**
 
@@ -315,17 +329,20 @@ opcache.fast_shutdown=1
 **文件: `wordpress-project/Dockerfiles/nginx/Dockerfile`**
 
 ```dockerfile
-FROM nginx:1.25.4-alpine
+FROM nginx:1.27-alpine3.20
+
+# 提取实际 Nginx 版本（写入 /tmp/nginx_version，用于动态标签）
+RUN nginx -v 2>&1 | cut -d'/' -f2 | cut -d' ' -f1 > /tmp/nginx_version || echo "1.27" > /tmp/nginx_version
 
 ARG USE_CN_MIRROR=false
 
 # 配置 Alpine 源
 RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
-      echo "http://mirrors.aliyun.com/alpine/v3.18/main/" > /etc/apk/repositories && \
-      echo "http://mirrors.aliyun.com/alpine/v3.18/community/" >> /etc/apk/repositories ; \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && \
+      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; \
     else \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.18/main" > /etc/apk/repositories && \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.18/community" >> /etc/apk/repositories ; \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
+      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \
     fi
 
 # 更新包索引
@@ -342,6 +359,11 @@ RUN chown -R www-data:www-data /var/cache/nginx /var/log/nginx
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 ```
+
+**重要更新说明**：
+- **基础镜像更新**：切换到 `nginx:1.27-alpine3.20`（支持 Alpine 3.20 的最新稳定 Nginx 系列）。
+- **Alpine 源版本**：统一为 `v3.20`。
+- **动态版本提取**：提取实际版本（e.g., 1.27.2），存储在 `/tmp/nginx_version`。
 
 **文件: `wordpress-project/configs/nginx/nginx.conf`**
 
@@ -408,7 +430,7 @@ server {
 ## 步骤四：GitHub Actions 自动化构建工作流
 
 **文件: `wordpress-project/.github/workflows/build-and-push.yml`**  
-这个工作流在推送至 `main` 分支时触发：检出代码、登录 Docker Hub、构建多阶段 PHP 和 Nginx 镜像，并推送带标签的版本。为了增强安全性，我们使用了 GitHub Secrets 中的 `${{ secrets.DOCKERHUB_USERNAME }}` 变量来动态生成镜像标签，避免硬编码用户名。支持多平台构建（linux/amd64, linux/arm64）以兼容不同环境。
+这个工作流在推送至 `main` 分支时触发：检出代码、登录 Docker Hub、先构建临时镜像、提取实际版本、重新标签并推送。为了增强安全性，我们使用了 GitHub Secrets 中的 `${{ secrets.DOCKERHUB_USERNAME }}` 变量来动态生成镜像标签，避免硬编码用户名。支持多平台构建（linux/amd64, linux/arm64）以兼容不同环境。
 
 ```yaml
 name: Build and Push Docker Images
@@ -439,35 +461,68 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Build and push PHP image
+    - name: Fetch latest Composer hash
+      id: composer-hash
+      run: |
+        HASH=$(curl -s https://composer.github.io/installer.sig  | base64 -d)
+        if [ -z "$HASH" ] || [ ${#HASH} -ne 96 ]; then 
+          echo "Error: Invalid Composer hash (length: ${#HASH})"
+          exit 1
+        fi
+        echo "Fetched Composer hash: $HASH"
+        echo "composer_hash=${HASH}" >> $GITHUB_OUTPUT
+
+    - name: Build and push PHP temp (multi-platform)
+      id: php-build
       uses: docker/build-push-action@v6
       with:
         context: ./Dockerfiles/php
         file: ./Dockerfiles/php/Dockerfile
         push: true
-        tags: |
-           ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:8.2.12
-           ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:latest
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp
+        platforms: linux/amd64,linux/arm64
+        build-args: |
+          USE_CN_MIRROR=false
+          COMPOSER_HASH=${{ steps.composer-hash.outputs.composer_hash }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Pull amd64 variant and extract PHP version
+      run: |
+        docker pull --platform linux/amd64 ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp
+        ACTUAL_PHP_VERSION=$(docker run --rm --platform linux/amd64 ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp cat /tmp/php_version)
+        docker tag ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${ACTUAL_PHP_VERSION}
+        docker tag ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:temp ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:latest
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${ACTUAL_PHP_VERSION}
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:latest
+        echo "php_version=${ACTUAL_PHP_VERSION}" >> $GITHUB_OUTPUT
+
+    - name: Verify Nginx base image exists
+      run: docker pull nginx:1.27-alpine3.20
+
+    - name: Build and push Nginx temp (multi-platform)
+      id: nginx-build
+      uses: docker/build-push-action@v6
+      with:
+        context: ./Dockerfiles/nginx
+        file: ./Dockerfiles/nginx/Dockerfile
+        push: true
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp
         platforms: linux/amd64,linux/arm64
         build-args: |
           USE_CN_MIRROR=false
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    - name: Build and push Nginx image
-      uses: docker/build-push-action@v6
-      with:
-        context: ./Dockerfiles/nginx
-        file: ./Dockerfiles/nginx/Dockerfile
-        push: true
-        tags: |
-           ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:1.25.4
-           ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:latest
-        platforms: linux/amd64,linux/arm64
-        build-args: |
-          USE_CN_MIRROR=false
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+    - name: Pull amd64 variant and extract Nginx version
+      run: |
+        docker pull --platform linux/amd64 ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp
+        ACTUAL_NGINX_VERSION=$(docker run --rm --platform linux/amd64 ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp cat /tmp/nginx_version)
+        docker tag ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${ACTUAL_NGINX_VERSION}
+        docker tag ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:temp ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:latest
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${ACTUAL_NGINX_VERSION}
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:latest
+        echo "nginx_version=${ACTUAL_NGINX_VERSION}" >> $GITHUB_OUTPUT
 
     - name: Run docker-compose for validation (optional)
       run: |
@@ -479,9 +534,9 @@ jobs:
 
 **说明**：
 - **触发器**：推送或 PR 到 `main` 分支。
-- **构建优化**：使用 Buildx 支持多阶段和多平台；缓存加速后续构建。
+- **构建优化**：使用 Buildx 支持多阶段和多平台；缓存加速后续构建。动态提取步骤确保推送精确版本标签（e.g., :8.3.14），而拉取使用 minor latest 避免 not found。
 - **验证**：可选运行 docker-compose 测试连通性（本地模拟）。
-- **标签**：固定版本标签 + `latest`（仅用于便利，非生产推荐）。
+- **标签**：动态精确版本标签 + `latest`（仅用于便利，非生产推荐）。
 - **扩展**：若需部署到服务器，可添加部署步骤（如使用 SSH 拉取镜像并重启服务）。
 
 ## 步骤五：Git 工作流与变更管理 (核心实践)
@@ -510,7 +565,7 @@ jobs:
     *   开发完成，推送功能分支到远程仓库（如 GitHub）。
     *   在代码托管平台创建一个 Pull Request，目标分支是 `main`。
     *   在 PR 描述中说明修改内容和原因，邀请团队成员进行**代码审查**。
-    *   审查通过后，将 PR 合并到 `main` 分支。这个过程会被记录在 Git 历史中，并自动触发 GitHub Actions 构建新镜像。
+    *   审查通过后，将 PR 合并到 `main` 分支。这个过程会被记录在 Git 历史中，并自动触发 GitHub Actions 构建新镜像（包括动态标签提取）。
 
 4.  **部署**：
     当 `main` 分支更新后（镜像已推送），部署到任何环境都变得简单、可重复：
@@ -536,7 +591,7 @@ jobs:
     docker-compose up -d --build
     ```
 
-3.  **生产部署**：使用 `docker-compose pull && docker-compose up -d` 拉取自动化构建的镜像。
+3.  **生产部署**：使用 `docker-compose pull && docker-compose up -d` 拉取自动化构建的镜像（精确版本标签）。
 
 4.  **完成安装**:
     浏览器访问 `http://你的服务器IP`，按照向导完成数据库配置。
@@ -588,15 +643,22 @@ sudo systemctl restart docker
 这份 GitHub Actions 自动化版指南不仅提供了一个技术上先进的 WordPress 部署方案，更重要的是，它融入了 **DevOps 的工程化思维**。
 
 通过：
-*   **版本锁定** 消除了环境不确定性。
+*   **动态版本锁定** 消除了环境不确定性，同时基于 Alpine 3.20 受益于现代基础。
 *   **多阶段构建** 优化了镜像大小和安全。
 *   **配置文件外部化与 Git 管理** 确保了环境的一致性和变更的可追溯性。
-*   **GitHub Actions 自动化** 实现了无摩擦的 CI/CD 管道，每次 PR 合并即构建并推送镜像。
+*   **GitHub Actions 自动化** 实现了无摩擦的 CI/CD 管道，每次 PR 合并即构建、提取版本并推送精确镜像。
 
-遵循此指南，您将能够构建一个**稳定、高效、可维护、团队友好**的 WordPress 生产环境，从容应对未来的业务增长和团队协作挑战。
+遵循此指南，您将能够构建一个**稳定、高效、可维护、团队友好**的 WordPress 生产环境，从容应对未来的业务增长和团队协作挑战。动态机制特别解决了标签不匹配的常见痛点，确保构建鲁棒。
 
-| 阶段           | 是否构建 | 是否用国内源   | 镜像处理方式        |
-| -------------- | -------- | -------------- | ------------------- |
-| GitHub Actions | ✅ 是     | ❌ 否（官方源） | ✅ 构建并推送镜像    |
-| 本地开发       | ✅ 可选   | ✅ 推荐使用     | 构建 dev 标签镜像   |
-| 生产部署服务器 | ❌ 不构建 | ✅ 拉取加速     | 仅 `pull + up` 操作 |
+| 阶段           | 是否构建 | 是否用国内源   | 镜像处理方式                   |
+| -------------- | -------- | -------------- | ------------------------------ |
+| GitHub Actions | ✅ 是     | ❌ 否（官方源） | ✅ 构建、动态提取版本并推送镜像 |
+| 本地开发       | ✅ 可选   | ✅ 推荐使用     | 构建 dev 标签镜像              |
+| 生产部署服务器 | ❌ 不构建 | ✅ 拉取加速     | 仅 `pull + up` 操作            |
+| </DOCUMENT>    |          |                |                                |
+
+|      |      |      |      |
+| ---- | ---- | ---- | ---- |
+|      |      |      |      |
+|      |      |      |      |
+|      |      |      |      |
