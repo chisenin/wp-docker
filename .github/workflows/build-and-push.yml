@@ -92,9 +92,9 @@ jobs:
         docker push ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:latest
         echo "nginx_version=${ACTUAL_NGINX_VERSION}" >> $GITHUB_OUTPUT
 
-    - name: Run docker-compose for validation (optional)
+    - name: Run docker compose for validation (optional)
       run: |
-        docker-compose up -d --build
+        docker compose up -d --build
         sleep 10
         curl -f http://localhost || exit 1
-        docker-compose down
+        docker compose down
