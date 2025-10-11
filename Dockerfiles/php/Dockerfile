@@ -33,11 +33,13 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp
 RUN docker-php-ext-install -j$(nproc) pdo_mysql mysqli gd exif intl zip opcache
 
 # 安装 Composer（使用动态 COMPOSER_HASH 参数验证安装器；如果为空，使用硬编码回退）
-RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
-    EXPECTED_HASH=$( [ -n "$COMPOSER_HASH" ] && echo "$COMPOSER_HASH" || echo "ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792" ) && \
-    php -r "echo 'Verifying Composer installer...'; if (hash_file('sha384', 'composer-setup.php') === getenv('EXPECTED_HASH')) { echo ' Installer verified'; } else { echo ' Installer corrupt'; unlink('composer-setup.php'); exit(1); }; echo PHP_EOL;" && \
-    php composer-setup.php --install-dir=/usr/local/bin --filename=composer && \
-    php -r "unlink('composer-setup.php');"
+RUN set -eux; \
+    EXPECTED_HASH=${COMPOSER_HASH:-"ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792"}; \
+    php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"; \
+    php -r "echo 'Verifying Composer installer...'; if (hash_file('sha384', 'composer-setup.php') === getenv('EXPECTED_HASH')) { echo ' Installer verified'; } else { echo ' Installer corrupt'; unlink('composer-setup.php'); exit(1); }; echo PHP_EOL;"; \
+    php composer-setup.php --install-dir=/usr/local/bin --filename=composer; \
+    php -r "unlink('composer-setup.php');"; \
+    composer --version
 
 # 清理缓存（增强鲁棒性，忽略空目录错误）
 RUN rm -rf /var/cache/apk/* 2>/dev/null || true
