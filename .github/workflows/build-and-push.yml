@@ -29,7 +29,12 @@ jobs:
     - name: Fetch latest Composer hash
       id: composer-hash
       run: |
-        HASH=$(curl -s https://composer.github.io/installer.sig | base64 -d | shasum -a 384 | cut -d' ' -f1)
+        HASH=$(curl -s https://composer.github.io/installer.sig  | base64 -d)
+        if [ -z "$HASH" ] || [ ${#HASH} -ne 96 ]; then 
+          echo "Error: Invalid Composer hash (length: ${#HASH})"
+          exit 1
+        fi
+        echo "Fetched Composer hash: $HASH"
         echo "composer_hash=${HASH}" >> $GITHUB_OUTPUT
 
     - name: Build and push PHP temp (multi-platform)

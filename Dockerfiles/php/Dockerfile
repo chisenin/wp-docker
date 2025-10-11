@@ -1,41 +1,39 @@
 # --- 构建阶段 ---
 FROM php:8.3-fpm-alpine3.20 AS builder
 
+# 定义 ARG 以支持动态哈希传入（默认为空，回退时可硬编码）
+ARG COMPOSER_HASH=""
+
 # 提取实际 PHP 版本（写入 /tmp/php_version，用于动态标签）
 RUN php -v | head -1 | cut -d' ' -f2 | cut -d'-' -f1 > /tmp/php_version || echo "8.3" > /tmp/php_version
 
 ARG USE_CN_MIRROR=false
-ARG COMPOSER_HASH
 
 # 配置 Alpine 源
-RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
-      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && \
-      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; \
-    else \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \
-    fi && apk update --no-cache
+RUN if [ "$USE_CN_MIRROR" = "true" ]; then \n      echo "http://mirrors.aliyun.com/alpine/v3.20/main/" > /etc/apk/repositories && \n      echo "http://mirrors.aliyun.com/alpine/v3.20/community/" >> /etc/apk/repositories ; \n    else \n      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \n      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \n    fi
 
-# 拆分：独立安装依赖（添加 update 以防缓存过期）
-RUN apk update --no-cache && \
-    apk add --no-cache \
+# 更新包索引
+RUN apk update --no-cache
+
+# 安装依赖和编译工具
+RUN apk add --no-cache \
         libzip-dev freetype-dev libpng-dev libjpeg-turbo-dev icu-dev libwebp-dev git \
         zip unzip autoconf g++ libtool
 
-# 拆分：配置 GD（添加 --with-webp-dir=/usr 以明确路径，防 configure 失败）
-RUN docker-php-ext-configure gd \
-        --with-freetype --with-jpeg --with-webp=/usr
+# 配置 GD 扩展
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp-dir=/usr
 
-# 拆分：安装 PHP 扩展
+# 安装 PHP 扩展
 RUN docker-php-ext-install -j$(nproc) pdo_mysql mysqli gd exif intl zip opcache
 
-# 拆分：安装 Composer（使用传入的 COMPOSER_HASH 参数验证安装器，无需手动更新哈希）
+# 安装 Composer（使用动态 COMPOSER_HASH 参数验证安装器；如果为空，使用硬编码回退）
 RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
-    php -r "if (hash_file('sha384', 'composer-setup.php') === getenv('COMPOSER_HASH')) { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); exit(1); }; echo PHP_EOL;" && \
+    EXPECTED_HASH=$( [ -n "$COMPOSER_HASH" ] && echo "$COMPOSER_HASH" || echo "ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792" ) && \
+    php -r "if (hash_file('sha384', 'composer-setup.php') === getenv('EXPECTED_HASH')) { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); exit(1); }; echo PHP_EOL;" && \
     php composer-setup.php --install-dir=/usr/local/bin --filename=composer && \
     php -r "unlink('composer-setup.php');"
 
-# 拆分：清理（可选，但保持；添加错误忽略以处理空目录）
+# 清理缓存（增强鲁棒性，忽略空目录错误）
 RUN rm -rf /var/cache/apk/* 2>/dev/null || true
 
 # --- 最终运行阶段 ---
