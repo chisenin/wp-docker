@@ -18,10 +18,13 @@ RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
 # 安装调试工具
 RUN apk add --no-cache vim bash curl wget
 
+# 确保目录存在并设置权限
+RUN mkdir -p /var/cache/nginx /var/log/nginx
+RUN chown -R nginx:nginx /var/cache/nginx /var/log/nginx
+RUN chmod -R 755 /var/cache/nginx /var/log/nginx
+
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY conf.d /etc/nginx/conf.d
-
-RUN chown -R www-data:www-data /var/cache/nginx /var/log/nginx
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
