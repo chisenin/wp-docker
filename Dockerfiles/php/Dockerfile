@@ -33,12 +33,9 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp
 RUN docker-php-ext-install -j$(nproc) pdo_mysql mysqli gd exif intl zip opcache
 
 # 安装 Composer（使用动态 COMPOSER_HASH 参数验证安装器；如果为空，使用硬编码回退）
+# 使用Alpine包管理器直接安装Composer（更简单可靠）
 RUN set -eux; \
-    EXPECTED_HASH=${COMPOSER_HASH:-'ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792'}; \
-    php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"; \
-    php -r "if (hash_file('sha384', 'composer-setup.php') !== getenv('EXPECTED_HASH')) { unlink('composer-setup.php'); exit(1); };"; \
-    php composer-setup.php --install-dir=/usr/local/bin --filename=composer; \
-    php -r "unlink('composer-setup.php');"; \
+    apk add --no-cache composer; \
     composer --version
 
 # 清理缓存（增强鲁棒性，忽略空目录错误）
