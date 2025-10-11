@@ -20,7 +20,7 @@ services:
 
   # --- Redis 缓存服务 ---
   redis:
-    image: redis:7.2.4-alpine3.20 # 使用固定版本号，并注明基础系统版本
+    image: redis:7.2-alpine # 使用稳定的主版本号，避免特定版本不可用的问题
     container_name: wp_redis
     restart: unless-stopped
     networks:
