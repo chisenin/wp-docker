@@ -55,38 +55,39 @@ jobs:
       - name: Create scripts directory
         run: mkdir -p scripts
 
-      # 步骤1: 构建 base 镜像并导出为 tar（避免 local 引用问题）
-      - name: Build and export base image
+      # 构建 base 镜像并推送（支持多架构）
+      - name: Build and push base image
         run: |
           docker buildx build --platform linux/amd64,linux/arm64 \
             -f ./Dockerfiles/base/Dockerfile \
-            -t local/base:3.22 \
-            --load ./Dockerfiles/base  # --load 确保加载到本地
-          docker save local/base:3.22 -o base.tar  # 导出为 tar 文件
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 \
+            --push ./Dockerfiles/base
 
-      # 步骤2: 构建 PHP 镜像，使用导入的 base
-      - name: Build PHP image
+      # 获取 Composer hash
+      - name: Fetch Composer hash
         run: |
-          docker load -i base.tar  # 导入 base
-          # 提取 PHP 版本（从容器内运行命令）
-          PHP_VERSION=$(docker run --rm local/base:3.22 sh -c "apk add --no-cache php && php -v | head -1 | cut -d' ' -f2 | cut -d'-' -f1 | sed 's/-.*//' || echo '8.3'")
-          # 构建并推送（使用动态版本）
+          COMPOSER_HASH=$(curl -s https://composer.github.io/installer.sig || echo "")
+          echo "COMPOSER_HASH=$COMPOSER_HASH" >> $GITHUB_ENV
+
+      # 构建 PHP 镜像并推送
+      - name: Build and push PHP image
+        run: |
+          PHP_VERSION=$(docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 sh -c "apk add --no-cache php && php -v | head -1 | cut -d' ' -f2 | cut -d'-' -f1 | sed 's/-.*//' || echo '8.3'")
           docker buildx build --platform linux/amd64,linux/arm64 \
-            --build-arg BASE_IMAGE=local/base:3.22 \
-            --build-arg COMPOSER_HASH=${{ secrets.COMPOSER_HASH }} \
+            --build-arg BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 \
+            --build-arg COMPOSER_HASH=${{ env.COMPOSER_HASH }} \
             -f ./Dockerfiles/php/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${PHP_VERSION} \
             --push ./Dockerfiles/php
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
-      # 步骤3: 构建 Nginx 镜像
-      - name: Build Nginx image
+      # 构建 Nginx 镜像并推送
+      - name: Build and push Nginx image
         run: |
-          docker load -i base.tar  # 再次导入 base，确保可用
           NGINX_VERSION=$(docker run --rm nginx:1.27-alpine3.22 nginx -v 2>&1 | cut -d'/' -f2 | cut -d'.' -f1-3 || echo '1.27.2')
           docker buildx build --platform linux/amd64,linux/arm64 \
-            --build-arg BASE_IMAGE=local/base:3.22 \
+            --build-arg BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 \
             -f ./Dockerfiles/nginx/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${NGINX_VERSION} \
             --push ./Dockerfiles/nginx
