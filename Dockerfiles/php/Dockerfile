@@ -1,97 +1,50 @@
 # --- 构建阶段 ---
-FROM php:8.3-fpm-alpine3.20 AS builder
+FROM wordpress-project/Dockerfiles/base/Dockerfile AS base
 
-# 定义 ARG
+FROM php:8.3-fpm-alpine3.22 AS builder
+
+# 定义 ARG 以支持动态哈希传入（默认为空，回退时硬编码）
 ARG COMPOSER_HASH=""
-ARG USE_CN_MIRROR=false
 
-# 配置 Alpine 源
-RUN set -eux; \
-    if [ "$USE_CN_MIRROR" = "true" ]; then \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \
-    else \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > /etc/apk/repositories && \
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories ; \
-    fi
+# 提取实际 PHP 版本（写入 /tmp/php_version，用于动态标签）
+RUN php -v | head -1 | cut -d' ' -f2 | cut -d'-' -f1 > /tmp/php_version || echo "8.3" > /tmp/php_version
 
-# 更新包索引并安装依赖
-RUN set -eux; \
-    apk update --no-cache && \
-    apk add --no-cache \
+COPY --from=base /etc/apk/repositories /etc/apk/repositories
+
+# 更新包索引
+RUN apk update --no-cache
+
+# 安装依赖和编译工具
+RUN apk add --no-cache \
         libzip-dev freetype-dev libpng-dev libjpeg-turbo-dev icu-dev libwebp-dev git \
         zip unzip autoconf g++ libtool
 
-# 手动安装 Composer（作为更可靠的替代方案）
-RUN set -eux; \
-    wget -O composer-setup.php https://getcomposer.org/installer && \
-    php composer-setup.php --install-dir=/usr/local/bin --filename=composer && \
-    rm composer-setup.php
-
 # 配置 GD 扩展
-RUN set -eux; \
-    docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp
 
 # 安装 PHP 扩展
-RUN set -eux; \
-    docker-php-ext-install -j$(nproc) pdo_mysql mysqli gd exif intl zip opcache
+RUN docker-php-ext-install -j$(nproc) pdo_mysql mysqli gd exif intl zip opcache
 
-# 分离验证命令，逐一检查 Composer 安装
-RUN set -eux; \
-    echo "验证 Composer 版本..." && \
-    composer --version || { echo "Composer version check failed"; exit 1; }
+# 安装 Composer（使用动态 COMPOSER_HASH 参数验证安装器；如果为空，使用硬编码回退）
+RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
+    EXPECTED_HASH=$( [ -n "$COMPOSER_HASH" ] && echo "$COMPOSER_HASH" || echo "ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792" ) && \
+    php -r "if (hash_file('sha384', 'composer-setup.php') === '$EXPECTED_HASH') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); exit(1); }; echo PHP_EOL;" && \
+    php composer-setup.php --install-dir=/usr/local/bin --filename=composer && \
+    php -r "unlink('composer-setup.php');"
 
-RUN set -eux; \
-    echo "检查 Composer 路径..." && \
-    which composer || { echo "Composer not found in PATH"; exit 1; }
-
-RUN set -eux; \
-    echo "检查 Composer 二进制文件..." && \
-    ls -l /usr/local/bin/composer || { echo "Composer binary not found"; exit 1; }
-
-# 确保 Composer 具有可执行权限
-RUN set -eux; \
-    chmod +x /usr/local/bin/composer
-
-# 清理缓存
-RUN set -eux; \
-    rm -rf /var/cache/apk/* 2>/dev/null || true
-
-# 提取 PHP 版本
-RUN set -eux; \
-    php -v | head -1 | cut -d' ' -f2 | cut -d'-' -f1 > /tmp/php_version || echo "8.3" > /tmp/php_version
+# 清理缓存（增强鲁棒性，忽略空目录错误）
+RUN rm -rf /var/cache/apk/* 2>/dev/null || true
 
 # --- 最终运行阶段 ---
-FROM php:8.3-fpm-alpine3.20 AS final
+FROM php:8.3-fpm-alpine3.22 AS final
 
-# 复制扩展和 Composer
+COPY --from=base /etc/apk/repositories /etc/apk/repositories
+
+# 从 builder 阶段复制编译好的扩展、工具和版本文件
 COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
 COPY --from=builder /usr/local/bin/composer /usr/local/bin/composer
 COPY --from=builder /tmp/php_version /tmp/php_version
 
-# 启用扩展
-RUN set -eux; \
-    docker-php-ext-enable pdo_mysql mysqli gd exif intl zip opcache
-
-# 在 final 阶段分离验证 Composer
-RUN set -eux; \
-    echo "Final stage - 验证 Composer 版本..." && \
-    composer --version || { echo "Composer version check failed in final stage"; exit 1; }
-
-RUN set -eux; \
-    echo "Final stage - 检查 Composer 路径..." && \
-    which composer || { echo "Composer not found in PATH in final stage"; exit 1; }
-
-RUN set -eux; \
-    echo "Final stage - 检查 Composer 二进制文件..." && \
-    ls -l /usr/local/bin/composer || { echo "Composer binary not found in final stage"; exit 1; }
-
-# 确保 final 阶段的 Composer 具有可执行权限
-RUN set -eux; \
-    chmod +x /usr/local/bin/composer
-
-# 清理缓存
-RUN set -eux; \
-    rm -rf /var/cache/apk/* 2>/dev/null || true
+RUN docker-php-ext-enable pdo_mysql mysqli gd exif intl zip opcache && rm -rf /var/cache/apk/* 2>/dev/null || true
 
 WORKDIR /var/www/html
