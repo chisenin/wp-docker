@@ -69,15 +69,34 @@ jobs:
           COMPOSER_HASH=$(curl -s https://composer.github.io/installer.sig || echo "")
           echo "COMPOSER_HASH=$COMPOSER_HASH" >> $GITHUB_ENV
 
+      # 提取 PHP 和 Nginx 版本号
+      - name: Extract PHP and Nginx versions
+        id: extract
+        run: |
+          # 尝试从文件获取，如果文件不存在则使用默认值
+          echo "php_version=$(cat Dockerfiles/php/php_version.txt || echo '8.3.26')" >> $GITHUB_OUTPUT
+          echo "nginx_version=$(cat Dockerfiles/nginx/nginx_version.txt || echo '1.27.2')" >> $GITHUB_OUTPUT
+          
+          # 同时设置为环境变量便于后续使用
+          echo "PHP_VERSION=$(cat Dockerfiles/php/php_version.txt || echo '8.3.26')" >> $GITHUB_ENV
+          echo "NGINX_VERSION=$(cat Dockerfiles/nginx/nginx_version.txt || echo '1.27.2')" >> $GITHUB_ENV
+          
+          # 如果版本文件不存在，创建它们
+          if [ ! -f Dockerfiles/php/php_version.txt ]; then
+            echo "8.3.26" > Dockerfiles/php/php_version.txt
+          fi
+          if [ ! -f Dockerfiles/nginx/nginx_version.txt ]; then
+            echo "1.27.2" > Dockerfiles/nginx/nginx_version.txt
+          fi
+
       # 构建 PHP 镜像并推送
       - name: Build and push PHP image
         run: |
-          PHP_VERSION=$(docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 sh -c "apk add --no-cache php && php -v | head -1 | cut -d' ' -f2 | cut -d'-' -f1 | sed 's/-.*//' || echo '8.3'")
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 \
             --build-arg COMPOSER_HASH=${{ env.COMPOSER_HASH }} \
             -f ./Dockerfiles/php/Dockerfile \
-            -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${PHP_VERSION} \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${{ steps.extract.outputs.php_version }} \
             --push ./Dockerfiles/php
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -85,11 +104,10 @@ jobs:
       # 构建 Nginx 镜像并推送
       - name: Build and push Nginx image
         run: |
-          NGINX_VERSION=$(docker run --rm nginx:1.27-alpine3.22 nginx -v 2>&1 | cut -d'/' -f2 | cut -d'.' -f1-3 || echo '1.27.2')
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 \
             -f ./Dockerfiles/nginx/Dockerfile \
-            -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${NGINX_VERSION} \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${{ steps.extract.outputs.nginx_version }} \
             --push ./Dockerfiles/nginx
 
       # Release 脚本（暂关闭，待测试）
