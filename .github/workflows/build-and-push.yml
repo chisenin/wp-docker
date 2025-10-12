@@ -106,7 +106,7 @@ jobs:
             --build-arg COMPOSER_HASH=${{ env.COMPOSER_HASH }} \
             -f ./Dockerfiles/php/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${{ steps.extract.outputs.php_version }} \
-            --push ./Dockerfiles/php || { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 构建或推送 PHP 镜像失败" | tee -a errors.log; exit 1; }
+            --push . || { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 构建或推送 PHP 镜像失败" | tee -a errors.log; exit 1; }
           echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 成功构建并推送 PHP 镜像" | tee -a run.log
           echo "::endgroup::"
 
@@ -118,7 +118,7 @@ jobs:
             --build-arg BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 \
             -f ./Dockerfiles/nginx/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${{ steps.extract.outputs.nginx_version }} \
-            --push ./Dockerfiles/nginx || { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 构建或推送 Nginx 镜像失败" | tee -a errors.log; exit 1; }
+            --push . || { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 构建或推送 Nginx 镜像失败" | tee -a errors.log; exit 1; }
           echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 成功构建并推送 Nginx 镜像" | tee -a run.log
           echo "::endgroup::"
 
