@@ -1,3 +1,4 @@
+```yaml
 name: Build and Push Docker Images
 
 on:
@@ -7,44 +8,16 @@ on:
     branches: [ main ]
 
 jobs:
-  # 版本监控（暂关闭，待测试）
-  # check-versions:
-  #   runs-on: ubuntu-latest
-  #   outputs:
-  #     trigger_build: ${{ steps.check.outputs.trigger_build }}
-  #     php_version: ${{ steps.check.outputs.php_version }}
-  #     nginx_version: ${{ steps.check.outputs.nginx_version }}
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-  #     - name: Install skopeo and jq
-  #       run: |
-  #         sudo apt-get update
-  #         sudo apt-get install -y skopeo jq
-  #     - name: Run version check script
-  #       id: check
-  #       run: |
-  #         chmod +x scripts/check_versions.sh
-  #         ./scripts/check_versions.sh
-  #     - name: Upload versions artifact
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: versions
-  #         path: versions.json
-
   build:
-    # needs: check-versions
-    # if: needs.check-versions.outputs.trigger_build == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - name: Checkout repository
+      - name: 检出代码
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: 初始化日志文件
         run: |
           ::group::初始化日志文件
@@ -53,16 +26,12 @@ jobs:
           echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 已创建 warnings.log 和 errors.log" | tee -a run.log
           ::endgroup::
 
-      - name: Set up Docker Buildx
+      - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
           install: true
-        run: |
-          ::group::设置 Docker Buildx
-          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 设置 Docker Buildx" | tee -a run.log
-          ::endgroup::
-
-      - name: Log in to Docker Hub
+        # 移除冗余的 run 字段，仅保留日志到 run.log
+      - name: 登录 Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -71,16 +40,15 @@ jobs:
           ::group::登录 Docker Hub
           echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 以 ${{ secrets.DOCKERHUB_USERNAME }} 身份登录 Docker Hub" | tee -a run.log
           ::endgroup::
-          
-      - name: Create scripts directory
+
+      - name: 创建 scripts 目录
         run: |
           ::group::创建 Scripts 目录
           echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 创建 scripts 目录" | tee -a run.log
           mkdir -p scripts || { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 创建 scripts 目录失败" | tee -a errors.log; exit 1; }
           ::endgroup::
 
-      # 构建 base 镜像并推送（支持多架构）
-      - name: Build and push base image
+      - name: 构建并推送 base 镜像
         run: |
           ::group::构建并推送 Base 镜像
           echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 构建并推送 base 镜像 ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22" | tee -a run.log
@@ -91,23 +59,21 @@ jobs:
           echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 成功构建并推送 base 镜像" | tee -a run.log
           ::endgroup::
 
-      # 获取 Composer hash
-      - name: Fetch Composer hash
+      - name: 获取 Composer hash
         run: |
           ::group::获取 Composer Hash
           echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 获取 Composer hash" | tee -a run.log
-          COMPOSER_HASH=$(curl -s https://composer.github.io/installer.sig || echo "")
-          if [ -z "$COMPOSER_HASH" ]; then
+          COMPOSER_HASH=$(curl -s --connect-timeout 10 https://composer.github.io/installer.sig || echo "55ce33d7678c5a611085731c9a2ba383d4d23389a81006900a0a43ed373ded6a0ee64936d3ab3d8e444a3e7a120dd6d57b55955475e363fbeefa16e7d97b7c0")
+          if [ "$COMPOSER_HASH" = "55ce33d7678c5a611085731c9a2ba383d4d23389a81006900a0a43ed373ded6a0ee64936d3ab3d8e444a3e7a120dd6d57b55955475e363fbeefa16e7d97b7c0" ]; then
             echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') 获取 Composer hash 失败，使用默认值" | tee -a warnings.log
-            echo "::warning::获取 Composer hash 失败，继续使用空 hash"
+            echo "::warning::获取 Composer hash 失败，使用默认值"
           else
             echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') Composer hash: $COMPOSER_HASH" | tee -a run.log
           fi
           echo "COMPOSER_HASH=$COMPOSER_HASH" >> $GITHUB_ENV
           ::endgroup::
 
-      # 提取 PHP 和 Nginx 版本号
-      - name: Extract PHP and Nginx versions
+      - name: 提取 PHP 和 Nginx 版本
         id: extract
         run: |
           ::group::提取 PHP 和 Nginx 版本
@@ -132,7 +98,6 @@ jobs:
           echo "NGINX_VERSION=$NGINX_VERSION" >> $GITHUB_ENV
           ::endgroup::
 
-      # 构建 PHP 镜像并推送
       - name: 构建并推送 PHP 镜像
         run: |
           ::group::构建并推送 PHP 镜像
@@ -145,10 +110,7 @@ jobs:
             --push ./Dockerfiles/php || { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 构建或推送 PHP 镜像失败" | tee -a errors.log; exit 1; }
           echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 成功构建并推送 PHP 镜像" | tee -a run.log
           ::endgroup::
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
-      # 构建 Nginx 镜像并推送
       - name: 构建并推送 Nginx 镜像
         run: |
           ::group::构建并推送 Nginx 镜像
@@ -161,102 +123,24 @@ jobs:
           echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 成功构建并推送 Nginx 镜像" | tee -a run.log
           ::endgroup::
 
-      # Release 脚本（暂关闭，待测试）
-      # - name: Create deployment script
-      #   run: |
-      #     cat > scripts/generate-env-and-compose.sh << 'EOF'
-      #     #!/bin/bash
-      #     echo "Generating .env and docker-compose.yml..."
-      #     cat > .env << EOT
-      #     DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
-      #     PHP_VERSION=${{ steps.php-build.outputs.php_version }}
-      #     NGINX_VERSION=${{ steps.nginx-build.outputs.nginx_version }}
-      #     MYSQL_ROOT_PASSWORD=your_strong_root_password
-      #     MYSQL_USER=wp_user
-      #     MYSQL_PASSWORD=your_strong_user_password
-      #     MYSQL_DATABASE=wordpress
-      #     EOT
-      #     cat > docker-compose.yml << EOT
-      #     version: '3.8'
-      #     services:
-      #       db:
-      #         image: mariadb:10.11.14
-      #         container_name: wp_db
-      #         restart: unless-stopped
-      #         networks:
-      #           - app-network
-      #         volumes:
-      #           - db_data:/var/lib/mysql
-      #         environment:
-      #           MYSQL_ROOT_PASSWORD: \${MYSQL_ROOT_PASSWORD}
-      #           MYSQL_DATABASE: \${MYSQL_DATABASE}
-      #           MYSQL_USER: \${MYSQL_USER}
-      #           MYSQL_PASSWORD: \${MYSQL_PASSWORD}
-      #         expose:
-      #           - "3306"
-      #       redis:
-      #         image: redis:8.2.2-alpine3.22
-      #         container_name: wp_redis
-      #         restart: unless-stopped
-      #         networks:
-      #           - app-network
-      #         command: redis-server --appendonly yes
-      #         volumes:
-      #           - redis_data:/data
-      #         expose:
-      #           - "6379"
-      #       wp:
-      #         image: \${DOCKERHUB_USERNAME}/wordpress-php:\${PHP_VERSION}
-      #         container_name: wp_fpm
-      #         restart: unless-stopped
-      #         networks:
-      #           - app-network
-      #         volumes:
-      #           - ./html:/var/www/html
-      #         expose:
-      #           - "9000"
-      #         depends_on:
-      #           - db
-      #           - redis
-      #         environment:
-      #           WORDPRESS_DB_HOST: db:3306
-      #           WORDPRESS_DB_USER: \${MYSQL_USER}
-      #           WORDPRESS_DB_PASSWORD: \${MYSQL_PASSWORD}
-      #           WORDPRESS_DB_NAME: \${MYSQL_DATABASE}
-      #           WORDPRESS_REDIS_HOST: redis
-      #           WORDPRESS_REDIS_PORT: 6379
-      #       nginx:
-      #         image: \${DOCKERHUB_USERNAME}/wordpress-nginx:\${NGINX_VERSION}
-      #         container_name: wp_nginx
-      #         restart: unless-stopped
-      #         networks:
-      #           - app-network
-      #         volumes:
-      #           - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf
-      #           - ./configs/nginx/conf.d:/etc/nginx/conf.d
-      #           - ./html:/var/www/html
-      #         ports:
-      #           - "80:80"
-      #         depends_on:
-      #           - wp
-      #     networks:
-      #       app-network:
-      #         driver: bridge
-      #     volumes:
-      #       db_data:
-      #       redis_data:
-      #     EOT
-      #     echo "Generated .env and docker-compose.yml"
-      #     EOF
-      #     chmod +x scripts/generate-env-and-compose.sh
-      # - name: Create Release
-      #   uses: softprops/action-gh-release@v2
-      #   with:
-      #     tag_name: v${{ github.sha }}
-      #     name: Release with PHP ${{ steps.php-build.outputs.php_version }} and Nginx ${{ steps.nginx-build.outputs.nginx_version }}
-      #     body: Built with PHP ${{ steps.php-build.outputs.php_version }} and Nginx ${{ steps.nginx-build.outputs.nginx_version }}
-      #     files: |
-      #       scripts/generate-env-and-compose.sh
+      - name: 运行 Docker Compose 验证（可选）
+        run: |
+          ::group::运行 Docker Compose 验证
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 开始 Docker Compose 验证" | tee -a run.log
+          if [ ! -f docker-compose.yml ]; then
+            echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') docker-compose.yml 文件缺失" | tee -a errors.log
+            exit 1
+          fi
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 启动 Docker Compose 服务" | tee -a run.log
+          docker compose --project-directory . up -d || { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 启动 Docker Compose 失败" | tee -a errors.log; exit 1; }
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 等待服务启动（10秒）" | tee -a run.log
+          sleep 10
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 检查服务连通性" | tee -a run.log
+          curl -f --connect-timeout 5 --retry 3 http://localhost || { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 服务连通性测试失败" | tee -a errors.log; docker compose logs | tee -a run.log; exit 1; }
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 服务连通性测试通过" | tee -a run.log
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 停止 Docker Compose 服务" | tee -a run.log
+          docker compose down || { echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') 停止 Docker Compose 服务失败" | tee -a warnings.log; }
+          ::endgroup::
 
       - name: 显示警告和错误日志
         if: always()
@@ -289,10 +173,3 @@ jobs:
             run.log
             warnings.log
             errors.log
-
-      - name: Run docker compose for validation (optional)
-        run: |
-          docker compose up -d
-          sleep 10
-          curl -f http://localhost || exit 1
-          docker compose down
