@@ -2,9 +2,11 @@
 ARG BASE_IMAGE=alpine:3.22
 FROM ${BASE_IMAGE} AS base
 
+# 声明NGINX_VERSION参数
+ARG NGINX_VERSION
+
 # --- 构建阶段 --- 
 # 读取 Nginx 版本标签
-ARG NGINX_VERSION
 FROM nginx:${NGINX_VERSION:-stable-alpine} AS builder
 
 # 提取实际 Nginx 版本（写入 /tmp/nginx_version，用于动态标签）
@@ -23,6 +25,9 @@ RUN mkdir -p /tmp/nginx-configs
 
 # --- 最终运行阶段 --- 
 FROM nginx:${NGINX_VERSION:-stable-alpine} AS final
+
+# 重新声明参数以在最终阶段使用
+ARG NGINX_VERSION
 
 COPY --from=base /etc/apk/repositories /etc/apk/repositories
 
