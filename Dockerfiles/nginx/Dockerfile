@@ -3,10 +3,12 @@ ARG BASE_IMAGE=alpine:3.22
 FROM ${BASE_IMAGE} AS base
 
 # --- 构建阶段 --- 
-FROM nginx:1.27-alpine3.22 AS builder
+# 读取 Nginx 版本标签
+ARG NGINX_VERSION
+FROM nginx:${NGINX_VERSION:-stable-alpine} AS builder
 
 # 提取实际 Nginx 版本（写入 /tmp/nginx_version，用于动态标签）
-RUN nginx -v 2>&1 | cut -d'/' -f2 | cut -d' ' -f1 > /tmp/nginx_version || echo "1.27" > /tmp/nginx_version
+RUN nginx -v 2>&1 | cut -d'/' -f2 | cut -d' ' -f1 > /tmp/nginx_version || echo "stable" > /tmp/nginx_version
 
 COPY --from=base /etc/apk/repositories /etc/apk/repositories
 
@@ -20,7 +22,7 @@ RUN apk add --no-cache vim bash curl wget
 RUN mkdir -p /tmp/nginx-configs
 
 # --- 最终运行阶段 --- 
-FROM nginx:1.27-alpine3.22 AS final
+FROM nginx:${NGINX_VERSION:-stable-alpine} AS final
 
 COPY --from=base /etc/apk/repositories /etc/apk/repositories
 

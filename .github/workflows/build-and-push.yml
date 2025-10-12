@@ -116,6 +116,7 @@ jobs:
           echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 构建并推送 Nginx 镜像 ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${{ steps.extract.outputs.nginx_version }}" | tee -a run.log
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 \
+            --build-arg NGINX_VERSION=${{ steps.extract.outputs.nginx_version }} \
             -f ./Dockerfiles/nginx/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${{ steps.extract.outputs.nginx_version }} \
             --push . || { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 构建或推送 Nginx 镜像失败" | tee -a errors.log; exit 1; }
