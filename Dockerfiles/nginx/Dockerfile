@@ -1,4 +1,6 @@
-FROM local/base:3.22 AS base
+# 使用ARG参数支持动态传入base镜像地址，默认为alpine:3.22作为回退
+ARG BASE_IMAGE=alpine:3.22
+FROM ${BASE_IMAGE} AS base
 
 # --- 构建阶段 --- 
 FROM nginx:1.27-alpine3.22 AS builder
