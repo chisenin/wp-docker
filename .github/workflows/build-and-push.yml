@@ -42,73 +42,124 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 初始化日志文件
+        run: |
+          ::group::初始化日志文件
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 初始化日志文件" | tee -a run.log
+          touch warnings.log errors.log
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 已创建 warnings.log 和 errors.log" | tee -a run.log
+          ::endgroup::
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+        run: |
+          ::group::设置 Docker Buildx
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 设置 Docker Buildx" | tee -a run.log
+          ::endgroup::
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          ::group::登录 Docker Hub
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 以 ${{ secrets.DOCKERHUB_USERNAME }} 身份登录 Docker Hub" | tee -a run.log
+          ::endgroup::
           
       - name: Create scripts directory
-        run: mkdir -p scripts
+        run: |
+          ::group::创建 Scripts 目录
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 创建 scripts 目录" | tee -a run.log
+          mkdir -p scripts || { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 创建 scripts 目录失败" | tee -a errors.log; exit 1; }
+          ::endgroup::
 
       # 构建 base 镜像并推送（支持多架构）
       - name: Build and push base image
         run: |
+          ::group::构建并推送 Base 镜像
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 构建并推送 base 镜像 ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22" | tee -a run.log
           docker buildx build --platform linux/amd64,linux/arm64 \
             -f ./Dockerfiles/base/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 \
-            --push ./Dockerfiles/base
+            --push ./Dockerfiles/base || { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 构建或推送 base 镜像失败" | tee -a errors.log; exit 1; }
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 成功构建并推送 base 镜像" | tee -a run.log
+          ::endgroup::
 
       # 获取 Composer hash
       - name: Fetch Composer hash
         run: |
+          ::group::获取 Composer Hash
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 获取 Composer hash" | tee -a run.log
           COMPOSER_HASH=$(curl -s https://composer.github.io/installer.sig || echo "")
+          if [ -z "$COMPOSER_HASH" ]; then
+            echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') 获取 Composer hash 失败，使用默认值" | tee -a warnings.log
+            echo "::warning::获取 Composer hash 失败，继续使用空 hash"
+          else
+            echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') Composer hash: $COMPOSER_HASH" | tee -a run.log
+          fi
           echo "COMPOSER_HASH=$COMPOSER_HASH" >> $GITHUB_ENV
+          ::endgroup::
 
       # 提取 PHP 和 Nginx 版本号
       - name: Extract PHP and Nginx versions
         id: extract
         run: |
-          # 尝试从文件获取，如果文件不存在则使用默认值
-          echo "php_version=$(cat Dockerfiles/php/php_version.txt || echo '8.3.26')" >> $GITHUB_OUTPUT
-          echo "nginx_version=$(cat Dockerfiles/nginx/nginx_version.txt || echo '1.27.2')" >> $GITHUB_OUTPUT
-          
-          # 同时设置为环境变量便于后续使用
-          echo "PHP_VERSION=$(cat Dockerfiles/php/php_version.txt || echo '8.3.26')" >> $GITHUB_ENV
-          echo "NGINX_VERSION=$(cat Dockerfiles/nginx/nginx_version.txt || echo '1.27.2')" >> $GITHUB_ENV
-          
-          # 如果版本文件不存在，创建它们
+          ::group::提取 PHP 和 Nginx 版本
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 提取 PHP 和 Nginx 版本" | tee -a run.log
+          PHP_VERSION=$(cat Dockerfiles/php/php_version.txt 2>/dev/null || echo '8.3.26')
+          NGINX_VERSION=$(cat Dockerfiles/nginx/nginx_version.txt 2>/dev/null || echo '1.27.2')
           if [ ! -f Dockerfiles/php/php_version.txt ]; then
+            echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') PHP 版本文件缺失，默认使用 8.3.26" | tee -a warnings.log
+            echo "::warning::PHP 版本文件缺失，默认使用 8.3.26"
             echo "8.3.26" > Dockerfiles/php/php_version.txt
           fi
           if [ ! -f Dockerfiles/nginx/nginx_version.txt ]; then
+            echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') Nginx 版本文件缺失，默认使用 1.27.2" | tee -a warnings.log
+            echo "::warning::Nginx 版本文件缺失，默认使用 1.27.2"
             echo "1.27.2" > Dockerfiles/nginx/nginx_version.txt
           fi
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') PHP 版本: $PHP_VERSION" | tee -a run.log
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') Nginx 版本: $NGINX_VERSION" | tee -a run.log
+          echo "php_version=$PHP_VERSION" >> $GITHUB_OUTPUT
+          echo "nginx_version=$NGINX_VERSION" >> $GITHUB_OUTPUT
+          echo "PHP_VERSION=$PHP_VERSION" >> $GITHUB_ENV
+          echo "NGINX_VERSION=$NGINX_VERSION" >> $GITHUB_ENV
+          ::endgroup::
 
       # 构建 PHP 镜像并推送
-      - name: Build and push PHP image
+      - name: 构建并推送 PHP 镜像
         run: |
+          ::group::构建并推送 PHP 镜像
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 构建并推送 PHP 镜像 ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${{ steps.extract.outputs.php_version }}" | tee -a run.log
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 \
             --build-arg COMPOSER_HASH=${{ env.COMPOSER_HASH }} \
             -f ./Dockerfiles/php/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${{ steps.extract.outputs.php_version }} \
-            --push ./Dockerfiles/php
+            --push ./Dockerfiles/php || { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 构建或推送 PHP 镜像失败" | tee -a errors.log; exit 1; }
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 成功构建并推送 PHP 镜像" | tee -a run.log
+          ::endgroup::
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
       # 构建 Nginx 镜像并推送
-      - name: Build and push Nginx image
+      - name: 构建并推送 Nginx 镜像
         run: |
+          ::group::构建并推送 Nginx 镜像
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 构建并推送 Nginx 镜像 ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${{ steps.extract.outputs.nginx_version }}" | tee -a run.log
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 \
             -f ./Dockerfiles/nginx/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${{ steps.extract.outputs.nginx_version }} \
-            --push ./Dockerfiles/nginx
+            --push ./Dockerfiles/nginx || { echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 构建或推送 Nginx 镜像失败" | tee -a errors.log; exit 1; }
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 成功构建并推送 Nginx 镜像" | tee -a run.log
+          ::endgroup::
 
       # Release 脚本（暂关闭，待测试）
       # - name: Create deployment script
@@ -206,6 +257,38 @@ jobs:
       #     body: Built with PHP ${{ steps.php-build.outputs.php_version }} and Nginx ${{ steps.nginx-build.outputs.nginx_version }}
       #     files: |
       #       scripts/generate-env-and-compose.sh
+
+      - name: 显示警告和错误日志
+        if: always()
+        run: |
+          ::group::显示警告和错误日志
+          echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 显示收集的警告和错误日志" | tee -a run.log
+          if [ -s warnings.log ]; then
+            echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') 检测到警告:" | tee -a run.log
+            cat warnings.log
+            echo "::warning::检测到警告，请查看 warnings.log"
+          else
+            echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 未检测到警告" | tee -a run.log
+          fi
+          if [ -s errors.log ]; then
+            echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') 检测到错误:" | tee -a run.log
+            cat errors.log
+            echo "::error::检测到错误，请查看 errors.log"
+            exit 1
+          else
+            echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') 未检测到错误" | tee -a run.log
+          fi
+          ::endgroup::
+
+      - name: 上传日志文件
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            run.log
+            warnings.log
+            errors.log
 
       - name: Run docker compose for validation (optional)
         run: |
