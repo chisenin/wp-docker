@@ -5,8 +5,9 @@ FROM ${BASE_IMAGE} AS base
 # 声明NGINX_VERSION参数
 ARG NGINX_VERSION
 
-# --- 构建阶段 --- 
-# 读取 Nginx 版本标签
+# --- 构建阶段 ---
+# 重新声明 NGINX_VERSION 以在 builder 阶段使用
+ARG NGINX_VERSION
 FROM nginx:${NGINX_VERSION:-stable-alpine} AS builder
 
 # 提取实际 Nginx 版本（写入 /tmp/nginx_version，用于动态标签）
@@ -23,18 +24,15 @@ RUN apk add --no-cache vim bash curl wget
 # 下载 WordPress 常见文件类型的 MIME 类型配置（可选优化）
 RUN mkdir -p /tmp/nginx-configs
 
-# --- 最终运行阶段 --- 
-FROM nginx:${NGINX_VERSION:-stable-alpine} AS final
-
-# 重新声明参数以在最终阶段使用
+# --- 最终运行阶段 ---
+# 重新声明 NGINX_VERSION 以在 final 阶段使用
 ARG NGINX_VERSION
-
-COPY --from=base /etc/apk/repositories /etc/apk/repositories
+FROM nginx:${NGINX_VERSION:-stable-alpine} AS final
 
 # 从 builder 阶段复制版本信息和调试工具
 COPY --from=builder /tmp/nginx_version /tmp/nginx_version
+COPY --from=builder /bin/bash /bin/bash  # 修正路径为 /bin/bash
 COPY --from=builder /usr/bin/vim /usr/bin/vim
-COPY --from=builder /usr/bin/bash /usr/bin/bash
 COPY --from=builder /usr/bin/curl /usr/bin/curl
 COPY --from=builder /usr/bin/wget /usr/bin/wget
 
