@@ -1,15 +1,8 @@
 FROM alpine:3.22
 
-ARG USE_CN_MIRROR=false
-
 # 配置 Alpine 源
-RUN if [ "$USE_CN_MIRROR" = "true" ]; then \ 
-      echo "http://mirrors.aliyun.com/alpine/v3.22/main/" > /etc/apk/repositories && \ 
-      echo "http://mirrors.aliyun.com/alpine/v3.22/community/" >> /etc/apk/repositories ; \ 
-    else \ 
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.22/main" > /etc/apk/repositories && \ 
-      echo "https://dl-cdn.alpinelinux.org/alpine/v3.22/community" >> /etc/apk/repositories ; \ 
-    fi
+RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.22/main" > /etc/apk/repositories && \ 
+    echo "https://dl-cdn.alpinelinux.org/alpine/v3.22/community" >> /etc/apk/repositories
 
 # 更新包索引
 RUN apk update --no-cache
