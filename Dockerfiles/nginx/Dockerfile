@@ -32,8 +32,8 @@ COPY --from=builder /usr/bin/curl /usr/bin/curl
 COPY --from=builder /usr/bin/wget /usr/bin/wget
 
 # 复制配置文件，使用正确的相对路径
-COPY ./configs/nginx/nginx.conf /etc/nginx/nginx.conf
-COPY ./configs/nginx/conf.d /etc/nginx/conf.d
+COPY ../../configs/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY ../../configs/nginx/conf.d /etc/nginx/conf.d
 
 # 创建日志目录并设置权限
 RUN mkdir -p /var/log/nginx && \
