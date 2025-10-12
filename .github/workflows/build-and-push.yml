@@ -66,10 +66,7 @@ jobs:
             --build-arg NGINX_VERSION=${{ steps.extract.outputs.nginx_version }} \
             -f ./Dockerfiles/nginx/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${{ steps.extract.outputs.nginx_version }} \
-            --push . > /dev/null 2>&1 || {
-              echo "::error::构建或推送 Nginx 镜像失败"
-              exit 1
-            }
+            --push . 
           echo "::endgroup::"
 
       - name: Docker Compose 验证（可选）
