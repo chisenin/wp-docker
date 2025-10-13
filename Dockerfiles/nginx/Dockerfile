@@ -37,12 +37,9 @@ COPY --from=builder /usr/bin/wget /usr/bin/wget
 COPY ./configs/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY ./configs/nginx/conf.d /etc/nginx/conf.d
 
-# 创建日志目录并设置最小权限（简化版）
-# 仅创建必要目录，避免复杂的所有权变更逻辑
-RUN mkdir -p /var/log/nginx && \
-    mkdir -p /var/cache/nginx && \
-    # 确保目录可写
-    chmod -R 777 /var/log/nginx /var/cache/nginx
+# Official Nginx image already has proper directory structure and permissions
+# No need to create or modify these directories
+# Logs and cache will be handled by Nginx automatically
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
