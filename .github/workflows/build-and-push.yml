@@ -63,7 +63,7 @@ jobs:
           echo "::group::构建并推送 PHP 镜像"
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 \
-            --build-arg COMPOSER_HASH=55ce33d7678c5a611085731c9a2ba383d4d23389a81006900a0a43ed373ded6a0ee64936d3ab3d8e444a3e7a120dd6d57b55955475e363fbeefa16e7d97b7c0 \
+            --build-arg COMPOSER_HASH=ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792 \
             -f ./Dockerfiles/php/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${{ steps.extract.outputs.php_version }} \
             --push . || {
