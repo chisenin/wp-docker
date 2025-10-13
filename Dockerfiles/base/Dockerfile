@@ -1,7 +1,10 @@
 FROM alpine:3.22
 
+# 使用 Alpine 3.22 作为基础镜像
+FROM alpine:3.22
+
 # 配置 Alpine 源
-RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.22/main" > /etc/apk/repositories && \ 
+RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.22/main" > /etc/apk/repositories && \
     echo "https://dl-cdn.alpinelinux.org/alpine/v3.22/community" >> /etc/apk/repositories
 
 # 更新包索引
