@@ -37,11 +37,12 @@ COPY --from=builder /usr/bin/wget /usr/bin/wget
 COPY ./configs/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY ./configs/nginx/conf.d /etc/nginx/conf.d
 
-# 创建日志目录并设置权限
+# 创建日志目录并设置权限（适配Alpine版本的Nginx镜像）
 RUN mkdir -p /var/log/nginx && \
     touch /var/log/nginx/error.log && \
     touch /var/log/nginx/access.log && \
-    chown -R www-data:www-data /var/cache/nginx /var/log/nginx && \
+    # 在Alpine版本中使用nginx用户而不是www-data
+    chown -R nginx:nginx /var/cache/nginx /var/log/nginx && \
     chmod -R 755 /var/log/nginx
 
 EXPOSE 80
