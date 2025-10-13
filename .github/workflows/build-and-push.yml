@@ -109,8 +109,4 @@ jobs:
             echo "::warning::Docker Compose 停止失败"
           }
 
-<<<<<<< HEAD
           echo "::endgroup::"
-=======
-          echo "::endgroup::"
->>>>>>> test-nginx-only
