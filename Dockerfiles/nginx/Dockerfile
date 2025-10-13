@@ -37,12 +37,25 @@ COPY --from=builder /usr/bin/wget /usr/bin/wget
 COPY ./configs/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY ./configs/nginx/conf.d /etc/nginx/conf.d
 
-# 创建日志目录并设置权限（适配Alpine版本的Nginx镜像）
-RUN mkdir -p /var/log/nginx && \
+# 创建日志目录并设置权限（更稳健的方法）
+RUN set -x && \
+    # 检查nginx用户是否存在
+    id nginx || echo "nginx user does not exist, using default user" && \
+    # 创建日志目录
+    mkdir -p /var/log/nginx && \
+    # 创建日志文件
     touch /var/log/nginx/error.log && \
     touch /var/log/nginx/access.log && \
-    # 在Alpine版本中使用nginx用户而不是www-data
-    chown -R nginx:nginx /var/cache/nginx /var/log/nginx && \
+    # 检查缓存目录是否存在，不存在则创建
+    [ -d /var/cache/nginx ] || mkdir -p /var/cache/nginx && \
+    # 尝试使用nginx用户，如果失败则使用当前用户
+    if id nginx >/dev/null 2>&1; then \
+        chown -R nginx:nginx /var/cache/nginx /var/log/nginx; \
+    else \
+        # 回退方案：使用当前用户
+        chown -R $(whoami):$(whoami) /var/cache/nginx /var/log/nginx; \
+    fi && \
+    # 设置权限
     chmod -R 755 /var/log/nginx
 
 EXPOSE 80
