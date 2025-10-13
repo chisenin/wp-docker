@@ -36,7 +36,7 @@ jobs:
           docker buildx build --platform linux/amd64,linux/arm64 \
             -f ./Dockerfiles/base/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:3.22 \
-            --push ./Dockerfiles/base > /dev/null 2>&1 || {
+            --push ./Dockerfiles/base || {
               echo "::error::构建或推送 base 镜像失败"
               exit 1
             }
@@ -66,7 +66,7 @@ jobs:
             --build-arg COMPOSER_HASH=55ce33d7678c5a611085731c9a2ba383d4d23389a81006900a0a43ed373ded6a0ee64936d3ab3d8e444a3e7a120dd6d57b55955475e363fbeefa16e7d97b7c0 \
             -f ./Dockerfiles/php/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${{ steps.extract.outputs.php_version }} \
-            --push . > /dev/null 2>&1 || {
+            --push . || {
               echo "::error::构建或推送 PHP 镜像失败"
               exit 1
             }
@@ -91,21 +91,21 @@ jobs:
             exit 1
           fi
 
-          docker compose --project-directory . up -d > /dev/null 2>&1 || {
+          docker compose --project-directory . up -d || {
             echo "::error::Docker Compose 启动失败"
             exit 1
           }
 
           sleep 10
 
-          curl -f --connect-timeout 5 --retry 3 http://localhost > /dev/null 2>&1 || {
+          curl -f --connect-timeout 5 --retry 3 http://localhost || {
             echo "::error::服务连通性测试失败"
             docker compose logs || true
             docker compose down || true
             exit 1
           }
 
-          docker compose down > /dev/null 2>&1 || {
+          docker compose down || {
             echo "::warning::Docker Compose 停止失败"
           }
 
