@@ -1,11 +1,13 @@
 # 使用ARG参数支持动态传入base镜像地址，默认为alpine:3.22作为回退
+# 全局参数声明 - 必须在所有FROM指令之前
+ARG NGINX_VERSION=1.26.2
 ARG BASE_IMAGE=alpine:3.22
+
+# --- 基础阶段 ---
 FROM ${BASE_IMAGE} AS base
 
-# --- 构建阶段 --- 
-# 读取 Nginx 版本标签
-ARG NGINX_VERSION
-FROM nginx:${NGINX_VERSION:-stable-alpine} AS builder
+# --- 构建阶段 ---
+FROM nginx:${NGINX_VERSION} AS builder
 
 # 提取实际 Nginx 版本（写入 /tmp/nginx_version，用于动态标签）
 RUN nginx -v 2>&1 | cut -d'/' -f2 | cut -d' ' -f1 > /tmp/nginx_version || echo "stable" > /tmp/nginx_version
@@ -21,15 +23,13 @@ RUN apk add --no-cache vim bash curl wget
 # 下载 WordPress 常见文件类型的 MIME 类型配置（可选优化）
 RUN mkdir -p /tmp/nginx-configs
 
-# --- 最终运行阶段 --- 
-FROM nginx:${NGINX_VERSION:-stable-alpine} AS final
-
-COPY --from=base /etc/apk/repositories /etc/apk/repositories
+# --- 最终运行阶段 ---
+FROM nginx:${NGINX_VERSION} AS final
 
 # 从 builder 阶段复制版本信息和调试工具
 COPY --from=builder /tmp/nginx_version /tmp/nginx_version
+COPY --from=builder /bin/bash /bin/bash
 COPY --from=builder /usr/bin/vim /usr/bin/vim
-COPY --from=builder /usr/bin/bash /usr/bin/bash
 COPY --from=builder /usr/bin/curl /usr/bin/curl
 COPY --from=builder /usr/bin/wget /usr/bin/wget
 
@@ -37,12 +37,9 @@ COPY --from=builder /usr/bin/wget /usr/bin/wget
 COPY ./configs/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY ./configs/nginx/conf.d /etc/nginx/conf.d
 
-# 创建日志目录并设置权限
-RUN mkdir -p /var/log/nginx && \
-    touch /var/log/nginx/error.log && \
-    touch /var/log/nginx/access.log && \
-    chown -R www-data:www-data /var/cache/nginx /var/log/nginx && \
-    chmod -R 755 /var/log/nginx
+# Official Nginx image already has proper directory structure and permissions
+# No need to create or modify these directories
+# Logs and cache will be handled by Nginx automatically
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

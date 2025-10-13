@@ -2,9 +2,9 @@ name: Build and Push Docker Images
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, test-nginx-only ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, test-nginx-only ]
 
 jobs:
   build:
@@ -71,7 +71,6 @@ jobs:
               exit 1
             }
           echo "::endgroup::"
-
       - name: 构建并推送 Nginx 镜像
         run: |
           echo "::group::构建并推送 Nginx 镜像"
@@ -110,4 +109,8 @@ jobs:
             echo "::warning::Docker Compose 停止失败"
           }
 
+<<<<<<< HEAD
           echo "::endgroup::"
+=======
+          echo "::endgroup::"
+>>>>>>> test-nginx-only
