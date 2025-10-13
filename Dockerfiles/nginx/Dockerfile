@@ -1,14 +1,13 @@
 # 使用ARG参数支持动态传入base镜像地址，默认为alpine:3.22作为回退
+# 全局参数声明 - 必须在所有FROM指令之前
+ARG NGINX_VERSION=1.26.2
 ARG BASE_IMAGE=alpine:3.22
+
+# --- 基础阶段 ---
 FROM ${BASE_IMAGE} AS base
 
-# 声明NGINX_VERSION参数
-ARG NGINX_VERSION
-
 # --- 构建阶段 ---
-# 重新声明 NGINX_VERSION 以在 builder 阶段使用
-ARG NGINX_VERSION
-FROM nginx:${NGINX_VERSION:-stable-alpine} AS builder
+FROM nginx:${NGINX_VERSION} AS builder
 
 # 提取实际 Nginx 版本（写入 /tmp/nginx_version，用于动态标签）
 RUN nginx -v 2>&1 | cut -d'/' -f2 | cut -d' ' -f1 > /tmp/nginx_version || echo "stable" > /tmp/nginx_version
@@ -25,13 +24,11 @@ RUN apk add --no-cache vim bash curl wget
 RUN mkdir -p /tmp/nginx-configs
 
 # --- 最终运行阶段 ---
-# 重新声明 NGINX_VERSION 以在 final 阶段使用
-ARG NGINX_VERSION
-FROM nginx:${NGINX_VERSION:-stable-alpine} AS final
+FROM nginx:${NGINX_VERSION} AS final
 
 # 从 builder 阶段复制版本信息和调试工具
 COPY --from=builder /tmp/nginx_version /tmp/nginx_version
-COPY --from=builder /bin/bash /bin/bash  # 修正路径为 /bin/bash
+COPY --from=builder /bin/bash /bin/bash
 COPY --from=builder /usr/bin/vim /usr/bin/vim
 COPY --from=builder /usr/bin/curl /usr/bin/curl
 COPY --from=builder /usr/bin/wget /usr/bin/wget
