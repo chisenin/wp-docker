@@ -1,0 +1,99 @@
+# 只验证Docker Compose配置的工作流
+# 这个工作流专门用于verify-only分支，跳过构建和推送步骤
+
+name: Verify Docker Compose
+
+on:
+  push:
+    branches: [ verify-only ]
+  pull_request:
+    branches: [ verify-only ]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置Docker环境
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+
+      - name: 创建.env文件用于测试
+        run: |
+          echo "::group::创建测试.env文件"
+          # 创建简化的.env文件，用于Docker Compose验证
+          cat > .env << EOF
+          # 用于验证的简化配置
+          DOCKERHUB_USERNAME=library
+          PHP_VERSION=8.3-apache
+          NGINX_VERSION=1.27-alpine
+          
+          # 数据库配置
+          MYSQL_ROOT_PASSWORD=test_root_password
+          MYSQL_DATABASE=wordpress
+          MYSQL_USER=wordpress
+          MYSQL_PASSWORD=test_wordpress_password
+          EOF
+          echo "创建的.env文件内容："
+          cat .env
+          echo "::endgroup::"
+
+      - name: 验证docker-compose.yml文件格式
+        run: |
+          echo "::group::验证docker-compose.yml格式"
+          if [ ! -f docker-compose.yml ]; then
+            echo "::error::docker-compose.yml 文件缺失"
+            exit 1
+          fi
+          
+          # 验证YAML格式是否正确
+          docker compose config -q || {
+            echo "::error::docker-compose.yml 格式错误"
+            exit 1
+          }
+          echo "::endgroup::"
+
+      - name: 预览Docker Compose配置
+        run: |
+          echo "::group::预览Docker Compose配置"
+          docker compose config
+          echo "::endgroup::"
+
+      - name: 测试Docker Compose启动（使用简化配置）
+        run: |
+          echo "::group::测试Docker Compose启动"
+          
+          # 使用简化的配置进行快速测试
+          docker compose --project-directory . up -d db redis || {
+            echo "::error::基础服务启动失败"
+            exit 1
+          }
+          
+          # 等待服务启动
+          sleep 5
+          
+          # 检查服务状态
+          docker compose ps
+          
+          # 清理
+          docker compose down -v || {
+            echo "::warning::清理资源时出错"
+          }
+          
+          echo "::endgroup::"
+
+      - name: 输出验证结果
+        run: |
+          echo "::group::验证结果"
+          echo "✅ Docker Compose配置验证成功！"
+          echo "工作流已成功跳过构建和推送过程，只执行了验证步骤。"
+          echo "这个工作流专门用于verify-only分支，适合快速测试配置更改。"
+          echo "::endgroup::"
