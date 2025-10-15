@@ -34,8 +34,8 @@ COPY --from=builder /usr/bin/curl /usr/bin/curl
 COPY --from=builder /usr/bin/wget /usr/bin/wget
 
 # 复制配置文件，使用正确的相对路径
-COPY ./configs/nginx/nginx.conf /etc/nginx/nginx.conf
-COPY ./configs/nginx/conf.d /etc/nginx/conf.d
+COPY ../deploy_configs/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY ../deploy_configs/nginx/conf.d /etc/nginx/conf.d
 
 # Official Nginx image already has proper directory structure and permissions
 # No need to create or modify these directories

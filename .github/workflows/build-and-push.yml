@@ -188,7 +188,7 @@ jobs:
           # 检查服务定义是否完整
           echo "验证关键服务定义..."
           MISSING_SERVICES=""
-          for service in db redis wp nginx; do
+          for service in mariadb redis php nginx; do
             if ! docker compose config --services | grep -q "^$service$"; then
               MISSING_SERVICES="$MISSING_SERVICES $service"
             fi
