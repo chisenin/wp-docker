@@ -4,7 +4,7 @@
 
 **注意**: 详细指南文档已移至 `guides/` 目录，包含从介绍到部署的完整步骤说明。
 
-**主要特性**: 动态版本锁定、共享Base镜像、配置即代码、自动化部署脚本、安全实践集成
+**主要特性**: 动态版本锁定、共享Base镜像、配置即代码、自动化部署脚本、版本监控、安全实践集成
 ---
 ## 项目结构
 
@@ -15,19 +15,11 @@ wp-docker/
 ├── .env.example                   # 环境变量配置模板
 ├── docker-compose.yml             # 服务编排核心定义
 ├── guides/                        # 详细指南文档目录
-│   ├── 01. 介绍与核心理念.md           # 项目介绍与设计理念
-│   ├── 02. 项目目录结构与Git初始化.md     # 目录结构与初始化步骤
-│   ├── 03. Docker Compose配置.md      # Docker Compose 配置说明
-│   ├── 04. Base镜像构建.md           # Base 镜像构建指南
-│   ├── 05. PHP镜像构建.md            # PHP 镜像构建指南
-│   ├── 06. Nginx镜像构建.md          # Nginx 镜像构建指南
-│   ├── 07. GitHub Actions自动化构建.md # CI/CD 工作流配置
-│   ├── 08. Git工作流与变更管理.md      # Git 工作流规范
-│   ├── 09. 部署与验证.md             # 部署流程与验证步骤
-│   └── 10. 无构建部署阶段.md          # 生产环境无构建部署
+│   └── WordPress + Docker Compose 多阶段构建与生产环境最佳实践指南 (GitHub Actions 自动化版).md # 完整集成指南
 ├── .github/                       # GitHub Actions 工作流目录
 │   └── workflows/
-│       └── build-and-push.yml     # 自动化构建工作流
+│       ├── build-and-push.yml     # 自动化构建工作流
+│       └── version-monitor.yml    # 版本监控工作流
 ├── configs/                       # 所有服务的配置文件统一存放
 │   ├── nginx/                     # Nginx 配置
 │   │   ├── nginx.conf             # Nginx 主配置
@@ -43,14 +35,36 @@ wp-docker/
 │   └── nginx/                     # Nginx Dockerfile
 │       └── Dockerfile             # Nginx 镜像构建定义
 ├── scripts/                       # 辅助脚本目录
-│   ├── deploy.sh                  # 部署脚本（生成.env文件）
-│   └── check_versions.sh          # 版本监控脚本（测试中）
+│   ├── auto_deploy.sh             # 自动化部署脚本（推荐）
+│   ├── check_versions.sh          # 版本监控脚本
+│   ├── deploy.sh                  # 传统部署脚本（生成.env文件）
+│   └── test-build.sh              # 构建测试脚本
 └── html/                          # WordPress 源码目录
 ```
 
 ## 快速开始
 
-### 开发环境
+### 开发环境 (使用自动部署脚本)
+
+1. **安装依赖**
+   - 确保已安装 Docker 和 Docker Compose
+
+2. **初始化项目**
+   ```bash
+   git clone <仓库地址> wp-docker
+   cd wp-docker
+   ```
+
+3. **使用自动部署脚本**
+   ```bash
+   chmod +x scripts/auto_deploy.sh
+   ./scripts/auto_deploy.sh dev
+   ```
+
+4. **完成 WordPress 安装**
+   - 访问 `http://localhost` 完成安装向导
+
+### 开发环境 (传统方式 - 可选)
 
 1. **安装依赖**
    - 确保已安装 Docker 和 Docker Compose
@@ -84,10 +98,29 @@ wp-docker/
    docker-compose up -d --build
    ```
 
-5. **完成 WordPress 安装**
+7. **完成 WordPress 安装**
    - 访问 `http://localhost` 完成安装向导
 
-### 生产环境
+### 生产环境 (使用自动部署脚本)
+
+1. **准备工作**
+   - 在 GitHub 仓库设置中配置 Docker Hub 凭据：`DOCKERHUB_USERNAME` 和 `DOCKERHUB_TOKEN`
+   - 将代码推送到 GitHub 仓库的 `main` 分支，触发 GitHub Actions 自动构建镜像
+
+2. **部署**
+   ```bash
+   # 在生产服务器上
+   git clone <仓库地址> wp-docker
+   cd wp-docker
+   chmod +x scripts/auto_deploy.sh
+   ./scripts/auto_deploy.sh prod
+   ```
+
+3. **完成 WordPress 安装**
+   - 访问服务器 IP 地址完成安装向导
+   - 推荐安装并配置 Redis Object Cache 插件以启用缓存功能
+
+### 生产环境 (传统方式 - 可选)
 
 1. **准备工作**
    - 在 GitHub 仓库设置中配置 Docker Hub 凭据：`DOCKERHUB_USERNAME` 和 `DOCKERHUB_TOKEN`
@@ -165,13 +198,19 @@ wp-docker/
    - 生成不含特殊字符的随机用户名和强密码
    - 容器内文件权限严格控制
 
-4. **版本监控（测试中）**
+4. **版本监控**
    - `scripts/check_versions.sh` 脚本可检查依赖版本更新
+   - GitHub Actions 工作流 `version-monitor.yml` 每日自动检查新版本
    - 支持多平台构建检测
+
+5. **自动化部署**
+   - `scripts/auto_deploy.sh` 脚本集成完整部署流程
+   - 支持开发环境和生产环境快速部署
+   - 自动创建目录、下载 WordPress、生成配置、启动服务
 
 ## 未来优化方向
 
-- 全面测试版本监控功能并集成到 CI/CD 流程
 - 添加数据库自动备份功能
 - 实现 HTTPS 证书自动获取和更新
 - 添加更多性能优化配置
+- 完善监控和告警体系
