@@ -87,12 +87,21 @@ jobs:
           echo "此分支专门用于验证Docker Compose配置。"
           echo "::endgroup::"
 
-      - name: 在verify-only分支上创建测试.env文件
-        if: env.SKIP_BUILD_PUSH == 'true'
+
+
+      - name: Docker Compose 验证
         run: |
-          echo "::group::创建测试.env文件"
-          # 为验证创建简化的.env文件，避免环境变量警告
-          cat > .env << EOF
+          echo "::group::Docker Compose 验证"
+
+          if [ ! -f docker-compose.yml ]; then
+            echo "::error::docker-compose.yml 文件缺失"
+            exit 1
+          fi
+
+          # 为验证创建测试.env文件，无论在哪个分支
+          if [ ! -f .env ]; then
+            echo "创建测试.env文件，因为未找到现有.env文件..."
+            cat > .env << EOF
           # 用于验证的简化配置
           DOCKERHUB_USERNAME=library
           PHP_VERSION=8.3-fpm-alpine3.22
@@ -104,17 +113,10 @@ jobs:
           MYSQL_USER=wordpress
           MYSQL_PASSWORD=test_wordpress_password
           EOF
-          echo "创建的.env文件内容："
-          cat .env
-          echo "::endgroup::"
-
-      - name: Docker Compose 验证
-        run: |
-          echo "::group::Docker Compose 验证"
-
-          if [ ! -f docker-compose.yml ]; then
-            echo "::error::docker-compose.yml 文件缺失"
-            exit 1
+            echo "创建的.env文件内容："
+            cat .env
+          else
+            echo "使用现有的.env文件进行验证。"
           fi
 
           # 在verify-only分支上简化验证过程
@@ -131,8 +133,15 @@ jobs:
           else
             # 标准分支上执行完整验证
             echo "在标准分支上运行完整的Docker Compose验证..."
+            # 首先尝试配置预览，确保引用格式正确
+            docker compose config -q || {
+              echo "::error::docker-compose.yml 格式或引用错误"
+              exit 1
+            }
+            
             docker compose --project-directory . up -d || {
               echo "::error::Docker Compose 启动失败"
+              docker compose logs || true
               exit 1
             }
 
