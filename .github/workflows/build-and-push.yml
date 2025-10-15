@@ -5,6 +5,8 @@ on:
     branches: [ main, test-nginx-only, verify-only ]
   pull_request:
     branches: [ main, test-nginx-only, verify-only ]
+  workflow_dispatch:
+    # 允许手动触发工作流，不设置任何必需参数，确保所有模块都会运行一次
 
 jobs:
   build:

@@ -8,6 +8,8 @@ on:
     branches: [ verify-only ]
   pull_request:
     branches: [ verify-only ]
+  workflow_dispatch:
+    # 允许手动触发验证工作流
 
 jobs:
   verify:
