@@ -49,7 +49,7 @@ COPY --from=builder /tmp/php_version /tmp/php_version
 
 RUN docker-php-ext-enable pdo_mysql mysqli gd exif intl zip opcache && rm -rf /var/cache/apk/* 2>/dev/null || true
 
-COPY ./configs/php/php.ini /usr/local/etc/php/php.ini
+COPY ../../configs/php/php.ini /usr/local/etc/php/php.ini
 
 # 创建日志目录并设置权限
 RUN mkdir -p /var/log/php && \

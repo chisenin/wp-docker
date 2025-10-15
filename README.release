@@ -1,0 +1,76 @@
+# WordPress Docker 生产环境部署包
+
+## 版本：v1.0.0
+
+## 包含文件
+
+- `.env.example`: 环境变量配置模板
+- `docker-compose.yml`: Docker Compose 配置文件（由脚本自动生成）
+- `scripts/auto_deploy.sh`: 自动部署脚本
+
+## 部署说明
+
+本部署包仅包含生产环境所需的核心文件，使用非常简单：
+
+1. 将本部署包解压到目标服务器上的任意目录
+
+2. 确保服务器已安装以下依赖：
+   - Docker
+   - Docker Compose
+   - wget 或 curl（用于下载WordPress）
+
+3. 运行自动部署脚本：
+   ```bash
+   cd /path/to/deployment
+   chmod +x scripts/auto_deploy.sh
+   ./scripts/auto_deploy.sh
+   ```
+
+4. 脚本将自动执行以下操作：
+   - 在当前目录创建项目结构
+   - 生成随机的.env配置文件（包含数据库密码和安全密钥）
+   - 生成docker-compose.yml文件
+   - 下载最新的WordPress源码并解压到html目录
+   - 生成Nginx和PHP配置文件
+   - 拉取Docker镜像并启动服务
+   - 设置正确的文件权限
+
+5. 部署完成后，通过浏览器访问服务器IP地址完成WordPress安装
+
+## 重要提示
+
+- 所有敏感信息（数据库密码、WordPress安全密钥等）都保存在当前目录的.env文件中，请妥善备份
+- 首次访问时，请通过WordPress安装向导设置管理员账号和网站基本信息
+- 建议在生产环境中配置SSL证书以启用HTTPS访问
+- 定期备份html目录和数据库以防止数据丢失
+
+## 环境变量说明
+
+部署完成后，可根据需要修改.env文件中的以下关键配置：
+
+- `PHP_VERSION`: PHP容器版本
+- `NGINX_VERSION`: Nginx容器版本
+- `MYSQL_DATABASE`: WordPress数据库名称
+- `WORDPRESS_TABLE_PREFIX`: WordPress数据表前缀（如需修改请在安装前更改）
+
+## 服务组成
+
+- **Nginx**: 前端Web服务器
+- **PHP-FPM**: 处理PHP请求
+- **MariaDB**: 数据库服务
+- **Redis**: 缓存服务
+
+## 目录结构
+
+部署完成后将创建以下目录结构：
+
+```
+├── .env              # 环境变量配置文件
+├── docker-compose.yml # Docker Compose配置
+├── html/             # WordPress源码和内容
+├── configs/          # 配置文件
+│   ├── nginx/        # Nginx配置
+│   └── php/          # PHP配置
+└── scripts/          # 脚本目录
+    └── auto_deploy.sh # 自动部署脚本
+```

@@ -58,18 +58,18 @@ jobs:
             fi
             
             # 根据变更的文件判断需要更新的组件
-            if grep -q "Dockerfiles/php/php_version.txt" changed_files.txt || \
-               grep -q "Dockerfiles/php/composer_hash.txt" changed_files.txt || \
-               grep -q "Dockerfiles/php/Dockerfile" changed_files.txt; then
+            if grep -q "build/Dockerfiles/php/php_version.txt" changed_files.txt || \
+               grep -q "build/Dockerfiles/php/composer_hash.txt" changed_files.txt || \
+               grep -q "build/Dockerfiles/php/Dockerfile" changed_files.txt; then
               CHANGED_COMPONENTS="${CHANGED_COMPONENTS} php"
             fi
             
-            if grep -q "Dockerfiles/nginx/nginx_version.txt" changed_files.txt || \
-               grep -q "Dockerfiles/nginx/Dockerfile" changed_files.txt; then
+            if grep -q "build/Dockerfiles/nginx/nginx_version.txt" changed_files.txt || \
+               grep -q "build/Dockerfiles/nginx/Dockerfile" changed_files.txt; then
               CHANGED_COMPONENTS="${CHANGED_COMPONENTS} nginx"
             fi
             
-            if grep -q "Dockerfiles/base/Dockerfile" changed_files.txt; then
+            if grep -q "build/Dockerfiles/base/Dockerfile" changed_files.txt; then
               CHANGED_COMPONENTS="${CHANGED_COMPONENTS} base"
             fi
           fi
@@ -87,13 +87,13 @@ jobs:
         id: extract
         run: |
           echo "::group::提取版本"
-          PHP_VERSION=$(cat Dockerfiles/php/php_version.txt 2>/dev/null || echo '8.3.26')
-          NGINX_VERSION=$(cat Dockerfiles/nginx/nginx_version.txt 2>/dev/null || echo '1.27.2')
-          COMPOSER_HASH=$(cat Dockerfiles/php/composer_hash.txt 2>/dev/null || echo 'ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792')
+          PHP_VERSION=$(cat build/Dockerfiles/php/php_version.txt 2>/dev/null || echo '8.3.26')
+          NGINX_VERSION=$(cat build/Dockerfiles/nginx/nginx_version.txt 2>/dev/null || echo '1.27.2')
+          COMPOSER_HASH=$(cat build/Dockerfiles/php/composer_hash.txt 2>/dev/null || echo 'ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792')
 
-          [ ! -f Dockerfiles/php/php_version.txt ] && echo "::warning::PHP 版本文件缺失，默认使用 $PHP_VERSION"
-          [ ! -f Dockerfiles/nginx/nginx_version.txt ] && echo "::warning::Nginx 版本文件缺失，默认使用 $NGINX_VERSION"
-          [ ! -f Dockerfiles/php/composer_hash.txt ] && echo "::warning::Composer 哈希文件缺失，使用默认值"
+          [ ! -f build/Dockerfiles/php/php_version.txt ] && echo "::warning::PHP 版本文件缺失，默认使用 $PHP_VERSION"
+          [ ! -f build/Dockerfiles/nginx/nginx_version.txt ] && echo "::warning::Nginx 版本文件缺失，默认使用 $NGINX_VERSION"
+          [ ! -f build/Dockerfiles/php/composer_hash.txt ] && echo "::warning::Composer 哈希文件缺失，使用默认值"
 
           echo "php_version=$PHP_VERSION" >> $GITHUB_OUTPUT
           echo "nginx_version=$NGINX_VERSION" >> $GITHUB_OUTPUT
@@ -111,7 +111,7 @@ jobs:
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg BASE_IMAGE=alpine:3.22 \
             --build-arg COMPOSER_HASH=${{ steps.extract.outputs.composer_hash }} \
-            -f ./Dockerfiles/php/Dockerfile \
+            -f ./build/Dockerfiles/php/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${{ steps.extract.outputs.php_version }} \
             --push . || {
               echo "::error::构建或推送 PHP 镜像失败"
@@ -126,7 +126,7 @@ jobs:
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg BASE_IMAGE=alpine:3.22 \
             --build-arg NGINX_VERSION=${{ steps.extract.outputs.nginx_version }} \
-            -f ./Dockerfiles/nginx/Dockerfile \
+            -f ./build/Dockerfiles/nginx/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:${{ steps.extract.outputs.nginx_version }} \
             --push . || {
               echo "::error::构建或推送 Nginx 镜像失败"

@@ -34,10 +34,10 @@ services:
   # --- PHP-FPM 服务 ---
   wp:
     # 使用官方PHP-FPM镜像作为后备选项
+    build:
+      context: .
+      dockerfile: build/Dockerfiles/php/Dockerfile
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-8.3-fpm-alpine3.22}  # 为环境变量提供默认值
-    # build:  # 注释掉本地构建，使用Docker Hub镜像
-    #   context: ./Dockerfiles/php
-    #   dockerfile: Dockerfile
     container_name: wp_fpm
     restart: unless-stopped
     networks:
@@ -45,6 +45,8 @@ services:
     volumes:
       # 注意：宿主机 html 目录挂载到容器内 /var/www/html
       - ./html:/var/www/html
+      # 使用deploy目录中的PHP配置
+      - ./deploy/configs/php.ini:/usr/local/etc/php/php.ini:ro
     expose:
       - "9000"
     depends_on:
@@ -61,18 +63,18 @@ services:
   # --- Nginx 服务 ---
   nginx:
     # 使用官方Nginx镜像作为后备选项
+    build:
+      context: .
+      dockerfile: build/Dockerfiles/nginx/Dockerfile
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-nginx:${NGINX_VERSION:-1.27-alpine}  # 为环境变量提供默认值
-    # build:  # 注释掉本地构建，使用Docker Hub镜像
-    #   context: ./Dockerfiles/nginx
-    #   dockerfile: Dockerfile
     container_name: wp_nginx
     restart: unless-stopped
     networks:
       - app-network
     volumes:
-      # 挂载自定义配置文件，使用统一的 configs 目录
-      - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./configs/nginx/conf.d:/etc/nginx/conf.d
+      # 挂载自定义配置文件，使用build目录中的配置
+      - ./build/Dockerfiles/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./build/Dockerfiles/nginx/conf.d:/etc/nginx/conf.d
       - ./html:/var/www/html
     ports:
       - "80:80"

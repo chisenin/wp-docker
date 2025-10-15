@@ -28,7 +28,7 @@ jobs:
         run: |
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
-          git add Dockerfiles/php/php_version.txt Dockerfiles/nginx/nginx_version.txt Dockerfiles/php/composer_hash.txt
+          git add build/Dockerfiles/php/php_version.txt build/Dockerfiles/nginx/nginx_version.txt build/Dockerfiles/php/composer_hash.txt
           git commit -m "chore(versions): update components - ${{ steps.version_check.outputs.components }}"
           git push origin main
 

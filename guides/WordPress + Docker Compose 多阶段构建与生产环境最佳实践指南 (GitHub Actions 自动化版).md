@@ -22,23 +22,30 @@ wordpress-project/
 ├── .git/                             # Git 仓库
 ├── .gitignore                        # 忽略规则
 ├── README.md                         # 项目说明
-├── docker-compose.yml                # 服务编排
+├── docker-compose.yml                # 服务编排（开发环境）
 ├── .env.example                      # 环境变量模板
 ├── .github/workflows/                # GitHub Actions 工作流
 │   ├── build-and-push.yml            # 构建与推送
-│   └── version-monitor.yml           # 版本监控（已实现并集成）
-├── configs/                          # 配置文件
-│   ├── nginx/nginx.conf              # Nginx 主配置
-│   ├── nginx/conf.d/default.conf     # WordPress 站点配置
-│   └── php/php.ini                   # PHP 配置
-├── Dockerfiles/                      # Dockerfile 目录
-│   ├── base/Dockerfile               # 共享 Alpine base
-│   ├── php/Dockerfile                # PHP-FPM
-│   └── nginx/Dockerfile              # Nginx
-├── scripts/                          # 脚本
-│   ├── auto_deploy.sh                # 自动化部署脚本（一键部署）
-│   ├── deploy.sh                     # 部署脚本
-│   └── check_versions.sh             # 版本监控脚本
+│   ├── version-monitor.yml           # 版本监控（已实现并集成）
+│   └── verify-only.yml               # 配置验证工作流
+├── build/                            # 构建相关文件
+│   └── Dockerfiles/                  # Dockerfile 目录
+│       ├── base/Dockerfile           # 共享 Alpine base
+│       ├── php/                      # PHP-FPM 相关文件
+│       │   ├── Dockerfile            # PHP-FPM 镜像构建定义
+│       │   └── php_version.txt       # PHP 版本锁定文件
+│       └── nginx/                    # Nginx 相关文件
+│           ├── Dockerfile            # Nginx 镜像构建定义
+│           ├── nginx.conf            # Nginx 主配置
+│           ├── conf.d/               # 站点配置目录
+│           │   └── default.conf      # 默认站点配置
+│           └── nginx_version.txt     # Nginx 版本锁定文件
+├── deploy/                           # 部署相关文件
+│   ├── docker-compose.yml            # 生产环境服务编排配置
+│   ├── configs/                      # 配置文件目录
+│   │   └── php.ini                   # PHP 配置文件
+│   └── scripts/                      # 部署脚本目录
+│       └── auto_deploy.sh            # 自动化部署脚本（一键部署）
 └── html/                             # WordPress 源码
 ```
 
@@ -80,13 +87,15 @@ wordpress-project/
 
 ## Docker Compose 配置 (`docker-compose.yml`)
 
+### 开发环境配置示例
+
 ```yaml
 services:
-  db:
+  mariadb:
     image: mariadb:10.11.14
-    container_name: wp_db
+    container_name: wp-mariadb
     restart: unless-stopped
-    networks: [app-network]
+    networks: [wordpress-network]
     volumes: [db_data:/var/lib/mysql]
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -97,43 +106,49 @@ services:
 
   redis:
     image: redis:8.2.2-alpine3.22
-    container_name: wp_redis
+    container_name: wp-redis
     restart: unless-stopped
-    networks: [app-network]
+    networks: [wordpress-network]
     command: redis-server --appendonly yes
     volumes: [redis_data:/data]
     expose: ["6379"]
 
-  wp:
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-8.3-fpm-alpine3.22}
-    container_name: wp_fpm
+  php:
+    build:
+      context: ./build/Dockerfiles/php
+      dockerfile: Dockerfile
+    container_name: wp-php
     restart: unless-stopped
-    networks: [app-network]
-    volumes: [./html:/var/www/html]
+    networks: [wordpress-network]
+    volumes:
+      - ./html:/var/www/html
+      - ./deploy/configs/php.ini:/usr/local/etc/php/php.ini:ro
     expose: ["9000"]
-    depends_on: [db, redis]
+    depends_on: [mariadb, redis]
     environment:
-      WORDPRESS_DB_HOST: db:3306
-      WORDPRESS_DB_USER: wp_user
+      WORDPRESS_DB_HOST: mariadb:3306
+      WORDPRESS_DB_USER: ${MYSQL_USER}
       WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
-      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
       WORDPRESS_REDIS_HOST: redis
       WORDPRESS_REDIS_PORT: 6379
 
   nginx:
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-nginx:${NGINX_VERSION:-1.27-alpine}
-    container_name: wp_nginx
+    build:
+      context: ./build/Dockerfiles/nginx
+      dockerfile: Dockerfile
+    container_name: wp-nginx
     restart: unless-stopped
-    networks: [app-network]
+    networks: [wordpress-network]
     volumes:
-      - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./configs/nginx/conf.d:/etc/nginx/conf.d
+      - ./build/Dockerfiles/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./build/Dockerfiles/nginx/conf.d:/etc/nginx/conf.d:ro
       - ./html:/var/www/html
     ports: ["80:80"]
-    depends_on: [wp]
+    depends_on: [php]
 
 networks:
-  app-network:
+  wordpress-network:
     driver: bridge
 
 volumes:
@@ -427,34 +442,35 @@ jobs:
 
 ## 自动化部署（推荐）
 
-项目提供了功能强大的 `auto_deploy.sh` 脚本，可以一键完成 WordPress 项目的自动化部署，包括：
-- 创建项目目录
+项目提供了功能强大的 `auto_deploy.sh` 脚本，位于 `deploy/scripts/` 目录下，可以一键完成 WordPress 项目的自动化部署，包括：
+- 创建项目目录结构
+- 获取最新的镜像版本信息
 - 生成完整的 `.env` 文件（含数据库信息和8组 WordPress 安全密钥）
 - 生成 `docker-compose.yml` 配置文件
 - 下载并解压最新版 WordPress
-- 启动所有服务
+- 复制或生成必要的配置文件
+- 启动所有服务并设置适当的文件权限
 
 ### 使用方法
 
 1. **准备环境**:
    - 确保服务器已安装 Docker 和 Docker Compose
-   - 下载 `auto_deploy.sh` 脚本：
+   - 克隆仓库并进入项目目录：
    ```bash
-   curl -O https://raw.githubusercontent.com/your-username/your-repo/main/scripts/auto_deploy.sh
-   chmod +x auto_deploy.sh  # Linux/macOS环境
-   # Windows环境使用：icacls auto_deploy.sh /grant Everyone:F
+   git clone <your-repo-url> wp-docker
+   cd wp-docker
    ```
 
 2. **执行自动化部署**:
    ```bash
-   ./auto_deploy.sh [DOCKERHUB_USERNAME] [PROJECT_DIR]
+   chmod +x deploy/scripts/auto_deploy.sh  # Linux/macOS环境
+   ./deploy/scripts/auto_deploy.sh
    ```
-   - `DOCKERHUB_USERNAME` (可选): 您的 DockerHub 用户名，默认为 `library`
-   - `PROJECT_DIR` (可选): 项目安装目录，默认为 `./wordpress-project`
 
 3. **部署完成后**:
-   - 脚本会输出访问信息和管理员账户信息
-   - 浏览器访问 `http://服务器IP` 即可开始使用 WordPress
+   - 脚本会输出访问信息和所有敏感凭据
+   - 浏览器访问 `http://服务器IP` 即可完成 WordPress 安装向导
+   - 推荐安装并配置 Redis Object Cache 插件以启用缓存功能
 
 ## 传统部署方式（可选）
 
@@ -464,11 +480,11 @@ jobs:
 
    - 确保服务器已安装 Docker 和 Docker Compose。
 
-   - 克隆仓库或下载 Release 资产:
+   - 克隆仓库并进入项目的 deploy 目录:
 
      ```bash
-     git clone <your-repo-url> wordpress-project
-     cd wordpress-project
+     git clone <your-repo-url> wp-docker
+     cd wp-docker/deploy
      ```
 
      或从 GitHub Release 下载 
@@ -482,8 +498,53 @@ jobs:
      ```
      docker-compose.yml
      ```
+     文件到部署目录。
 
-     。
+2. **下载 WordPress**:
+
+   ```bash
+   wget https://wordpress.org/latest.tar.gz
+   tar -xvzf latest.tar.gz
+   mv wordpress/* html/
+   rm -rf wordpress latest.tar.gz
+   mkdir -p html/wp-content/uploads
+   ```
+
+3. **创建配置目录**:
+
+   ```bash
+   mkdir -p configs/nginx/conf.d
+   ```
+
+4. **复制或生成配置文件**:
+
+   - 从 build 目录复制 Nginx 配置:
+   ```bash
+   cp ../build/Dockerfiles/nginx/nginx.conf configs/nginx/
+   cp -r ../build/Dockerfiles/nginx/conf.d/* configs/nginx/conf.d/
+   ```
+
+   - 或使用默认配置:
+   ```bash
+   # 创建默认 Nginx 配置文件
+   # 这里可以添加创建默认配置的命令
+   ```
+
+5. **拉取并启动服务**:
+
+   ```bash
+   docker-compose pull
+   docker-compose up -d
+   ```
+
+6. **设置文件权限**:
+
+   ```bash
+   WP_CONTAINER_ID=$(docker-compose ps -q wp)
+   if [ -n "$WP_CONTAINER_ID" ]; then
+       docker exec -it $WP_CONTAINER_ID chown -R www-data:www-data /var/www/html
+   fi
+   ```
 
 2. **使用 Release 资产或生成 `.env`**:
 

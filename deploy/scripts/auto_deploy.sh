@@ -1,41 +1,54 @@
 #!/bin/bash
-#!/bin/bash
 set -e
 
-# 自动部署脚本：创建目录、生成 .env 和 docker-compose.yml、下载 WordPress、一键启动
-# 用法：./auto_deploy.sh [DOCKERHUB_USERNAME] [PROJECT_DIR]
-# 默认：DOCKERHUB_USERNAME=library, PROJECT_DIR=~/wordpress-project
+# WordPress Docker 生产环境自动部署脚本
+# 不带参数运行，自动在当前目录展开项目结构
+# 自动创建 .env、docker-compose.yml，下载 WordPress 源码
 
 # 配置项
-DEFAULT_DOCKERHUB_USERNAME="library"
-DEFAULT_PROJECT_DIR="$HOME/wordpress-project"
+DOCKERHUB_USERNAME="chisenin"  # 使用GitHub仓库所有者作为Docker Hub用户名
+PROJECT_DIR="$(pwd)"
 WP_DOWNLOAD_URL="https://wordpress.org/latest.tar.gz"
 MYSQL_DATABASE="wordpress"
 
-# 获取最新版本信息（从GitHub API）
-get_latest_versions() {
-    echo "获取最新版本信息..."
+# GitHub 仓库信息
+GITHUB_REPO="chisenin/wp-docker"
+
+# 获取工作流构建的镜像版本信息
+function get_workflow_versions() {
+    echo "获取项目构建的镜像版本信息..."
     
-    # 如果无法访问GitHub API，使用默认值
-    local default_php_version="8.3-fpm-alpine3.22"
-    local default_nginx_version="1.27-alpine"
+    # 优先读取本地版本文件
+    local local_php_version_file="${PROJECT_DIR}/build/Dockerfiles/php/php_version.txt"
+    local local_nginx_version_file="${PROJECT_DIR}/build/Dockerfiles/nginx/nginx_version.txt"
     
-    # 尝试从GitHub获取最新版本
-    # 注意：实际使用时需要替换为正确的API端点
-    local php_version_response=$(curl -s --retry 3 "https://raw.githubusercontent.com/chisenin/wp-docker/main/Dockerfiles/php/php_version.txt" || echo "$default_php_version")
-    local nginx_version_response=$(curl -s --retry 3 "https://raw.githubusercontent.com/chisenin/wp-docker/main/Dockerfiles/nginx/nginx_version.txt" || echo "$default_nginx_version")
+    # 尝试从GitHub获取版本文件内容
+    local php_version_file_url="https://raw.githubusercontent.com/${GITHUB_REPO}/main/build/Dockerfiles/php/php_version.txt"
+    local nginx_version_file_url="https://raw.githubusercontent.com/${GITHUB_REPO}/main/build/Dockerfiles/nginx/nginx_version.txt"
     
-    # 清理版本信息
-    PHP_VERSION=$(echo "$php_version_response" | tr -d '[:space:]')
-    NGINX_VERSION=$(echo "$nginx_version_response" | tr -d '[:space:]')
+    # 获取PHP版本号（优先本地文件，其次GitHub，最后默认值）
+    local php_version
+    if [ -f "$local_php_version_file" ]; then
+        php_version=$(cat "$local_php_version_file" | tr -d '\r' | tr -d '\n' | tr -d ' ')
+    else
+        php_version=$(curl -s --retry 3 "${php_version_file_url}" || echo "8.3.26")
+    fi
+    PHP_VERSION="${php_version}"
     
-    # 如果获取失败，使用默认值
-    [ -z "$PHP_VERSION" ] && PHP_VERSION="$default_php_version"
-    [ -z "$NGINX_VERSION" ] && NGINX_VERSION="$default_nginx_version"
+    # 获取Nginx版本号（优先本地文件，其次GitHub，最后默认值）
+    local nginx_version
+    if [ -f "$local_nginx_version_file" ]; then
+        nginx_version=$(cat "$local_nginx_version_file" | tr -d '\r' | tr -d '\n' | tr -d ' ')
+    else
+        nginx_version=$(curl -s --retry 3 "${nginx_version_file_url}" || echo "stable-alpine")
+    fi
+    NGINX_VERSION="${nginx_version}"
     
-    echo "使用 PHP 版本: $PHP_VERSION"
-    echo "使用 Nginx 版本: $NGINX_VERSION"
+    echo "使用 PHP 版本: ${PHP_VERSION}"
+    echo "使用 Nginx 版本: ${NGINX_VERSION}"
 }
+
+
 
 # 生成随机字符串函数（不含特殊字符的强密码）
 generate_secure_password() {
@@ -70,8 +83,14 @@ generate_wp_salts() {
 generate_nginx_config() {
     echo "生成Nginx配置文件..."
     
-    # Nginx主配置
-    cat > configs/nginx/nginx.conf << 'EOF'
+    # 复制Nginx配置（从build目录或生成）
+    mkdir -p configs/nginx/conf.d
+    if [ -f "../build/Dockerfiles/nginx/nginx.conf" ]; then
+        cp ../build/Dockerfiles/nginx/nginx.conf configs/nginx/
+        cp -r ../build/Dockerfiles/nginx/conf.d/* configs/nginx/conf.d/
+    else
+        # 如果没有现成的配置，生成一个
+        cat > configs/nginx/nginx.conf << 'EOF'
 user nginx;
 worker_processes auto;
 error_log /var/log/nginx/error.log warn;
@@ -101,9 +120,8 @@ http {
     include /etc/nginx/conf.d/*.conf;
 }
 EOF
-    
-    # WordPress站点配置
-    cat > configs/nginx/conf.d/wordpress.conf << 'EOF'
+        # WordPress站点配置
+        cat > configs/nginx/conf.d/wordpress.conf << 'EOF'
 server {
     listen 80;
     server_name _;
@@ -149,8 +167,11 @@ EOF
 generate_php_config() {
     echo "生成PHP配置文件..."
     
-    # PHP-FPM配置（覆盖某些默认值）
-    cat > configs/php/php.ini << 'EOF';
+    # PHP-FPM配置
+    if [ -f "../deploy/configs/php.ini" ]; then
+        cp ../deploy/configs/php.ini configs/php.ini
+    else
+        cat > configs/php.ini << 'EOF'
 [PHP]
 max_execution_time = 300
 memory_limit = 256M
@@ -182,46 +203,41 @@ EOF
 
 # 主函数
 main() {
-    local dockerhub_username="${1:-$DEFAULT_DOCKERHUB_USERNAME}"
-    local project_dir="${2:-$DEFAULT_PROJECT_DIR}"
+    echo "开始 WordPress Docker 生产环境自动部署..."
+    echo "部署目录: $PROJECT_DIR"
     
-    echo "开始自动部署 WordPress 项目..."
-    echo "使用 DockerHub 用户名: $dockerhub_username"
-    echo "部署目录: $project_dir"
+    # 获取工作流构建的镜像版本信息
+    get_workflow_versions
     
     # 检查依赖
     command -v docker >/dev/null 2>&1 || { echo "错误：Docker 未安装"; exit 1; }
-    command -v docker-compose >/dev/null 2>&1 || {
-        echo "警告：未找到 docker-compose 命令，尝试使用 docker compose..."
-        if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
-            echo "错误：Docker Compose 未安装"
-            exit 1
-        fi
-        DOCKER_COMPOSE="docker compose"
-    } || {
-        DOCKER_COMPOSE="docker-compose"
-    }
     
-    command -v wget >/dev/null 2>&1 || {
-        echo "警告：未找到 wget 命令，尝试使用 curl..."
-        if ! command -v curl >/dev/null 2>&1; then
-            echo "错误：wget 或 curl 未安装，无法下载 WordPress"
-            exit 1
-        fi
-        DOWNLOAD_TOOL="curl -o"
-        DOWNLOAD_FLAGS="-sL"
-    } || {
+    # 检测 docker-compose 命令
+    if command -v docker-compose >/dev/null 2>&1; then
+        DOCKER_COMPOSE="docker-compose"
+    elif docker compose version >/dev/null 2>&1; then
+        DOCKER_COMPOSE="docker compose"
+    else
+        echo "错误：Docker Compose 未安装"
+        exit 1
+    fi
+    
+    # 检测下载工具
+    if command -v wget >/dev/null 2>&1; then
         DOWNLOAD_TOOL="wget"
         DOWNLOAD_FLAGS="-O"
+    elif command -v curl >/dev/null 2>&1; then
+        DOWNLOAD_TOOL="curl -o"
+        DOWNLOAD_FLAGS="-sL"
+    else
+        echo "错误：wget 或 curl 未安装，无法下载 WordPress"
+        exit 1
     }
-    
-    # 获取最新版本
-    get_latest_versions
     
     # 创建项目目录
     echo "创建项目目录结构..."
-    mkdir -p "$project_dir/html" "$project_dir/configs/nginx/conf.d" "$project_dir/configs/php"
-    cd "$project_dir"
+    mkdir -p "$PROJECT_DIR/html" "$PROJECT_DIR/configs/nginx/conf.d"
+    cd "$PROJECT_DIR"
     
     # 生成随机值
     echo "生成安全凭据..."
@@ -233,7 +249,7 @@ main() {
     # 生成 .env 文件
     echo "生成 .env 文件..."
     cat > .env << EOF
-DOCKERHUB_USERNAME=$dockerhub_username
+DOCKERHUB_USERNAME=$DOCKERHUB_USERNAME
 PHP_VERSION=$PHP_VERSION
 NGINX_VERSION=$NGINX_VERSION
 MYSQL_ROOT_PASSWORD=$mysql_root_password
@@ -247,7 +263,7 @@ EOF
     
     # 生成 docker-compose.yml
     echo "生成 docker-compose.yml 文件..."
-    cat > docker-compose.yml << 'EOF'
+    cat > docker-compose.yml << EOF
 services:
   db:
     image: mariadb:10.11.14
@@ -272,13 +288,13 @@ services:
     expose: ["6379"]
 
   wp:
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-8.3-fpm-alpine3.22}
+    image: ${DOCKERHUB_USERNAME:-chisenin}/wordpress-php:${PHP_VERSION:-8.3.26}
     container_name: wp_fpm
     restart: unless-stopped
     networks: [app-network]
     volumes:
       - ./html:/var/www/html
-      - ./configs/php/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+      - ./configs/php.ini:/usr/local/etc/php/php.ini:ro
     expose: ["9000"]
     depends_on: [db, redis]
     environment:
@@ -290,7 +306,7 @@ services:
       WORDPRESS_REDIS_PORT: 6379
 
   nginx:
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-nginx:${NGINX_VERSION:-1.27-alpine}
+    image: ${DOCKERHUB_USERNAME:-chisenin}/wordpress-nginx:${NGINX_VERSION:-stable-alpine}
     container_name: wp_nginx
     restart: unless-stopped
     networks: [app-network]
@@ -320,7 +336,7 @@ EOF
     # 创建uploads目录并设置权限
     mkdir -p html/wp-content/uploads
     
-    # 生成Nginx和PHP配置
+    # 生成或复制Nginx和PHP配置
     generate_nginx_config
     generate_php_config
     
@@ -348,8 +364,8 @@ EOF
     echo "=========================================="
     echo "访问 http://您的服务器IP 完成WordPress安装"
     echo "\n重要信息："
-    echo "- DockerHub用户名: $dockerhub_username"
-    echo "- 项目目录: $project_dir"
+    echo "- DockerHub用户名: $DOCKERHUB_USERNAME"
+    echo "- 项目目录: $PROJECT_DIR"
     echo "- 数据库名称: $MYSQL_DATABASE"
     echo "- 数据库用户名: $mysql_user"
     echo "\n注意：所有敏感凭据（包括数据库密码和WordPress安全密钥）"
@@ -358,4 +374,4 @@ EOF
 }
 
 # 运行主函数
-main "$@"
+main
