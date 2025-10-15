@@ -1,129 +1,158 @@
 #!/bin/bash
+#!/bin/bash
 set -e
 
-# 版本监控脚本 - 检查Alpine、PHP、Nginx、Composer和apk包的版本更新
-# 此脚本目前被注释在工作流中，待测试稳定后启用
+# 版本监测脚本 - 检查Alpine、PHP、Nginx和Composer的版本更新
+# 此脚本在GitHub Actions中运行，检测到更新时会更新版本文件并触发构建
 
-# 创建临时目录
-TMP_DIR=$(mktemp -d)
-cd "$TMP_DIR"
+# 当前版本文件路径
+PHP_VERSION_FILE="Dockerfiles/php/php_version.txt"
+NGINX_VERSION_FILE="Dockerfiles/nginx/nginx_version.txt"
+COMPOSER_HASH_FILE="Dockerfiles/php/composer_hash.txt"
+ALPINE_VERSION="3.22"  # 固定minor，监测patch
 
 # 配置日志和输出
-OUTPUT_FILE="${TMP_DIR}/versions.json"
-LOG_FILE="${TMP_DIR}/check_versions.log"
-trigger_build=false
+WORKSPACE_DIR="${GITHUB_WORKSPACE:-.}"
+LOG_FILE="${WORKSPACE_DIR}/check_versions.log"
+UPDATED_COMPONENTS_FILE="${WORKSPACE_DIR}/updated_components.txt"
 
 # 函数：记录日志
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
 }
 
-# 函数：检查是否需要触发构建
-check_build_trigger() {
-    if [ "$trigger_build" = "false" ]; then
-        trigger_build=true
-        log "需要触发新的构建"
-    fi
-}
-
-# 函数：检查Docker镜像版本
-check_docker_image() {
-    local image_name="$1"
-    local current_version="$2"
-    local output_var="$3"
+# 函数：检查Alpine最新tag（使用Docker Hub API）
+check_alpine() {
+    log "检查Alpine最新版本（${ALPINE_VERSION}系列）"
     
-    log "检查Docker镜像: $image_name"
+    # 使用Docker Hub API查询最新的Alpine标签
+    LATEST_ALPINE=$(curl -s "https://hub.docker.com/v2/repositories/library/alpine/tags/?page_size=10" 2>/dev/null | \
+                   jq -r '.results[] | select(.name | startswith("'$ALPINE_VERSION'")) | .name' 2>/dev/null | \
+                   sort -V | tail -1)
     
-    # 尝试获取最新版本信息
-    local latest_version
-    latest_version=$(skopeo list-tags docker://$image_name 2>/dev/null | jq -r '.Tags[]' 2>/dev/null)
-    
-    if [ -n "$latest_version" ]; then
-        log "成功获取 $image_name 的标签列表"
-        # 这里简化处理，实际应用中需要更复杂的版本比较逻辑
-        if [[ "$latest_version" != *"$current_version"* ]]; then
-            check_build_trigger
+    if [ -n "$LATEST_ALPINE" ]; then
+        log "成功获取Alpine最新版本: $LATEST_ALPINE"
+        # 检查是否有新的patch版本
+        if [[ "$LATEST_ALPINE" != "$ALPINE_VERSION" ]]; then
+            log "Alpine更新检测到: $ALPINE_VERSION -> $LATEST_ALPINE"
+            echo "base" > "$UPDATED_COMPONENTS_FILE"  # 标记更新组件
         fi
     else
-        log "无法获取 $image_name 的标签信息，跳过版本检查"
+        log "无法获取Alpine版本信息，跳过版本检查"
     fi
 }
 
-# 函数：检查Composer版本
-check_composer_version() {
-    log "检查Composer版本"
+# 函数：检查PHP最新版本（8.3系列）
+check_php() {
+    log "检查PHP最新版本（8.3系列）"
+    
+    # 获取当前PHP版本
+    CURRENT_PHP=$(cat "$PHP_VERSION_FILE" 2>/dev/null || echo "0")
+    log "当前PHP版本: $CURRENT_PHP"
+    
+    # 使用Docker Hub API查询最新的PHP标签
+    LATEST_PHP=$(curl -s "https://hub.docker.com/v2/repositories/library/php/tags/?page_size=10" 2>/dev/null | \
+                jq -r '.results[] | select(.name | contains("8.3") and contains("fpm-alpine3.22")) | .name' 2>/dev/null | \
+                grep -oP '8\.3\.\K\d+' 2>/dev/null | sort -n | tail -1)
+    
+    if [ -n "$LATEST_PHP" ]; then
+        log "成功获取PHP最新版本: $LATEST_PHP"
+        # 比较版本
+        if [ "$LATEST_PHP" != "$CURRENT_PHP" ]; then
+            log "PHP更新检测到: $CURRENT_PHP -> $LATEST_PHP"
+            echo "$LATEST_PHP" > "$PHP_VERSION_FILE"
+            echo "php" >> "$UPDATED_COMPONENTS_FILE"
+        fi
+    else
+        log "无法获取PHP版本信息，跳过版本检查"
+    fi
+}
+
+# 函数：检查Nginx最新版本（1.27系列）
+check_nginx() {
+    log "检查Nginx最新版本（1.27系列）"
+    
+    # 获取当前Nginx版本
+    CURRENT_NGINX=$(cat "$NGINX_VERSION_FILE" 2>/dev/null || echo "stable-alpine")
+    log "当前Nginx版本: $CURRENT_NGINX"
+    
+    # 使用Docker Hub API查询最新的Nginx标签
+    LATEST_NGINX_TAG=$(curl -s "https://hub.docker.com/v2/repositories/library/nginx/tags/?page_size=10" 2>/dev/null | \
+                     jq -r '.results[] | select(.name | contains("1.27") and contains("alpine")) | .name' 2>/dev/null | \
+                     head -1)
+    
+    if [ -n "$LATEST_NGINX_TAG" ]; then
+        log "成功获取Nginx最新标签: $LATEST_NGINX_TAG"
+        # 提取版本号
+        LATEST_NGINX_VERSION=$(echo "$LATEST_NGINX_TAG" | grep -oP '1\.27\.\K\d+' 2>/dev/null || echo "stable-alpine")
+        
+        # 如果是新版本或标签发生变化
+        if [ "$LATEST_NGINX_VERSION" != "$CURRENT_NGINX" ]; then
+            log "Nginx更新检测到: $CURRENT_NGINX -> $LATEST_NGINX_TAG"
+            echo "$LATEST_NGINX_VERSION" > "$NGINX_VERSION_FILE"
+            echo "nginx" >> "$UPDATED_COMPONENTS_FILE"
+        fi
+    else
+        log "无法获取Nginx版本信息，跳过版本检查"
+    fi
+}
+
+# 函数：检查Composer hash（从官网获取）
+check_composer() {
+    log "检查Composer最新版本"
+    
+    # 获取当前Composer哈希
+    CURRENT_HASH=$(cat "$COMPOSER_HASH_FILE" 2>/dev/null || echo "")
     
     # 获取最新的Composer安装器哈希
-    local latest_hash
-    latest_hash=$(curl -s --retry 3 https://composer.github.io/installer.sig 2>/dev/null)
+    LATEST_HASH=$(curl -s --retry 3 https://composer.github.io/installer.sig 2>/dev/null || echo "")
     
-    if [ -n "$latest_hash" ]; then
+    if [ -n "$LATEST_HASH" ]; then
         log "成功获取最新Composer哈希"
-        # 在实际应用中，这里应该与存储的哈希进行比较
+        # 比较哈希
+        if [ "$LATEST_HASH" != "$CURRENT_HASH" ]; then
+            log "Composer更新检测到"
+            echo "$LATEST_HASH" > "$COMPOSER_HASH_FILE"
+            echo "php" >> "$UPDATED_COMPONENTS_FILE"  # Composer更新触发PHP重建
+        fi
     else
         log "无法获取Composer哈希，跳过版本检查"
     fi
 }
 
-# 函数：检查apk包版本
-check_apk_packages() {
-    log "检查apk包版本"
-    
-    # 注意：这部分需要在Alpine容器中运行以获得准确的版本信息
-    # 这里仅作为示例，实际应用中需要运行一个临时Alpine容器
-    local packages=(
-        "libzip-dev"
-        "freetype-dev"
-        "libpng-dev"
-        "libjpeg-turbo-dev"
-        "icu-dev"
-        "libwebp-dev"
-    )
-    
-    log "需要检查的包: ${packages[*]}"
-    # 在实际应用中，这里应该在临时容器中运行apk info命令检查版本
-}
-
 # 主函数
 main() {
-    log "开始版本监控检查"
+    log "开始版本监测检查"
     
-    # 检查Docker镜像版本
-    check_docker_image "alpine" "3.22" "alpine_version"
-    check_docker_image "php" "8.3-fpm-alpine3.22" "php_version"
-    check_docker_image "nginx" "1.27-alpine3.22" "nginx_version"
+    # 清理旧的更新文件
+    rm -f "$UPDATED_COMPONENTS_FILE"
+    touch "$LOG_FILE"
     
-    # 检查Composer版本
-    check_composer_version
+    # 检查各个组件的版本
+    check_alpine
+    check_php
+    check_nginx
+    check_composer
     
-    # 检查apk包版本
-    check_apk_packages
-    
-    # 生成输出文件
-    cat > "$OUTPUT_FILE" << EOF
-{
-    "trigger_build": "$trigger_build",
-    "alpine_version": "3.22",
-    "php_version": "8.3",
-    "nginx_version": "1.27",
-    "timestamp": "$(date '+%Y-%m-%d %H:%M:%S')"
-}
-EOF
-    
-    log "版本检查完成，结果: trigger_build=$trigger_build"
-    
-    # 输出结果供GitHub Actions使用
-    echo "trigger_build=$trigger_build" >> "$GITHUB_OUTPUT"
-    echo "php_version=8.3" >> "$GITHUB_OUTPUT"
-    echo "nginx_version=1.27" >> "$GITHUB_OUTPUT"
-    
-    # 复制结果到工作目录
-    cp "$OUTPUT_FILE" "$GITHUB_WORKSPACE/versions.json" || log "无法复制版本文件到工作目录"
-    cp "$LOG_FILE" "$GITHUB_WORKSPACE/check_versions.log" || log "无法复制日志文件到工作目录"
+    # 去重并清理更新组件文件
+    if [ -f "$UPDATED_COMPONENTS_FILE" ]; then
+        sort -u "$UPDATED_COMPONENTS_FILE" -o "$UPDATED_COMPONENTS_FILE"
+        log "检测到更新，需要重建的组件: $(cat "$UPDATED_COMPONENTS_FILE" | tr '\n' ', ')"
+        # 输出结果供GitHub Actions使用
+        if [ -n "$GITHUB_OUTPUT" ]; then
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+            echo "components=$(cat "$UPDATED_COMPONENTS_FILE" | tr '\n' ', ' | sed 's/,$//')" >> "$GITHUB_OUTPUT"
+        fi
+        exit 0  # 有更新
+    else
+        log "未检测到更新"
+        if [ -n "$GITHUB_OUTPUT" ]; then
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+        fi
+        exit 1  # 无更新
+    fi
 }
 
 # 运行主函数
 main
-
-# 清理临时目录
-rm -rf "$TMP_DIR" || true

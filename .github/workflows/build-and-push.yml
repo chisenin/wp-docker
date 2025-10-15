@@ -33,30 +33,84 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: 检查变更的组件
+        id: check-changes
+        run: |
+          echo "::group::检查变更组件"
+          
+          # 初始化变量
+          CHANGED_COMPONENTS=""
+          
+          # 检查是否存在更新组件文件（来自版本监测脚本）
+          if [ -f updated_components.txt ]; then
+            echo "检测到更新组件文件"
+            CHANGED_COMPONENTS=$(cat updated_components.txt)
+          else
+            echo "未找到更新组件文件，尝试通过git diff检测变更"
+            # 尝试获取上次提交和当前提交之间的差异
+            if [ ${{ github.event_name }} == 'push' ]; then
+              # 对于push事件，比较当前提交和前一个提交
+              git diff --name-only HEAD~1 HEAD > changed_files.txt
+            else
+              # 对于pull_request事件，比较PR分支和目标分支
+              git fetch origin ${{ github.base_ref }}:base_branch
+              git diff --name-only base_branch HEAD > changed_files.txt
+            fi
+            
+            # 根据变更的文件判断需要更新的组件
+            if grep -q "Dockerfiles/php/php_version.txt" changed_files.txt || \
+               grep -q "Dockerfiles/php/composer_hash.txt" changed_files.txt || \
+               grep -q "Dockerfiles/php/Dockerfile" changed_files.txt; then
+              CHANGED_COMPONENTS="${CHANGED_COMPONENTS} php"
+            fi
+            
+            if grep -q "Dockerfiles/nginx/nginx_version.txt" changed_files.txt || \
+               grep -q "Dockerfiles/nginx/Dockerfile" changed_files.txt; then
+              CHANGED_COMPONENTS="${CHANGED_COMPONENTS} nginx"
+            fi
+            
+            if grep -q "Dockerfiles/base/Dockerfile" changed_files.txt; then
+              CHANGED_COMPONENTS="${CHANGED_COMPONENTS} base"
+            fi
+          fi
+          
+          # 去重并格式化输出
+          CHANGED_COMPONENTS=$(echo "$CHANGED_COMPONENTS" | xargs -n1 | sort -u | xargs)
+          echo "变更的组件: $CHANGED_COMPONENTS"
+          
+          # 设置输出变量
+          echo "changed_components=$CHANGED_COMPONENTS" >> $GITHUB_OUTPUT
+          echo "has_changes=$([ -z "$CHANGED_COMPONENTS" ] && echo 'false' || echo 'true')" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
       - name: 提取 PHP 和 Nginx 版本
         id: extract
         run: |
           echo "::group::提取版本"
           PHP_VERSION=$(cat Dockerfiles/php/php_version.txt 2>/dev/null || echo '8.3.26')
           NGINX_VERSION=$(cat Dockerfiles/nginx/nginx_version.txt 2>/dev/null || echo '1.27.2')
+          COMPOSER_HASH=$(cat Dockerfiles/php/composer_hash.txt 2>/dev/null || echo 'ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792')
 
           [ ! -f Dockerfiles/php/php_version.txt ] && echo "::warning::PHP 版本文件缺失，默认使用 $PHP_VERSION"
           [ ! -f Dockerfiles/nginx/nginx_version.txt ] && echo "::warning::Nginx 版本文件缺失，默认使用 $NGINX_VERSION"
+          [ ! -f Dockerfiles/php/composer_hash.txt ] && echo "::warning::Composer 哈希文件缺失，使用默认值"
 
           echo "php_version=$PHP_VERSION" >> $GITHUB_OUTPUT
           echo "nginx_version=$NGINX_VERSION" >> $GITHUB_OUTPUT
+          echo "composer_hash=$COMPOSER_HASH" >> $GITHUB_OUTPUT
           echo "PHP_VERSION=$PHP_VERSION" >> $GITHUB_ENV
           echo "NGINX_VERSION=$NGINX_VERSION" >> $GITHUB_ENV
+          echo "COMPOSER_HASH=$COMPOSER_HASH" >> $GITHUB_ENV
           echo "::endgroup::"
 
       - name: 构建并推送 PHP 镜像
-        if: env.SKIP_BUILD_PUSH != 'true'
+        if: env.SKIP_BUILD_PUSH != 'true' && (contains(steps.check-changes.outputs.changed_components, 'php') || contains(steps.check-changes.outputs.changed_components, 'base'))
         run: |
           echo "::group::构建并推送 PHP 镜像"
-          # 确保使用本地构建的 base 镜像而不是尝试从远程拉取
+          # 使用提取的变量构建镜像
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg BASE_IMAGE=alpine:3.22 \
-            --build-arg COMPOSER_HASH=ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792 \
+            --build-arg COMPOSER_HASH=${{ steps.extract.outputs.composer_hash }} \
             -f ./Dockerfiles/php/Dockerfile \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:${{ steps.extract.outputs.php_version }} \
             --push . || {
@@ -65,10 +119,10 @@ jobs:
             }
           echo "::endgroup::"
       - name: 构建并推送 Nginx 镜像
-        if: env.SKIP_BUILD_PUSH != 'true'
+        if: env.SKIP_BUILD_PUSH != 'true' && (contains(steps.check-changes.outputs.changed_components, 'nginx') || contains(steps.check-changes.outputs.changed_components, 'base'))
         run: |
           echo "::group::构建并推送 Nginx 镜像"
-          # 确保使用本地构建的 base 镜像而不是尝试从远程拉取
+          # 使用提取的变量构建镜像
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg BASE_IMAGE=alpine:3.22 \
             --build-arg NGINX_VERSION=${{ steps.extract.outputs.nginx_version }} \
