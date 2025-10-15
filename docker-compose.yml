@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   # --- MariaDB 数据库服务 ---
-  db:
+  mariadb:
     image: mariadb:10.11.14 # 使用固定的稳定版本号
     container_name: wp_db
     restart: unless-stopped
@@ -32,7 +32,7 @@ services:
       - "6379"
 
   # --- PHP-FPM 服务 ---
-  wp:
+  php:
     # 使用官方PHP-FPM镜像作为后备选项
     build:
       context: .
@@ -50,10 +50,10 @@ services:
     expose:
       - "9000"
     depends_on:
-      - db
+      - mariadb
       - redis
     environment:
-      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_HOST: mariadb:3306
       WORDPRESS_DB_USER: ${MYSQL_USER}
       WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
       WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
@@ -79,7 +79,7 @@ services:
     ports:
       - "80:80"
     depends_on:
-      - wp
+      - php
 
 networks:
   app-network:
