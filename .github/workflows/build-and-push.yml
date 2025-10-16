@@ -210,7 +210,7 @@ jobs:
   create-release:
     # 第四阶段：创建或更新Release（在成功构建后运行）
     needs: [build-components, verify-config]
-    if: (github.event_name == 'workflow_dispatch' || needs.determine-components.outputs.components != '') && success()
+    if: success()
     runs-on: ubuntu-latest
     permissions:
       contents: write  # 需要写权限以创建发布
