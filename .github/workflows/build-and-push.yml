@@ -264,6 +264,11 @@ jobs:
           - ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:$PHP_VERSION
           - ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:$NGINX_VERSION
           
+          ## 部署文件说明
+          - **auto_deploy.sh**: 自动化部署脚本，一键完成WordPress项目部署
+          - **.env.example**: 环境变量配置模板，用于手动部署时创建环境文件
+          - **docker-compose.yml**: Docker Compose配置模板，用于手动部署时配置服务
+          
           ## 更新日志
           参考 [发布说明](release_notes.md) 获取详细信息。
           EOF
