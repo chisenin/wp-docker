@@ -1,4 +1,74 @@
-# WordPress Docker 项目发布说明
+# WordPress Docker 部署方案更新说明
+
+## 概述
+
+本仓库提供了基于Docker的WordPress部署方案，包含PHP和Nginx容器化配置，支持自动版本监测和手动触发构建。
+
+## 最新功能更新
+
+### v1.0.0 (最新)
+
+- **模块化构建系统**：支持单独构建PHP、Nginx、基础镜像或全部组件
+- **自动版本监测**：定期检查Alpine、PHP、Nginx和Composer的最新版本并自动更新
+- **手动触发功能**：通过GitHub Actions界面手动选择要构建的组件
+- **统一发布机制**：无论是自动版本更新还是手动触发，都会生成标准的GitHub Release
+- **Docker Compose验证**：构建前验证配置文件的有效性
+- **完整的依赖处理**：当基础镜像更新时，自动触发PHP和Nginx的重新构建
+
+## 版本兼容性
+
+| 组件 | 推荐版本 | 最低版本 |
+|------|---------|----------|
+| PHP  | 8.3.x   | 8.1.x    |
+| Nginx| 1.27.x  | 1.25.x   |
+| Alpine| 3.20.x  | 3.19.x   |
+| Composer| 2.7.x  | 2.5.x   |
+
+## 更新流程
+
+### 自动更新
+
+1. 工作流定时运行版本检查脚本
+2. 检测到组件更新时，自动构建并推送新镜像
+3. 生成包含更新详情的GitHub Release
+
+### 手动更新
+
+1. 在GitHub Actions页面手动触发构建工作流
+2. 选择需要构建的组件（base/php/nginx/all）
+3. 系统执行构建并推送选定组件
+4. 生成手动触发的GitHub Release
+
+## 镜像使用
+
+```bash
+# 使用最新的PHP镜像
+docker pull chisenin/wordpress-php:8.3.26
+
+# 使用最新的Nginx镜像
+docker pull chisenin/wordpress-nginx:1.27.2
+```
+
+## 常见问题
+
+### 构建失败
+
+- 检查Docker Hub凭据是否正确配置
+- 确认版本文件格式是否符合要求
+- 查看工作流日志获取详细错误信息
+
+### 镜像拉取问题
+
+- 确保Docker可以访问Docker Hub
+- 验证镜像名称和标签是否正确
+
+## 贡献指南
+
+欢迎提交Pull Request和Issue。提交代码前请确保所有测试通过，并遵循现有代码风格。
+
+## 许可证
+
+本项目采用MIT许可证。
 
 ## v1.0.0
 
