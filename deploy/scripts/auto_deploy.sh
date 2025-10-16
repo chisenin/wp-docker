@@ -324,9 +324,9 @@ download_wordpress() {
 start_services() {
     echo "启动 Docker 服务..."
     
-    # 拉取最新镜像
+    # 拉取最新镜像（静默模式）
     echo "拉取最新镜像..."
-    docker-compose pull
+    docker-compose pull --quiet
     
     # 启动服务
     echo "启动容器..."
