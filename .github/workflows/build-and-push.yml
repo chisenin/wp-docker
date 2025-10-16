@@ -287,6 +287,10 @@ jobs:
           generate_release_notes: false
           make_latest: true
           append_body: true
+          files: |
+            deploy/scripts/*
+            deploy/.env.example
+            deploy/docker-compose.yml
 
   verify-config:
     # 第三阶段：验证Docker Compose配置（独立运行，不依赖构建结果）
