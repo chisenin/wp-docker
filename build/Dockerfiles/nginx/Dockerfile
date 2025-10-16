@@ -42,4 +42,5 @@ COPY build/deploy_configs/nginx/conf.d /etc/nginx/conf.d
 # Logs and cache will be handled by Nginx automatically
 
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+# 使用shell形式，但明确指定使用bash执行，避免解析问题
+CMD ["bash", "-c", "nginx -g 'daemon off;' "]
