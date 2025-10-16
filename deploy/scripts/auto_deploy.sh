@@ -97,7 +97,7 @@ MYSQL_USER=wordpress
 MYSQL_PASSWORD=$db_user_password
 
 # WordPress 配置
-WORDPRESS_DB_HOST=db:3306
+WORDPRESS_DB_HOST=mariadb:3306
 WORDPRESS_DB_USER=wordpress
 WORDPRESS_DB_PASSWORD=$db_user_password
 WORDPRESS_DB_NAME=wordpress
@@ -127,7 +127,7 @@ generate_docker_compose_file() {
 version: '3.8'
 
 services:
-  db:
+  mariadb:
     image: mariadb:${DB_VERSION:-10.11.14}
     container_name: wp_db
     restart: unless-stopped
@@ -149,7 +149,7 @@ services:
     volumes: [redis_data:/data]
     expose: ["6379"]
 
-  wp:
+  php:
     image: chisenin/wordpress-php:${PHP_VERSION:-8.3.26}
     container_name: wp_fpm
     restart: unless-stopped
@@ -158,9 +158,9 @@ services:
       - ./html:/var/www/html
       - ./configs/php.ini:/usr/local/etc/php/php.ini:ro
     expose: ["9000"]
-    depends_on: [db, redis]
+    depends_on: [mariadb, redis]
     environment:
-      WORDPRESS_DB_HOST: ${WORDPRESS_DB_HOST:-db:3306}
+      WORDPRESS_DB_HOST: ${WORDPRESS_DB_HOST:-mariadb:3306}
       WORDPRESS_DB_USER: ${WORDPRESS_DB_USER:-wordpress}
       WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
       WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME:-wordpress}
@@ -179,7 +179,7 @@ services:
       - ./configs/nginx/conf.d:/etc/nginx/conf.d:ro
       - ./html:/var/www/html
     ports: ["80:80"]
-    depends_on: [wp]
+    depends_on: [php]
 
 networks:
   app-network:

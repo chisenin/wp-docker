@@ -1,6 +1,6 @@
 # 使用ARG参数支持动态传入base镜像地址，默认为alpine:3.22作为回退
 # 全局参数声明 - 必须在所有FROM指令之前
-ARG NGINX_VERSION=1.26.2
+ARG NGINX_VERSION=1.27.2
 ARG BASE_IMAGE=alpine:3.22
 
 # --- 基础阶段 ---
@@ -33,9 +33,9 @@ COPY --from=builder /usr/bin/vim /usr/bin/vim
 COPY --from=builder /usr/bin/curl /usr/bin/curl
 COPY --from=builder /usr/bin/wget /usr/bin/wget
 
-# 复制配置文件，使用正确的绝对路径
-COPY build/deploy_configs/nginx/nginx.conf /etc/nginx/nginx.conf
-COPY build/deploy_configs/nginx/conf.d /etc/nginx/conf.d
+# 复制配置文件，使用正确的相对路径
+COPY deploy_configs/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY deploy_configs/nginx/conf.d /etc/nginx/conf.d
 
 # Official Nginx image already has proper directory structure and permissions
 # No need to create or modify these directories

@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  db:
+  mariadb:
     image: mariadb:10.11.14
     container_name: wp_db
     restart: unless-stopped
@@ -23,8 +23,8 @@ services:
     volumes: [redis_data:/data]
     expose: ["6379"]
 
-  wp:
-    image: ${DOCKERHUB_USERNAME:-chisenin}/wordpress-php:${PHP_VERSION:-26}
+  php:
+    image: ${DOCKERHUB_USERNAME:-chisenin}/wordpress-php:${PHP_VERSION:-8.3.26}
     container_name: wp_fpm
     restart: unless-stopped
     networks: [app-network]
@@ -32,9 +32,9 @@ services:
       - ./html:/var/www/html
       - ./configs/php.ini:/usr/local/etc/php/php.ini:ro
     expose: ["9000"]
-    depends_on: [db, redis]
+    depends_on: [mariadb, redis]
     environment:
-      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_HOST: mariadb:3306
       WORDPRESS_DB_USER: ${MYSQL_USER}
       WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
       WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
@@ -51,7 +51,7 @@ services:
       - ../build/Dockerfiles/nginx/conf.d:/etc/nginx/conf.d:ro
       - ./html:/var/www/html
     ports: ["80:80"]
-    depends_on: [wp]
+    depends_on: [php]
 
 networks:
   app-network:
