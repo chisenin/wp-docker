@@ -86,6 +86,13 @@ wp-docker/
    chmod +x deploy/scripts/auto_deploy.sh
    ./deploy/scripts/auto_deploy.sh
    ```
+   
+   脚本特性：
+   - 自动创建专用部署目录，避免在系统目录直接部署
+   - 提供交互式目录名称设置（默认：wordpress-docker）
+   - 使用自定义构建的Nginx镜像代替官方镜像
+   - 自动生成安全的密码和WordPress密钥
+   - 一键完成所有配置、下载和启动流程
 
 3. **手动部署（可选）**
    ```bash

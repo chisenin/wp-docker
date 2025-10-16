@@ -27,9 +27,11 @@
    ```
 
 4. 脚本将自动执行以下操作：
-   - 在当前目录创建项目结构
+   - 创建专用部署目录，避免在系统目录直接部署
+   - 提供交互式目录名称设置（默认：wordpress-docker）
+   - 在部署目录内创建项目结构
    - 生成随机的.env配置文件（包含数据库密码和安全密钥）
-   - 生成docker-compose.yml文件
+   - 生成docker-compose.yml文件，使用自定义构建的Nginx镜像
    - 下载最新的WordPress源码并解压到html目录
    - 生成Nginx和PHP配置文件
    - 拉取Docker镜像并启动服务
