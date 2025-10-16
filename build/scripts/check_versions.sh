@@ -1,14 +1,14 @@
 #!/bin/bash
-#!/bin/bash
 set -e
 
 # 版本监测脚本 - 检查Alpine、PHP、Nginx和Composer的版本更新
 # 此脚本在GitHub Actions中运行，检测到更新时会更新版本文件并触发构建
 
-# 当前版本文件路径
-PHP_VERSION_FILE="Dockerfiles/php/php_version.txt"
-NGINX_VERSION_FILE="Dockerfiles/nginx/nginx_version.txt"
-COMPOSER_HASH_FILE="Dockerfiles/php/composer_hash.txt"
+# 当前版本文件路径 - 使用绝对路径确保在任何目录下都能正确运行
+PHP_VERSION_FILE="build/Dockerfiles/php/php_version.txt"
+NGINX_VERSION_FILE="build/Dockerfiles/nginx/nginx_version.txt"
+COMPOSER_HASH_FILE="build/Dockerfiles/php/composer_hash.txt"
+BASE_DOCKERFILE="build/Dockerfiles/base/Dockerfile"
 ALPINE_VERSION="3.22"  # 固定minor，监测patch
 
 # 配置日志和输出
@@ -36,7 +36,13 @@ check_alpine() {
         # 检查是否有新的patch版本
         if [[ "$LATEST_ALPINE" != "$ALPINE_VERSION" ]]; then
             log "Alpine更新检测到: $ALPINE_VERSION -> $LATEST_ALPINE"
-            echo "base" > "$UPDATED_COMPONENTS_FILE"  # 标记更新组件
+            echo "base" >> "$UPDATED_COMPONENTS_FILE"  # 使用追加方式，避免覆盖
+            
+            # 如果存在基础Dockerfile，尝试更新版本号
+            if [ -f "$BASE_DOCKERFILE" ]; then
+                log "更新基础Dockerfile中的Alpine版本"
+                sed -i "s/alpine:$ALPINE_VERSION/alpine:$LATEST_ALPINE/g" "$BASE_DOCKERFILE"
+            fi
         fi
     else
         log "无法获取Alpine版本信息，跳过版本检查"
@@ -125,6 +131,12 @@ check_composer() {
 main() {
     log "开始版本监测检查"
     
+    # 确保必要的目录存在
+    mkdir -p "$(dirname "$PHP_VERSION_FILE")"
+    mkdir -p "$(dirname "$NGINX_VERSION_FILE")"
+    mkdir -p "$(dirname "$COMPOSER_HASH_FILE")"
+    mkdir -p "$(dirname "$BASE_DOCKERFILE")"
+    
     # 清理旧的更新文件
     rm -f "$UPDATED_COMPONENTS_FILE"
     touch "$LOG_FILE"
@@ -137,21 +149,41 @@ main() {
     
     # 去重并清理更新组件文件
     if [ -f "$UPDATED_COMPONENTS_FILE" ]; then
-        sort -u "$UPDATED_COMPONENTS_FILE" -o "$UPDATED_COMPONENTS_FILE"
-        log "检测到更新，需要重建的组件: $(cat "$UPDATED_COMPONENTS_FILE" | tr '\n' ', ')"
-        # 输出结果供GitHub Actions使用
-        if [ -n "$GITHUB_OUTPUT" ]; then
-            echo "updated=true" >> "$GITHUB_OUTPUT"
-            echo "components=$(cat "$UPDATED_COMPONENTS_FILE" | tr '\n' ', ' | sed 's/,$//')" >> "$GITHUB_OUTPUT"
+        # 确保文件不为空
+        if [ -s "$UPDATED_COMPONENTS_FILE" ]; then
+            sort -u "$UPDATED_COMPONENTS_FILE" -o "$UPDATED_COMPONENTS_FILE"
+            log "检测到更新，需要重建的组件: $(cat "$UPDATED_COMPONENTS_FILE" | tr '\n' ', ' | sed 's/,$//')"
+            
+            # 处理基础镜像依赖关系：如果base被标记为更新，确保php和nginx也被包含
+            if grep -q "base" "$UPDATED_COMPONENTS_FILE"; then
+                log "基础镜像需要更新，将确保php和nginx也被包含在更新列表中"
+                echo "php" >> "$UPDATED_COMPONENTS_FILE"
+                echo "nginx" >> "$UPDATED_COMPONENTS_FILE"
+                sort -u "$UPDATED_COMPONENTS_FILE" -o "$UPDATED_COMPONENTS_FILE"
+            fi
+            
+            # 输出结果供GitHub Actions使用
+            if [ -n "$GITHUB_OUTPUT" ]; then
+                echo "updated=true" >> "$GITHUB_OUTPUT"
+                echo "components=$(cat "$UPDATED_COMPONENTS_FILE" | tr '\n' ', ' | sed 's/,$//')" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0  # 有更新
+        else
+            # 文件存在但为空
+            log "未检测到更新"
+            rm -f "$UPDATED_COMPONENTS_FILE"  # 删除空文件
         fi
-        exit 0  # 有更新
-    else
-        log "未检测到更新"
-        if [ -n "$GITHUB_OUTPUT" ]; then
-            echo "updated=false" >> "$GITHUB_OUTPUT"
-        fi
-        exit 1  # 无更新
     fi
+    
+    # 无更新情况
+    log "未检测到更新"
+    # 创建空文件，确保在工作流中能够读取到文件
+    touch "$UPDATED_COMPONENTS_FILE"
+    
+    if [ -n "$GITHUB_OUTPUT" ]; then
+        echo "updated=false" >> "$GITHUB_OUTPUT"
+    fi
+    exit 1  # 无更新
 }
 
 # 运行主函数
