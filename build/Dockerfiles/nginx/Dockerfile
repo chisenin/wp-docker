@@ -41,9 +41,9 @@ COPY --from=builder /usr/bin/vim /usr/bin/vim
 COPY --from=builder /usr/bin/curl /usr/bin/curl
 COPY --from=builder /usr/bin/wget /usr/bin/wget
 
-# 从当前目录复制Nginx配置文件（相对于Dockerfile的位置）
-COPY nginx.conf /etc/nginx/nginx.conf
-COPY conf.d /etc/nginx/conf.d
+# 从项目根目录复制Nginx配置文件（基于构建上下文）
+COPY build/Dockerfiles/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY build/Dockerfiles/nginx/conf.d /etc/nginx/conf.d
 
 # 确保Nginx日志目录存在
 RUN mkdir -p /var/log/nginx /var/cache/nginx
