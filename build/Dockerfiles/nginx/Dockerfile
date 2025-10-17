@@ -1,57 +1,59 @@
-# ä½¿ç”¨ARGå‚æ•°æ”¯æŒåŠ¨æ€ä¼ å…¥baseé•œåƒåœ°å€ï¼Œé»˜è®¤ä¸ºalpine:3.22ä½œä¸ºå›é€€
-# å…¨å±€å‚æ•°å£°æ˜ - å¿…é¡»åœ¨æ‰€æœ‰FROMæŒ‡ä»¤ä¹‹å‰
+# Ê¹ÓÃARG²ÎÊıÖ§³Ö¶¯Ì¬´«Èëbase¾µÏñµØÖ·£¬Ä¬ÈÏÎªalpine:3.22×÷Îª»ØÍË
+# È«¾Ö²ÎÊıÉùÃ÷ - ±ØĞëÔÚËùÓĞFROMÖ¸ÁîÖ®Ç°
 ARG NGINX_VERSION=1.27.2-alpine
 ARG BASE_IMAGE=alpine:3.22
 
-# --- æ„å»ºé˜¶æ®µ ---
-FROM nginx:${NGINX_VERSION} AS builder
+# --- ¹¹½¨½×¶Î ---
+FROM nginx:1.27.2-alpine AS builder
 
-# é…ç½®Alpineä»“åº“ï¼Œç¡®ä¿ä½¿ç”¨æ­£ç¡®çš„é•œåƒæº
+# ÅäÖÃAlpine²Ö¿â£¬È·±£Ê¹ÓÃÕıÈ·µÄ¾µÏñÔ´
 RUN echo 'https://dl-cdn.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories && \
     echo 'https://dl-cdn.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
 
-# æå–å®é™… Nginx ç‰ˆæœ¬ï¼ˆå†™å…¥ /tmp/nginx_versionï¼Œç”¨äºåŠ¨æ€æ ‡ç­¾ï¼‰
+# ÌáÈ¡Êµ¼Ê Nginx °æ±¾£¨Ğ´Èë /tmp/nginx_version£¬ÓÃÓÚ¶¯Ì¬±êÇ©£©
 RUN set -x && \
-    # è¾“å‡ºNginxç‰ˆæœ¬ä¿¡æ¯ï¼Œä¾¿äºè°ƒè¯•
+    # Êä³öNginx°æ±¾ĞÅÏ¢£¬±ãÓÚµ÷ÊÔ
     nginx -v 2>&1 && \
-    # æå–ç‰ˆæœ¬å·
+    # ÌáÈ¡°æ±¾ºÅ
     nginx -v 2>&1 | cut -d'/' -f2 | cut -d' ' -f1 > /tmp/nginx_version || echo "stable" > /tmp/nginx_version
 
-# ç¡®ä¿ä½¿ç”¨Alpineçš„åŒ…ç®¡ç†å·¥å…·å¹¶å®‰è£…å¿…è¦çš„è°ƒè¯•å·¥å…·
+# È·±£Ê¹ÓÃAlpineµÄ°ü¹ÜÀí¹¤¾ß²¢°²×°±ØÒªµÄµ÷ÊÔ¹¤¾ß
 RUN set -x && \
-    # æ›´æ–°åŒ…ç´¢å¼•å¹¶å®‰è£…å·¥å…·
+    # ¸üĞÂ°üË÷Òı²¢°²×°¹¤¾ß
     apk update --no-cache && \
     apk add --no-cache vim bash curl wget
 
-# ç¡®ä¿åˆ›å»ºå¿…è¦çš„ç›®å½•
+# È·±£´´½¨±ØÒªµÄÄ¿Â¼
 RUN mkdir -p /tmp/nginx-configs
 
-# --- æœ€ç»ˆè¿è¡Œé˜¶æ®µ ---
-FROM nginx:${NGINX_VERSION} AS final
+# --- ×îÖÕÔËĞĞ½×¶Î ---
+FROM nginx:1.27.2-alpine AS final
 
-# é…ç½®Alpineä»“åº“ï¼Œç¡®ä¿ä¸æ„å»ºé˜¶æ®µä¸€è‡´
+# ÅäÖÃAlpine²Ö¿â£¬È·±£Óë¹¹½¨½×¶ÎÒ»ÖÂ
 RUN echo 'https://dl-cdn.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories && \
     echo 'https://dl-cdn.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
 
-# ä» builder é˜¶æ®µå¤åˆ¶ç‰ˆæœ¬ä¿¡æ¯å’Œè°ƒè¯•å·¥å…·
+# ´Ó builder ½×¶Î¸´ÖÆ°æ±¾ĞÅÏ¢ºÍµ÷ÊÔ¹¤¾ß
 COPY --from=builder /tmp/nginx_version /tmp/nginx_version
 COPY --from=builder /bin/bash /bin/bash
 COPY --from=builder /usr/bin/vim /usr/bin/vim
 COPY --from=builder /usr/bin/curl /usr/bin/curl
 COPY --from=builder /usr/bin/wget /usr/bin/wget
 
-# ä»é¡¹ç›®æ ¹ç›®å½•å¤åˆ¶Nginxé…ç½®æ–‡ä»¶ï¼ˆåŸºäºæ„å»ºä¸Šä¸‹æ–‡ï¼‰
+# ´ÓÏîÄ¿¸ùÄ¿Â¼¸´ÖÆNginxÅäÖÃÎÄ¼ş£¨»ùÓÚ¹¹½¨ÉÏÏÂÎÄ£©
 COPY build/Dockerfiles/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY build/Dockerfiles/nginx/conf.d /etc/nginx/conf.d
 
-# ç¡®ä¿Nginxæ—¥å¿—ç›®å½•å­˜åœ¨
+# È·±£NginxÈÕÖ¾Ä¿Â¼´æÔÚ
 RUN mkdir -p /var/log/nginx /var/cache/nginx
 
-# ç¡®ä¿æ­£ç¡®çš„æƒé™è®¾ç½®
+# È·±£ÕıÈ·µÄÈ¨ÏŞÉèÖÃ
 RUN chown -R nginx:nginx /var/log/nginx /var/cache/nginx /etc/nginx
 
-# æš´éœ²ç«¯å£
+# ±©Â¶¶Ë¿Ú
 EXPOSE 80
 
-# ä½¿ç”¨execå½¢å¼ï¼Œç›´æ¥è¿è¡Œnginxï¼Œæ›´ç¬¦åˆAlpineé•œåƒçš„æ¨èç”¨æ³•ï¼Œç¡®ä¿æ­£ç¡®å¤„ç†ä¿¡å·
+# Ê¹ÓÃexecĞÎÊ½£¬Ö±½ÓÔËĞĞnginx£¬¸ü·ûºÏAlpine¾µÏñµÄÍÆ¼öÓÃ·¨£¬È·±£ÕıÈ·´¦ÀíĞÅºÅ
 CMD ["nginx", "-g", "daemon off;"]
+
+
