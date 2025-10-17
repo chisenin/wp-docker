@@ -8,8 +8,7 @@ FROM nginx:${NGINX_VERSION} AS builder
 
 # 配置Alpine仓库，确保使用正确的镜像源
 RUN echo 'https://dl-cdn.alpinelinux.org/alpine/v3.22/main' > /etc/apk/repositories && \
-    echo 'https://dl-cdn.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories && \
-    echo 'https://dl-cdn.alpinelinux.org/alpine/v3.22/testing' >> /etc/apk/repositories
+    echo 'https://dl-cdn.alpinelinux.org/alpine/v3.22/community' >> /etc/apk/repositories
 
 # 提取实际 Nginx 版本（写入 /tmp/nginx_version，用于动态标签）
 RUN set -x && \
