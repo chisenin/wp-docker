@@ -44,11 +44,15 @@ COPY --from=builder /usr/bin/wget /usr/bin/wget
 COPY build/Dockerfiles/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY build/Dockerfiles/nginx/conf.d /etc/nginx/conf.d
 
-# 确保Nginx日志目录存在
+# 确保Nginx日志目录存在（先以root用户创建目录）
+USER root
 RUN mkdir -p /var/log/nginx /var/cache/nginx
 
 # 确保正确的权限设置
 RUN chown -R nginx:nginx /var/log/nginx /var/cache/nginx /etc/nginx
+
+# 切换回nginx用户以提高安全性
+USER nginx
 
 # 暴露端口
 EXPOSE 80
