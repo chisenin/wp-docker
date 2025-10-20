@@ -3,13 +3,18 @@ version: '3.8'
 services:
   # --- MariaDB 数据库服务 ---
   mariadb:
-    image: mariadb:10.11.14 # 使用固定的稳定版本号
+    # 使用我们构建的MariaDB镜像，支持自动版本更新
+    build:
+      context: .
+      dockerfile: build/Dockerfiles/mariadb/Dockerfile
+    image: ${DOCKERHUB_USERNAME:-library}/wordpress-mariadb:${MARIADB_VERSION:-11.3.2}
     container_name: wp_db
     restart: unless-stopped
     networks:
       - app-network
     volumes:
       - db_data:/var/lib/mysql
+      - ./build/deploy_configs/mariadb/my.cnf:/etc/my.cnf:ro
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -17,27 +22,44 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     expose:
       - "3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # --- Redis 缓存服务 ---
   redis:
-    image: redis:8.2.2-alpine3.22 # 使用固定的基于Alpine 3.22的版本
+    # 使用我们构建的Redis镜像，支持自动版本更新
+    build:
+      context: .
+      dockerfile: build/Dockerfiles/redis/Dockerfile
+    image: ${DOCKERHUB_USERNAME:-library}/wordpress-redis:${REDIS_VERSION:-7.4.0}
     container_name: wp_redis
     restart: unless-stopped
     networks:
       - app-network
-    command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
+      - ./build/deploy_configs/redis/redis.conf:/etc/redis/redis.conf:ro
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_MAXMEMORY: ${REDIS_MAXMEMORY:-256mb}
     expose:
       - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # --- PHP-FPM 服务 ---
   php:
-    # 使用官方PHP-FPM镜像作为后备选项
+    # 使用我们构建的PHP镜像，支持自动版本更新
     build:
       context: .
       dockerfile: build/Dockerfiles/php/Dockerfile
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-8.3-fpm-alpine3.22}  # 为环境变量提供默认值
+    image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-8.3.26}
     container_name: wp_fpm
     restart: unless-stopped
     networks:
@@ -46,12 +68,14 @@ services:
       # 注意：宿主机 html 目录挂载到容器内 /var/www/html
       - ./html:/var/www/html
       # 使用deploy目录中的PHP配置
-      - ./deploy/configs/php.ini:/usr/local/etc/php/php.ini:ro
+      - ./build/deploy_configs/php/php.ini:/usr/local/etc/php/php.ini:ro
     expose:
       - "9000"
     depends_on:
-      - mariadb
-      - redis
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       WORDPRESS_DB_HOST: mariadb:3306
       WORDPRESS_DB_USER: ${MYSQL_USER}
@@ -59,32 +83,55 @@ services:
       WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
       WORDPRESS_REDIS_HOST: redis
       WORDPRESS_REDIS_PORT: 6379
+      PHP_OPCACHE_ENABLE: 1
+      PHP_MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-512M}
+    healthcheck:
+      test: ["CMD", "php-fpm", "-t"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
 
   # --- Nginx 服务 ---
   nginx:
-    # 使用官方Nginx镜像作为后备选项
+    # 使用我们构建的Nginx镜像，支持自动版本更新
     build:
       context: .
       dockerfile: build/Dockerfiles/nginx/Dockerfile
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-nginx:${NGINX_VERSION:-1.27-alpine}  # 为环境变量提供默认值
+    image: ${DOCKERHUB_USERNAME:-library}/wordpress-nginx:${NGINX_VERSION:-1.27.2}
     container_name: wp_nginx
     restart: unless-stopped
     networks:
       - app-network
     volumes:
-      # 挂载自定义配置文件，使用build目录中的配置
-      - ./build/Dockerfiles/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./build/Dockerfiles/nginx/conf.d:/etc/nginx/conf.d
+      # 挂载自定义配置文件
+      - ./build/deploy_configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./build/deploy_configs/nginx/conf.d:/etc/nginx/conf.d:ro
       - ./html:/var/www/html
+      - nginx_logs:/var/log/nginx
     ports:
       - "80:80"
+      - "443:443"
     depends_on:
-      - php
+      php:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
 
 networks:
   app-network:
     driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.18.0.0/16
 
 volumes:
   db_data:
+    driver: local
   redis_data:
+    driver: local
+  nginx_logs:
+    driver: local

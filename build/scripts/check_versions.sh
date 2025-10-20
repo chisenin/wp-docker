@@ -127,6 +127,58 @@ check_composer() {
     fi
 }
 
+# 函数：检查MariaDB最新版本（11.3系列）
+check_mariadb() {
+    log "检查MariaDB最新版本（11.3系列）"
+    
+    # 获取当前MariaDB版本
+    CURRENT_MARIADB=$(cat "$MARIADB_VERSION_FILE" 2>/dev/null || echo "0")
+    log "当前MariaDB版本: $CURRENT_MARIADB"
+    
+    # 使用Docker Hub API查询最新的MariaDB标签
+    LATEST_MARIADB=$(curl -s "https://hub.docker.com/v2/repositories/library/mariadb/tags/?page_size=10" 2>/dev/null | \
+                   jq -r '.results[] | select(.name | contains("11.3") and (.name | test("^11\\.3\\.\\d+$") )) | .name' 2>/dev/null | \
+                   sort -V | tail -1)
+    
+    if [ -n "$LATEST_MARIADB" ]; then
+        log "成功获取MariaDB最新版本: $LATEST_MARIADB"
+        # 比较版本
+        if [ "$LATEST_MARIADB" != "$CURRENT_MARIADB" ]; then
+            log "MariaDB更新检测到: $CURRENT_MARIADB -> $LATEST_MARIADB"
+            echo "$LATEST_MARIADB" > "$MARIADB_VERSION_FILE"
+            echo "mariadb" >> "$UPDATED_COMPONENTS_FILE"
+        fi
+    else
+        log "无法获取MariaDB版本信息，跳过版本检查"
+    fi
+}
+
+# 函数：检查Redis最新版本（7.4系列）
+check_redis() {
+    log "检查Redis最新版本（7.4系列）"
+    
+    # 获取当前Redis版本
+    CURRENT_REDIS=$(cat "$REDIS_VERSION_FILE" 2>/dev/null || echo "0")
+    log "当前Redis版本: $CURRENT_REDIS"
+    
+    # 使用Docker Hub API查询最新的Redis标签
+    LATEST_REDIS=$(curl -s "https://hub.docker.com/v2/repositories/library/redis/tags/?page_size=10" 2>/dev/null | \
+                 jq -r '.results[] | select(.name | contains("7.4") and (.name | test("^7\\.4\\.\\d+$") )) | .name' 2>/dev/null | \
+                 sort -V | tail -1)
+    
+    if [ -n "$LATEST_REDIS" ]; then
+        log "成功获取Redis最新版本: $LATEST_REDIS"
+        # 比较版本
+        if [ "$LATEST_REDIS" != "$CURRENT_REDIS" ]; then
+            log "Redis更新检测到: $CURRENT_REDIS -> $LATEST_REDIS"
+            echo "$LATEST_REDIS" > "$REDIS_VERSION_FILE"
+            echo "redis" >> "$UPDATED_COMPONENTS_FILE"
+        fi
+    else
+        log "无法获取Redis版本信息，跳过版本检查"
+    fi
+}
+
 # 主函数
 main() {
     log "开始版本监测检查"

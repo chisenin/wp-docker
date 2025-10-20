@@ -1,78 +1,151 @@
-# WordPress Docker 生产环境部署包
+# WordPress Docker 全栈解决方案 - 发布说明
 
-## 版本：v1.0.0
+## 项目概述
 
-## 包含文件
+本项目提供了一个完整的 WordPress 全栈 Docker 化解决方案，包含自定义构建的 MariaDB、Redis、PHP 和 Nginx 镜像，所有组件均针对 WordPress 进行了性能和安全优化。项目支持自动版本监控与构建，通过 GitHub Actions 实现完整的 CI/CD 自动化流程。
 
-- `.env.example`: 环境变量配置模板
-- `docker-compose.yml`: Docker Compose 配置文件（由脚本自动生成）
-- `scripts/auto_deploy.sh`: 自动部署脚本
+## 最新版本亮点
 
-## 部署说明
+- **全栈自定义镜像**：除了 PHP 和 Nginx，现在还包含自定义构建的 MariaDB 和 Redis 镜像
+- **自动版本监控与构建**：新增 `version-monitor-and-build.yml` 工作流，自动检测依赖版本更新并触发构建
+- **优化的数据库配置**：针对 WordPress 优化的 MariaDB 配置，包含连接池、查询缓存等性能调优
+- **高性能缓存方案**：内置 Redis 缓存，支持对象缓存和会话管理，大幅提升 WordPress 性能
+- **安全增强**：所有组件均采用最小权限原则，配置了必要的安全措施
+- **统一的配置管理**：所有配置集中存放在 `build/deploy_configs` 目录，便于维护
 
-本部署包仅包含生产环境所需的核心文件，使用非常简单：
+## 快速部署指南
 
-1. 将本部署包解压到目标服务器上的任意目录
+### 方法一：使用 GitHub Releases 资产（推荐）
 
-2. 确保服务器已安装以下依赖：
-   - Docker
-   - Docker Compose
-   - wget 或 curl（用于下载WordPress）
-
-3. 运行自动部署脚本：
+1. 访问项目的 GitHub Releases 页面
+2. 下载最新版本的 `.env` 和 `docker-compose.yml` 文件
+3. 将文件上传到目标服务器
+4. 执行以下命令：
    ```bash
-   cd /path/to/deployment
-   chmod +x scripts/auto_deploy.sh
-   ./scripts/auto_deploy.sh
+   # 创建必要的目录
+   mkdir -p html
+   
+   # 启动服务
+   docker-compose pull
+   docker-compose up -d
    ```
+5. 访问服务器 IP 地址完成 WordPress 安装
 
-4. 脚本将自动执行以下操作：
-   - 创建专用部署目录，避免在系统目录直接部署
-   - 提供交互式目录名称设置（默认：wordpress-docker）
-   - 在部署目录内创建项目结构
-   - 生成随机的.env配置文件（包含数据库密码和安全密钥）
-   - 生成docker-compose.yml文件，使用自定义构建的Nginx镜像
-   - 下载最新的WordPress源码并解压到html目录
-   - 生成Nginx和PHP配置文件
-   - 拉取Docker镜像并启动服务
-   - 设置正确的文件权限
+### 方法二：使用自动部署脚本
 
-5. 部署完成后，通过浏览器访问服务器IP地址完成WordPress安装
-
-## 重要提示
-
-- 所有敏感信息（数据库密码、WordPress安全密钥等）都保存在当前目录的.env文件中，请妥善备份
-- 首次访问时，请通过WordPress安装向导设置管理员账号和网站基本信息
-- 建议在生产环境中配置SSL证书以启用HTTPS访问
-- 定期备份html目录和数据库以防止数据丢失
-
-## 环境变量说明
-
-部署完成后，可根据需要修改.env文件中的以下关键配置：
-
-- `PHP_VERSION`: PHP容器版本
-- `NGINX_VERSION`: Nginx容器版本
-- `MYSQL_DATABASE`: WordPress数据库名称
-- `WORDPRESS_TABLE_PREFIX`: WordPress数据表前缀（如需修改请在安装前更改）
-
-## 服务组成
-
-- **Nginx**: 前端Web服务器
-- **PHP-FPM**: 处理PHP请求
-- **MariaDB**: 数据库服务
-- **Redis**: 缓存服务
-
-## 目录结构
-
-部署完成后将创建以下目录结构：
-
+```bash
+# 在目标服务器上执行
+git clone <仓库地址> wp-docker
+cd wp-docker
+chmod +x deploy/scripts/auto_deploy.sh
+./deploy/scripts/auto_deploy.sh
 ```
-├── .env              # 环境变量配置文件
-├── docker-compose.yml # Docker Compose配置
-├── html/             # WordPress源码和内容
-├── configs/          # 配置文件
-│   ├── nginx/        # Nginx配置
-│   └── php/          # PHP配置
-└── scripts/          # 脚本目录
-    └── auto_deploy.sh # 自动部署脚本
+
+脚本会自动完成：
+- 创建专用部署目录
+- 下载最新 WordPress
+- 生成安全的环境变量配置
+- 拉取最新镜像
+- 启动所有服务
+
+## 环境变量配置
+
+### 核心环境变量
+
+| 环境变量 | 说明 | 默认值 |
+|---------|------|-------|
+| `MARIADB_VERSION` | MariaDB 版本 | 11.3.2 |
+| `REDIS_VERSION` | Redis 版本 | 7.4.0 |
+| `PHP_VERSION` | PHP 版本 | 8.3.26 |
+| `NGINX_VERSION` | Nginx 版本 | 1.27.2 |
+| `MYSQL_ROOT_PASSWORD` | 数据库 root 密码 | 自动生成 |
+| `MYSQL_DATABASE` | WordPress 数据库名 | wordpress |
+| `MYSQL_USER` | WordPress 数据库用户 | wordpress |
+| `MYSQL_PASSWORD` | WordPress 数据库密码 | 自动生成 |
+| `REDIS_PASSWORD` | Redis 认证密码 | 可选 |
+| `REDIS_MAXMEMORY` | Redis 最大内存 | 256mb |
+
+### 性能调优环境变量
+
+| 环境变量 | 说明 | 默认值 |
+|---------|------|-------|
+| `PHP_MEMORY_LIMIT` | PHP 内存限制 | 512M |
+| `PHP_OPCACHE_ENABLE` | 启用 OPcache | 1 |
+| `PHP_UPLOAD_MAX_FILESIZE` | 文件上传限制 | 64M |
+
+## 安全最佳实践
+
+1. **生产环境必须**：
+   - 使用强密码，至少 16 位，包含大小写字母、数字和符号
+   - 不要使用默认的数据库用户名和密码
+   - 启用 Redis 密码认证
+   - 配置 HTTPS（需要在 Nginx 配置中添加 SSL 证书）
+
+2. **定期维护**：
+   - 定期备份数据库和 WordPress 文件
+   - 关注版本更新，及时应用安全补丁
+   - 定期清理不需要的插件和主题
+
+## 常见问题与故障排除
+
+### 服务无法启动
+
+1. 检查环境变量配置是否正确
+2. 查看容器日志：`docker-compose logs <服务名>`
+3. 确认端口未被占用：`netstat -tuln`
+
+### 数据库连接问题
+
+1. 确认 MariaDB 服务健康状态：`docker-compose ps mariadb`
+2. 检查数据库用户名和密码是否正确
+3. 验证网络配置，确认服务之间可以通信
+
+### Redis 缓存不工作
+
+1. 确保 WordPress 已安装 Redis Object Cache 插件
+2. 检查 Redis 服务状态：`docker-compose ps redis`
+3. 验证 PHP Redis 扩展已正确加载
+
+### 性能优化建议
+
+1. 为 Redis 分配更多内存（通过 `REDIS_MAXMEMORY` 环境变量）
+2. 考虑使用 Redis 作为会话存储
+3. 为静态资源配置 CDN
+4. 启用浏览器缓存（已在 Nginx 配置中默认启用）
+
+## 自动版本监控说明
+
+项目使用 `version-monitor-and-build.yml` 工作流自动监控所有组件的版本更新：
+
+- 默认每日检查一次新版本
+- 检测到新版本时自动触发构建和发布
+- 构建完成后自动生成新的 Release 资产
+- 支持通过 GitHub Actions 配置调整检查频率
+
+## 升级指南
+
+### 小版本升级
+
+```bash
+# 拉取最新镜像
+docker-compose pull
+
+# 重启服务
+docker-compose down
+docker-compose up -d
 ```
+
+### 大版本升级
+
+1. 备份数据库：`docker-compose exec mariadb mysqldump -u root -p wordpress > backup.sql`
+2. 备份 WordPress 文件：`cp -r html/* backup/`
+3. 更新环境变量中的版本号
+4. 拉取新镜像并重启服务
+
+## 支持与反馈
+
+如有问题或建议，请在 GitHub 仓库提交 Issues 或 Pull Requests。我们会定期维护和更新项目，确保其安全性和性能。
+
+## 许可证
+
+本项目采用 MIT 许可证 - 详情请查看 LICENSE 文件

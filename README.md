@@ -4,7 +4,7 @@
 
 **注意**: 详细指南文档已移至 `guides/` 目录，包含从介绍到部署的完整步骤说明。
 
-**主要特性**: 动态版本锁定、共享Base镜像、配置即代码、自动化部署脚本、版本监控、安全实践集成
+**主要特性**: 动态版本锁定、共享Base镜像、配置即代码、全栈自定义、自动版本监控与构建、自动化部署脚本、安全实践集成
 ---
 ## 项目结构
 
@@ -13,34 +13,37 @@ wp-docker/
 ├── .gitignore                     # Git 忽略规则
 ├── README.md                      # 项目说明文档
 ├── README.release                 # 发布说明文档
-├── release_notes.md               # 版本发布记录
 ├── .env                           # 环境变量配置（本地开发）
 ├── .env.example                   # 环境变量配置模板
 ├── docker-compose.yml             # 服务编排核心定义（开发环境）
 ├── guides/                        # 详细指南文档目录
 │   └── WordPress + Docker Compose 多阶段构建与生产环境最佳实践指南 (GitHub Actions 自动化版).md # 完整集成指南
 ├── .github/                       # GitHub Actions 工作流目录
-│   └── workflows/
-│       ├── build-and-push.yml     # 自动化构建工作流
-│       ├── version-monitor.yml    # 版本监控工作流
-│       └── verify-only.yml        # 配置验证工作流
+│   ├── build-and-push.yml         # 自动化构建工作流
+│   ├── version-monitor-and-build.yml # 版本监控与自动构建工作流
+│   ├── version-monitor.yml        # 版本监控工作流
+│   └── verify-only.yml            # 配置验证工作流
 ├── build/                         # 构建相关文件
-│   └── Dockerfiles/               # 各服务的 Dockerfile 目录
-│       ├── base/                  # 共享 Alpine Base 镜像
-│       │   └── Dockerfile         # Base 镜像构建定义
-│       ├── php/                   # PHP-FPM Dockerfile
-│       │   ├── Dockerfile         # PHP 镜像构建定义
-│       │   └── php_version.txt    # PHP 版本锁定文件
-│       └── nginx/                 # Nginx Dockerfile
-│           ├── Dockerfile         # Nginx 镜像构建定义
-│           ├── nginx.conf         # Nginx 主配置
-│           ├── conf.d/            # 站点配置目录
-│           │   └── default.conf   # 默认站点配置
-│           └── nginx_version.txt  # Nginx 版本锁定文件
+│   ├── Dockerfiles/               # 各服务的 Dockerfile 目录
+│   │   ├── base/                  # 共享 Alpine Base 镜像
+│   │   ├── php/                   # PHP-FPM Dockerfile
+│   │   ├── nginx/                 # Nginx Dockerfile
+│   │   ├── mariadb/               # MariaDB Dockerfile
+│   │   └── redis/                 # Redis Dockerfile
+│   ├── deploy_configs/            # 部署配置目录
+│   │   ├── php/                   # PHP 配置
+│   │   ├── nginx/                 # Nginx 配置
+│   │   ├── mariadb/               # MariaDB 配置
+│   │   └── redis/                 # Redis 配置
+│   └── scripts/                   # 构建脚本目录
+│       ├── check_versions.sh      # 版本检查脚本
+│       ├── mariadb/               # MariaDB 脚本
+│       ├── redis/                 # Redis 脚本
+│       └── test-build.sh          # 构建测试脚本
 ├── deploy/                        # 部署相关文件
+│   ├── .env.example               # 部署环境变量模板
 │   ├── docker-compose.yml         # 生产环境服务编排配置
 │   ├── configs/                   # 配置文件目录
-│   │   └── php.ini                # PHP 配置文件
 │   └── scripts/                   # 部署脚本目录
 │       └── auto_deploy.sh         # 自动化部署脚本
 └── html/                          # WordPress 源码目录
@@ -61,8 +64,10 @@ wp-docker/
 
 3. **配置环境**
    - 开发环境默认使用本地构建，可以直接修改 `docker-compose.yml` 文件中的配置
-   - Nginx 配置位于 `build/Dockerfiles/nginx/` 目录
-   - PHP 配置位于 `deploy/configs/php.ini` 文件
+   - Nginx 配置位于 `build/deploy_configs/nginx/` 目录
+   - PHP 配置位于 `build/deploy_configs/php/php.ini` 文件
+   - MariaDB 配置位于 `build/deploy_configs/mariadb/my.cnf` 文件
+   - Redis 配置位于 `build/deploy_configs/redis/redis.conf` 文件
 
 4. **启动服务**
    ```bash
@@ -147,35 +152,56 @@ wp-docker/
 - **定期备份**: 定期备份数据库和重要文件，特别是 `html` 目录下的内容和数据库
 - **版本管理**: 遵循文档中的最佳实践进行环境管理，使用精确版本号而非 `latest` 标签，版本信息存储在 `build/Dockerfiles/*/*_version.txt` 文件中
 - **配置管理**: 
-  - Nginx 配置位于 `build/Dockerfiles/nginx/` 目录
-  - PHP 配置位于 `deploy/configs/php.ini` 文件
+  - Nginx 配置位于 `build/deploy_configs/nginx/` 目录
+  - PHP 配置位于 `build/deploy_configs/php/php.ini` 文件
+  - MariaDB 配置位于 `build/deploy_configs/mariadb/my.cnf` 文件
+  - Redis 配置位于 `build/deploy_configs/redis/redis.conf` 文件
+  - 所有配置均支持通过环境变量进行动态调整
 - **故障排除**: 如遇到镜像拉取失败，检查 `.env` 文件中的版本号是否正确或查看 GitHub Actions 构建日志
 - **环境变量**: 所有环境变量配置可参考 `.env.example` 文件
 
 ## 已实现的高级功能
 
 1. **动态版本管理**
-   - 自动提取并使用精确的 PHP 和 Nginx 版本
+   - 自动提取并使用精确的 PHP、Nginx、MariaDB 和 Redis 版本
    - 避免使用不稳定的 `latest` 标签
+   - 版本信息存储在专用的版本锁定文件中
 
 2. **多阶段构建优化**
    - 使用共享 Alpine Base 镜像减少重复依赖下载
    - 分离构建和运行环境，减小最终镜像体积
+   - 所有组件（PHP、Nginx、MariaDB、Redis）均采用多阶段构建
 
-3. **安全增强**
+3. **全栈自定义配置**
+   - WordPress 专用的 MariaDB 数据库配置，优化查询性能
+   - 高性能 Redis 缓存配置，支持对象缓存和会话管理
+   - 针对 WordPress 优化的 PHP-FPM 配置，启用所有必要扩展
+   - 安全且高性能的 Nginx 配置，包含 Gzip、缓存控制和安全头
+
+4. **安全增强**
    - 部署脚本自动生成 WordPress 安全密钥
    - 生成不含特殊字符的随机用户名和强密码
    - 容器内文件权限严格控制
+   - 自动禁止访问敏感文件和目录
+   - 支持 Redis 密码认证
 
-4. **版本监控**
-   - `scripts/check_versions.sh` 脚本可检查依赖版本更新
-   - GitHub Actions 工作流 `version-monitor.yml` 每日自动检查新版本
-   - 支持多平台构建检测
+5. **自动版本监控与构建**
+   - GitHub Actions 工作流 `version-monitor-and-build.yml` 定期自动检查所有依赖版本更新
+   - 检测到新版本时自动触发构建和发布
+   - 支持自定义检查频率和通知配置
+   - 自动生成详细的版本更新日志
 
-5. **自动化部署**
+6. **自动化部署**
    - `scripts/auto_deploy.sh` 脚本集成完整部署流程
    - 支持开发环境和生产环境快速部署
    - 自动创建目录、下载 WordPress、生成配置、启动服务
+   - 集成服务健康检查，确保部署成功
+
+7. **性能优化**
+   - 数据库连接池和查询缓存配置
+   - Redis 内存优化和淘汰策略
+   - PHP OPcache 优化配置
+   - Nginx 静态文件缓存和压缩
 
 ## 未来优化方向
 

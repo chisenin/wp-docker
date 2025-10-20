@@ -1,0 +1,78 @@
+# Redis Dockerfile
+# 全局参数声明
+ARG BASE_IMAGE=alpine:3.22
+ARG REDIS_VERSION=7.4.0
+
+# 使用Alpine作为基础镜像
+FROM ${BASE_IMAGE} as builder
+
+# 标签信息
+LABEL maintainer="wp-docker project" \
+      description="Redis image for WordPress Docker environment" \
+      redis-version="${REDIS_VERSION}"
+
+# 安装构建依赖
+RUN apk update --no-cache && \
+    apk add --no-cache \
+    build-base \
+    linux-headers \
+    openssl-dev \
+    wget \
+    tar \
+    && rm -rf /var/cache/apk/*
+
+# 下载并编译Redis
+RUN mkdir -p /usr/src/redis && \
+    wget -O redis.tar.gz https://download.redis.io/releases/redis-${REDIS_VERSION}.tar.gz && \
+    tar -xzf redis.tar.gz -C /usr/src/redis --strip-components=1 && \
+    rm redis.tar.gz && \
+    cd /usr/src/redis && \
+    make && \
+    make PREFIX=/usr/local install
+
+# 最终阶段
+FROM ${BASE_IMAGE}
+
+# 复制编译好的Redis
+COPY --from=builder /usr/local/bin/redis-* /usr/local/bin/
+
+# 安装运行时依赖
+RUN apk update --no-cache && \
+    apk add --no-cache \
+    bash \
+    tzdata \
+    && rm -rf /var/cache/apk/*
+
+# 设置时区
+RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo "Asia/Shanghai" > /etc/timezone
+
+# 创建Redis用户和组
+RUN addgroup -g 1000 redis && \
+    adduser -u 1000 -G redis -s /bin/false -D redis
+
+# 创建必要的目录
+RUN mkdir -p /data /etc/redis && \
+    chown -R redis:redis /data /etc/redis
+
+# 配置文件
+COPY build/deploy_configs/redis/redis.conf /etc/redis/redis.conf
+
+# 初始化脚本
+COPY build/scripts/redis/entrypoint.sh /usr/local/bin/
+
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# 暴露端口
+EXPOSE 6379
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD redis-cli ping || exit 1
+
+# 设置工作目录
+WORKDIR /data
+
+# 入口点
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["redis-server", "/etc/redis/redis.conf"]

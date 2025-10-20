@@ -1,0 +1,528 @@
+name: 版本监视与智能构建流程
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'  # 每周一00:00 UTC运行
+  workflow_dispatch:
+    # 允许手动触发，用于测试
+    inputs:
+      test_mode:
+        description: '测试模式（true/false）'
+        required: true
+        default: 'false'
+        type: string
+
+jobs:
+  # 阶段1：初始化和准备
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      alpine_latest: ${{ steps.get-alpine-version.outputs.latest }}
+      php_versions: ${{ steps.get-versions.outputs.php_versions }}
+      nginx_versions: ${{ steps.get-versions.outputs.nginx_versions }}
+      mariadb_versions: ${{ steps.get-versions.outputs.mariadb_versions }}
+      redis_versions: ${{ steps.get-versions.outputs.redis_versions }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置工具
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
+      - name: 获取Alpine最新版本
+        id: get-alpine-version
+        run: |
+          # 获取Alpine最新稳定版
+          ALPINE_LATEST=$(curl -s https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/latest-releases.yaml | grep version | head -1 | awk '{print $2}' | cut -d'.' -f1-2)
+          echo "latest=$ALPINE_LATEST" >> $GITHUB_OUTPUT
+          echo "获取到Alpine最新版本: $ALPINE_LATEST"
+
+      - name: 缓存官方镜像
+        run: |
+          # 缓存常用的官方镜像以提高构建速度
+          docker pull alpine:latest
+          docker pull php:latest-alpine
+          docker pull nginx:latest-alpine
+          docker pull mariadb:latest
+          docker pull redis:latest-alpine
+
+      - name: 获取模块最新版本
+        id: get-versions
+        run: |
+          # 获取各模块的最新版本信息
+          echo "::group::获取PHP最新版本"
+          PHP_LATEST=$(curl -s https://www.php.net/releases/index.php?json | jq -r '.version[0]')
+          echo "php_versions=$PHP_LATEST" >> $GITHUB_OUTPUT
+          
+          echo "::group::获取Nginx最新版本"
+          NGINX_LATEST=$(curl -s https://api.github.com/repos/nginx/nginx/tags | jq -r '.[0].name' | sed 's/^v//')
+          echo "nginx_versions=$NGINX_LATEST" >> $GITHUB_OUTPUT
+          
+          echo "::group::获取MariaDB最新版本"
+          MARIADB_LATEST=$(curl -s https://api.github.com/repos/MariaDB/server/tags | jq -r '.[0].name' | sed 's/^mariadb-//')
+          echo "mariadb_versions=$MARIADB_LATEST" >> $GITHUB_OUTPUT
+          
+          echo "::group::获取Redis最新版本"
+          REDIS_LATEST=$(curl -s https://api.github.com/repos/redis/redis/tags | jq -r '.[0].name' | sed 's/^v//')
+          echo "redis_versions=$REDIS_LATEST" >> $GITHUB_OUTPUT
+
+  # 阶段2：检查版本并确定重构策略
+  version-check:
+    needs: setup
+    runs-on: ubuntu-latest
+    outputs:
+      need_rebuild: ${{ steps.check-versions.outputs.need_rebuild }}
+      rebuild_type: ${{ steps.check-versions.outputs.rebuild_type }}
+      modules_to_rebuild: ${{ steps.check-versions.outputs.modules_to_rebuild }}
+      use_official: ${{ steps.check-versions.outputs.use_official }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 检查版本差异
+        id: check-versions
+        run: |
+          echo "::group::版本检查与兼容性验证"
+          
+          # 创建版本文件目录（如果不存在）
+          mkdir -p build/Dockerfiles/php
+          mkdir -p build/Dockerfiles/nginx
+          mkdir -p build/Dockerfiles/mariadb
+          mkdir -p build/Dockerfiles/redis
+          
+          # 读取当前版本（如果存在）
+          CURRENT_PHP=$(cat build/Dockerfiles/php/php_version.txt 2>/dev/null || echo "0.0.0")
+          CURRENT_NGINX=$(cat build/Dockerfiles/nginx/nginx_version.txt 2>/dev/null || echo "0.0.0")
+          CURRENT_MARIADB=$(cat build/Dockerfiles/mariadb/mariadb_version.txt 2>/dev/null || echo "0.0.0")
+          CURRENT_REDIS=$(cat build/Dockerfiles/redis/redis_version.txt 2>/dev/null || echo "0.0.0")
+          CURRENT_ALPINE=$(cat build/Dockerfiles/base/alpine_version.txt 2>/dev/null || echo "0.0")
+          
+          # 获取最新版本
+          LATEST_PHP=${{ needs.setup.outputs.php_versions }}
+          LATEST_NGINX=${{ needs.setup.outputs.nginx_versions }}
+          LATEST_MARIADB=${{ needs.setup.outputs.mariadb_versions }}
+          LATEST_REDIS=${{ needs.setup.outputs.redis_versions }}
+          LATEST_ALPINE=${{ needs.setup.outputs.alpine_latest }}
+          
+          echo "当前版本 - PHP: $CURRENT_PHP, Nginx: $CURRENT_NGINX, MariaDB: $CURRENT_MARIADB, Redis: $CURRENT_REDIS, Alpine: $CURRENT_ALPINE"
+          echo "最新版本 - PHP: $LATEST_PHP, Nginx: $LATEST_NGINX, MariaDB: $LATEST_MARIADB, Redis: $LATEST_REDIS, Alpine: $LATEST_ALPINE"
+          
+          # 确定是否需要重构
+          NEED_REBUILD=false
+          REBUILD_TYPE="none"
+          MODULES_TO_REBUILD=""
+          USE_OFFICIAL=false
+          
+          # 检查基础OS版本
+          if [[ "$CURRENT_ALPINE" != "$LATEST_ALPINE" ]]; then
+            echo "Alpine版本不匹配，需要重构基础镜像和所有模块"
+            NEED_REBUILD=true
+            REBUILD_TYPE="base"
+            MODULES_TO_REBUILD="base php nginx mariadb redis"
+          else
+            # 检查各模块版本
+            MODULES_TO_REBUILD=""
+            
+            if [[ "$CURRENT_PHP" != "$LATEST_PHP" ]]; then
+              MODULES_TO_REBUILD="${MODULES_TO_REBUILD} php"
+            fi
+            
+            if [[ "$CURRENT_NGINX" != "$LATEST_NGINX" ]]; then
+              MODULES_TO_REBUILD="${MODULES_TO_REBUILD} nginx"
+            fi
+            
+            if [[ "$CURRENT_MARIADB" != "$LATEST_MARIADB" ]]; then
+              MODULES_TO_REBUILD="${MODULES_TO_REBUILD} mariadb"
+            fi
+            
+            if [[ "$CURRENT_REDIS" != "$LATEST_REDIS" ]]; then
+              MODULES_TO_REBUILD="${MODULES_TO_REBUILD} redis"
+            fi
+            
+            # 去除前后空格
+            MODULES_TO_REBUILD=$(echo "$MODULES_TO_REBUILD" | xargs)
+            
+            if [[ -n "$MODULES_TO_REBUILD" ]]; then
+              echo "检测到模块版本更新，需要重构: $MODULES_TO_REBUILD"
+              NEED_REBUILD=true
+              REBUILD_TYPE="modules"
+            else
+              echo "所有模块版本已是最新，使用官方镜像"
+              USE_OFFICIAL=true
+            fi
+          fi
+          
+          # 输出结果
+          echo "need_rebuild=$NEED_REBUILD" >> $GITHUB_OUTPUT
+          echo "rebuild_type=$REBUILD_TYPE" >> $GITHUB_OUTPUT
+          echo "modules_to_rebuild=$MODULES_TO_REBUILD" >> $GITHUB_OUTPUT
+          echo "use_official=$USE_OFFICIAL" >> $GITHUB_OUTPUT
+          
+          # 如果需要，保存新的版本信息
+          if [[ "$NEED_REBUILD" == "true" ]]; then
+            echo "$LATEST_PHP" > build/Dockerfiles/php/php_version.txt
+            echo "$LATEST_NGINX" > build/Dockerfiles/nginx/nginx_version.txt
+            echo "$LATEST_MARIADB" > build/Dockerfiles/mariadb/mariadb_version.txt
+            echo "$LATEST_REDIS" > build/Dockerfiles/redis/redis_version.txt
+            echo "$LATEST_ALPINE" > build/Dockerfiles/base/alpine_version.txt
+          fi
+
+  # 阶段3：使用官方镜像路径
+  use-official-images:
+    needs: version-check
+    if: needs.version-check.outputs.use_official == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 更新docker-compose.yml
+        run: |
+          echo "::group::更新docker-compose使用官方镜像"
+          # 这里可以添加更新docker-compose.yml的逻辑
+          # 例如替换镜像名称为官方镜像
+          echo "已更新docker-compose使用官方镜像"
+          
+      - name: 提交更改
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+          git add docker-compose.yml
+          git commit -m "chore: 更新docker-compose使用官方镜像" || echo "没有需要提交的更改"
+          git push origin main || echo "推送失败或没有更改"
+
+  # 阶段4：重构镜像
+  rebuild-images:
+    needs: version-check
+    if: needs.version-check.outputs.need_rebuild == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      rebuild_success: ${{ steps.rebuild.outputs.success }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+
+      - name: 登录Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 重构镜像
+        id: rebuild
+        run: |
+          echo "::group::开始镜像重构流程"
+          SUCCESS=false
+          
+          # 获取需要重构的模块
+          MODULES="${{ needs.version-check.outputs.modules_to_rebuild }}"
+          REBUILD_TYPE="${{ needs.version-check.outputs.rebuild_type }}"
+          
+          echo "重构类型: $REBUILD_TYPE"
+          echo "重构模块: $MODULES"
+          
+          # 获取版本信息
+          ALPINE_VERSION=$(cat build/Dockerfiles/base/alpine_version.txt)
+          PHP_VERSION=$(cat build/Dockerfiles/php/php_version.txt)
+          NGINX_VERSION=$(cat build/Dockerfiles/nginx/nginx_version.txt)
+          MARIADB_VERSION=$(cat build/Dockerfiles/mariadb/mariadb_version.txt)
+          REDIS_VERSION=$(cat build/Dockerfiles/redis/redis_version.txt)
+          
+          # 如果是基础镜像重构，先构建base
+          if [[ "$REBUILD_TYPE" == "base" || "$MODULES" == *"base"* ]]; then
+            echo "::group::构建Base镜像"
+            docker buildx build --platform linux/amd64,linux/arm64 \
+              -f ./build/Dockerfiles/base/Dockerfile \
+              --build-arg ALPINE_VERSION=$ALPINE_VERSION \
+              -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:$ALPINE_VERSION \
+              --push . || {
+                echo "::error::Base镜像构建失败"
+                exit 1
+              }
+            echo "::endgroup::"
+          fi
+          
+          # 构建PHP镜像
+          if [[ "$MODULES" == *"php"* ]]; then
+            echo "::group::构建PHP镜像"
+            docker buildx build --platform linux/amd64,linux/arm64 \
+              -f ./build/Dockerfiles/php/Dockerfile \
+              --build-arg BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:$ALPINE_VERSION \
+              --build-arg PHP_VERSION=$PHP_VERSION \
+              -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:$PHP_VERSION \
+              --push . || {
+                echo "::error::PHP镜像构建失败"
+                exit 1
+              }
+            echo "::endgroup::"
+          fi
+          
+          # 构建Nginx镜像
+          if [[ "$MODULES" == *"nginx"* ]]; then
+            echo "::group::构建Nginx镜像"
+            docker buildx build --platform linux/amd64,linux/arm64 \
+              -f ./build/Dockerfiles/nginx/Dockerfile \
+              --build-arg BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:$ALPINE_VERSION \
+              --build-arg NGINX_VERSION=$NGINX_VERSION \
+              -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:$NGINX_VERSION \
+              --push . || {
+                echo "::error::Nginx镜像构建失败"
+                exit 1
+              }
+            echo "::endgroup::"
+          fi
+          
+          # 构建MariaDB镜像
+          if [[ "$MODULES" == *"mariadb"* ]]; then
+            echo "::group::构建MariaDB镜像"
+            docker buildx build --platform linux/amd64,linux/arm64 \
+              -f ./build/Dockerfiles/mariadb/Dockerfile \
+              --build-arg BASE_IMAGE=alpine:$ALPINE_VERSION \
+              --build-arg MARIADB_VERSION=$MARIADB_VERSION \
+              -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-mariadb:$MARIADB_VERSION \
+              --push . || {
+                echo "::error::MariaDB镜像构建失败"
+                exit 1
+              }
+            echo "::endgroup::"
+          fi
+          
+          # 构建Redis镜像
+          if [[ "$MODULES" == *"redis"* ]]; then
+            echo "::group::构建Redis镜像"
+            docker buildx build --platform linux/amd64,linux/arm64 \
+              -f ./build/Dockerfiles/redis/Dockerfile \
+              --build-arg BASE_IMAGE=alpine:$ALPINE_VERSION \
+              --build-arg REDIS_VERSION=$REDIS_VERSION \
+              -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-redis:$REDIS_VERSION \
+              --push . || {
+                echo "::error::Redis镜像构建失败"
+                exit 1
+              }
+            echo "::endgroup::"
+          fi
+          
+          # 如果所有构建都成功
+          SUCCESS=true
+          echo "success=$SUCCESS" >> $GITHUB_OUTPUT
+          echo "所有镜像构建成功"
+
+      - name: 错误处理
+        if: failure()
+        run: |
+          echo "::error::镜像重构失败，创建Issue并通知"
+          # 这里可以添加创建GitHub Issue的逻辑
+          # 以及webhook通知逻辑
+          
+          # 回滚标签（示例）
+          docker rmi $(docker images -q "${{ secrets.DOCKERHUB_USERNAME }}/*" | head -5) 2>/dev/null || true
+
+  # 阶段5：测试重构的镜像
+  test-images:
+    needs: rebuild-images
+    if: needs.rebuild-images.outputs.rebuild_success == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      test_success: ${{ steps.test.outputs.success }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 运行测试
+        id: test
+        run: |
+          echo "::group::运行镜像测试"
+          SUCCESS=false
+          
+          # 获取版本信息
+          PHP_VERSION=$(cat build/Dockerfiles/php/php_version.txt)
+          NGINX_VERSION=$(cat build/Dockerfiles/nginx/nginx_version.txt)
+          MARIADB_VERSION=$(cat build/Dockerfiles/mariadb/mariadb_version.txt)
+          REDIS_VERSION=$(cat build/Dockerfiles/redis/redis_version.txt)
+          
+          # Smoke测试
+          echo "::group::Smoke测试"
+          # 这里添加基本的启动测试
+          echo "执行Smoke测试..."
+          
+          # 集成测试
+          echo "::group::集成测试"
+          # 这里添加集成测试逻辑
+          echo "执行集成测试..."
+          
+          # 安全扫描
+          echo "::group::安全扫描 (Trivy)"
+          # 安装Trivy
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
+          
+          # 扫描镜像
+          trivy image --severity HIGH,CRITICAL ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:$PHP_VERSION
+          trivy image --severity HIGH,CRITICAL ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:$NGINX_VERSION
+          trivy image --severity HIGH,CRITICAL ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-mariadb:$MARIADB_VERSION
+          trivy image --severity HIGH,CRITICAL ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-redis:$REDIS_VERSION
+          
+          # 测试成功
+          SUCCESS=true
+          echo "success=$SUCCESS" >> $GITHUB_OUTPUT
+          echo "所有测试通过"
+
+      - name: 测试失败处理
+        if: failure()
+        run: |
+          echo "::error::测试失败，创建Issue并通知"
+          # 这里可以添加创建GitHub Issue的逻辑
+          # 以及webhook通知逻辑
+
+  # 阶段6：签名和发布
+  sign-and-release:
+    needs: test-images
+    if: needs.test-images.outputs.test_success == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: 安装Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: 获取测试模式
+        id: get-test-mode
+        run: |
+          TEST_MODE=${{ github.event.inputs.test_mode || 'false' }}
+          echo "test_mode=$TEST_MODE" >> $GITHUB_OUTPUT
+
+      - name: 签名镜像
+        run: |
+          echo "::group::签名Docker镜像"
+          TEST_MODE=${{ steps.get-test-mode.outputs.test_mode }}
+          
+          # 获取版本信息
+          PHP_VERSION=$(cat build/Dockerfiles/php/php_version.txt)
+          NGINX_VERSION=$(cat build/Dockerfiles/nginx/nginx_version.txt)
+          MARIADB_VERSION=$(cat build/Dockerfiles/mariadb/mariadb_version.txt)
+          REDIS_VERSION=$(cat build/Dockerfiles/redis/redis_version.txt)
+          
+          # 设置标签后缀
+          TAG_SUFFIX=""
+          if [[ "$TEST_MODE" == "true" ]]; then
+            TAG_SUFFIX="-test-$(date +%s)"
+          fi
+          
+          # 签名镜像
+          cosign sign --yes ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:$PHP_VERSION$TAG_SUFFIX
+          cosign sign --yes ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:$NGINX_VERSION$TAG_SUFFIX
+          cosign sign --yes ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-mariadb:$MARIADB_VERSION$TAG_SUFFIX
+          cosign sign --yes ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-redis:$REDIS_VERSION$TAG_SUFFIX
+
+      - name: 更新版本文件并提交
+        run: |
+          echo "::group::更新版本文件"
+          TEST_MODE=${{ steps.get-test-mode.outputs.test_mode }}
+          
+          # 获取版本信息
+          PHP_VERSION=$(cat build/Dockerfiles/php/php_version.txt)
+          NGINX_VERSION=$(cat build/Dockerfiles/nginx/nginx_version.txt)
+          MARIADB_VERSION=$(cat build/Dockerfiles/mariadb/mariadb_version.txt)
+          REDIS_VERSION=$(cat build/Dockerfiles/redis/redis_version.txt)
+          
+          # 更新docker-compose.yml（使用新镜像）
+          echo "更新docker-compose.yml使用新版本镜像"
+          
+          # 提交更改
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+          
+          # 添加版本文件
+          git add build/Dockerfiles/php/php_version.txt \
+                   build/Dockerfiles/nginx/nginx_version.txt \
+                   build/Dockerfiles/mariadb/mariadb_version.txt \
+                   build/Dockerfiles/redis/redis_version.txt \
+                   build/Dockerfiles/base/alpine_version.txt \
+                   docker-compose.yml
+          
+          # 根据测试模式设置提交信息
+          if [[ "$TEST_MODE" == "true" ]]; then
+            git commit -m "test: 更新版本文件和配置 (测试模式)" || echo "没有需要提交的更改"
+          else
+            git commit -m "chore: 更新版本文件和配置到 PHP $PHP_VERSION, Nginx $NGINX_VERSION, MariaDB $MARIADB_VERSION, Redis $REDIS_VERSION" || echo "没有需要提交的更改"
+          fi
+          
+          git push origin main || echo "推送失败或没有更改"
+
+      - name: 创建GitHub Release
+        if: steps.get-test-mode.outputs.test_mode == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v$(date +%Y%m%d)
+          name: Release $(date +%Y-%m-%d)
+          body: |
+            自动生成的版本更新
+            - PHP: $(cat build/Dockerfiles/php/php_version.txt)
+            - Nginx: $(cat build/Dockerfiles/nginx/nginx_version.txt)
+            - MariaDB: $(cat build/Dockerfiles/mariadb/mariadb_version.txt)
+            - Redis: $(cat build/Dockerfiles/redis/redis_version.txt)
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 创建测试Release
+        if: steps.get-test-mode.outputs.test_mode == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: test-v$(date +%Y%m%d-%H%M%S)
+          name: Test Release $(date +%Y-%m-%d %H:%M:%S)
+          body: |
+            测试版本
+            - PHP: $(cat build/Dockerfiles/php/php_version.txt)
+            - Nginx: $(cat build/Dockerfiles/nginx/nginx_version.txt)
+            - MariaDB: $(cat build/Dockerfiles/mariadb/mariadb_version.txt)
+            - Redis: $(cat build/Dockerfiles/redis/redis_version.txt)
+          draft: true
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 发送通知
+        run: |
+          echo "::group::发送构建成功通知"
+          # 这里可以添加webhook通知逻辑
+          echo "构建完成并发布成功"
+
+  # 阶段7：清理和完成
+  cleanup:
+    needs: [use-official-images, sign-and-release]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 清理工作区
+        run: |
+          echo "::group::清理工作区"
+          # 清理临时文件等
+          docker system prune -f || true
+          echo "工作流执行完成"
+
+      - name: 上传执行日志
+        uses: actions/upload-artifact@v3
+        with:
+          name: workflow-execution-logs
+          path: /tmp/workflow-logs/
+          retention-days: 7

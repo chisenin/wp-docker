@@ -20,15 +20,17 @@ jobs:
       - name: Run version check script
         id: version_check
         run: |
-          chmod +x scripts/check_versions.sh
-          ./scripts/check_versions.sh || exit 0
+          chmod +x build/scripts/check_versions.sh
+          ./build/scripts/check_versions.sh || exit 0
 
       - name: Commit and push updates
         if: steps.version_check.outputs.updated == 'true'
         run: |
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
-          git add build/Dockerfiles/php/php_version.txt build/Dockerfiles/nginx/nginx_version.txt build/Dockerfiles/php/composer_hash.txt
+          git add build/Dockerfiles/php/php_version.txt build/Dockerfiles/nginx/nginx_version.txt \
+                  build/Dockerfiles/mariadb/mariadb_version.txt build/Dockerfiles/redis/redis_version.txt \
+                  build/Dockerfiles/php/composer_hash.txt build/Dockerfiles/base/alpine_version.txt
           git commit -m "chore(versions): update components - ${{ steps.version_check.outputs.components }}"
           git push origin main
 
