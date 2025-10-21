@@ -11,8 +11,8 @@ LABEL maintainer="wp-docker project" \
       description="MariaDB image for WordPress Docker environment" \
       mariadb-version="${MARIADB_VERSION}"
 
-# 设置版本信息环境变量（用于后续引用）
-ENV MARIADB_VERSION=${MARIADB_VERSION}
+# 直接设置版本号，避免变量未定义问题
+ENV MARIADB_VERSION=11.3.2
 
 # 安装运行时依赖
 RUN apk update --no-cache && \
@@ -26,9 +26,13 @@ RUN apk update --no-cache && \
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo "Asia/Shanghai" > /etc/timezone
 
-# 创建MySQL用户和组
-RUN addgroup -g 81 mysql && \
-    adduser -u 81 -G mysql -s /bin/false -D mysql
+# 检查并创建MySQL用户和组，避免重复创建错误
+RUN if ! grep -q "mysql" /etc/group; then \
+        addgroup -g 81 mysql; \
+    fi && \
+    if ! grep -q "mysql" /etc/passwd; then \
+        adduser -u 81 -G mysql -s /bin/false -D mysql; \
+    fi
 
 # 创建必要的目录
 RUN mkdir -p /var/lib/mysql /var/run/mysqld /var/log/mysql && \
