@@ -1,6 +1,8 @@
 name: 版本监视与智能构建流程
 
 on:
+  push:
+    branches: [ main ]
   schedule:
     - cron: '0 0 * * 1'  # 每周一00:00 UTC运行
   workflow_dispatch:
