@@ -47,10 +47,10 @@ jobs:
         run: |
           # 缓存常用的官方镜像以提高构建速度
           docker pull alpine:latest
-          docker pull php:latest-alpine
-          docker pull nginx:latest-alpine
+          docker pull php:alpine
+          docker pull nginx:alpine
           docker pull mariadb:latest
-          docker pull redis:latest-alpine
+          docker pull redis:alpine
 
       - name: 获取模块最新版本
         id: get-versions
