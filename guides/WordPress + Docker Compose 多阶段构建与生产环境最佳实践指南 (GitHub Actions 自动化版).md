@@ -21,8 +21,7 @@ wp-docker/
 ├── docker-compose.yml                # 开发环境服务编排
 ├── .env.example                      # 环境变量模板
 ├── .github/workflows/                # GitHub Actions 工作流
-│   ├── build-and-push.yml            # 构建与推送工作流
-│   ├── version-monitor-and-build.yml # 版本监控与自动构建工作流
+│   ├── version-monitor-and-build.yml # 版本监控与自动构建工作流（包含构建与推送功能）
 │   ├── version-monitor.yml           # 版本监控工作流
 │   └── verify-only.yml               # 配置验证工作流
 ├── build/                            # 构建相关文件

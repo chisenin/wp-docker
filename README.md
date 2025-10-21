@@ -19,8 +19,7 @@ wp-docker/
 ├── guides/                        # 详细指南文档目录
 │   └── WordPress + Docker Compose 多阶段构建与生产环境最佳实践指南 (GitHub Actions 自动化版).md # 完整集成指南
 ├── .github/                       # GitHub Actions 工作流目录
-│   ├── build-and-push.yml         # 自动化构建工作流
-│   ├── version-monitor-and-build.yml # 版本监控与自动构建工作流
+│   ├── version-monitor-and-build.yml # 版本监控与自动构建工作流（包含build-and-push.yml的所有功能）
 │   ├── version-monitor.yml        # 版本监控工作流
 │   └── verify-only.yml            # 配置验证工作流
 ├── build/                         # 构建相关文件
