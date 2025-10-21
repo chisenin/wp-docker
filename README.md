@@ -19,9 +19,7 @@ wp-docker/
 ├── guides/                        # 详细指南文档目录
 │   └── WordPress + Docker Compose 多阶段构建与生产环境最佳实践指南 (GitHub Actions 自动化版).md # 完整集成指南
 ├── .github/                       # GitHub Actions 工作流目录
-│   ├── version-monitor-and-build.yml # 版本监控与自动构建工作流（包含build-and-push.yml的所有功能）
-│   ├── version-monitor.yml        # 版本监控工作流
-│   └── verify-only.yml            # 配置验证工作流
+│   └── version-monitor-and-build.yml # 版本监控与自动构建工作流
 ├── build/                         # 构建相关文件
 │   ├── Dockerfiles/               # 各服务的 Dockerfile 目录
 │   │   ├── base/                  # 共享 Alpine Base 镜像
@@ -41,10 +39,9 @@ wp-docker/
 │       └── test-build.sh          # 构建测试脚本
 ├── deploy/                        # 部署相关文件
 │   ├── .env.example               # 部署环境变量模板
-│   ├── docker-compose.yml         # 生产环境服务编排配置
 │   ├── configs/                   # 配置文件目录
 │   └── scripts/                   # 部署脚本目录
-│       └── auto_deploy.sh         # 自动化部署脚本
+│       └── auto_deploy.sh         # 自动化部署脚本（增强版）
 └── html/                          # WordPress 源码目录
 ```
 
@@ -98,20 +95,13 @@ wp-docker/
    - 自动生成安全的密码和WordPress密钥
    - 一键完成所有配置、下载和启动流程
 
-3. **手动部署（可选）**
-   ```bash
-   # 在生产服务器上
-   git clone <仓库地址> wp-docker
-   cd wp-docker/deploy
-   # 下载 WordPress
-   wget https://wordpress.org/latest.tar.gz
-   tar -xvzf latest.tar.gz
-   mv wordpress/* html/
-   rm -rf wordpress latest.tar.gz
-   # 拉取并启动服务
-   docker-compose pull
-   docker-compose up -d
-   ```
+3. **增强的自动部署脚本**
+   - 自动检测操作系统环境（支持CentOS、Debian、Ubuntu、Alpine）
+   - 智能收集系统参数并优化Docker资源配置
+   - 自动设置数据库备份（每日3点备份，保留7天）
+   - 磁盘空间监控与自动清理功能（80%使用率触发）
+   - 自动安装缺失依赖并创建必要目录结构
+   - 优化的Nginx和PHP配置，支持高并发环境
 
 4. **完成 WordPress 安装**
     - 访问服务器 IP 地址完成安装向导
@@ -143,7 +133,7 @@ wp-docker/
      - 推送镜像到 Docker Hub
      - 更新版本锁定文件
      - 测试镜像可用性
-   - 生产部署：在目标服务器上运行 `./deploy/scripts/auto_deploy.sh` 或在 `deploy` 目录中执行 `docker-compose pull && docker-compose up -d`
+   - 生产部署：在目标服务器上运行 `./deploy/scripts/auto_deploy.sh` 自动化脚本
 
 ## 注意事项
 
@@ -190,11 +180,13 @@ wp-docker/
    - 支持自定义检查频率和通知配置
    - 自动生成详细的版本更新日志
 
-6. **自动化部署**
-   - `scripts/auto_deploy.sh` 脚本集成完整部署流程
-   - 支持开发环境和生产环境快速部署
-   - 自动创建目录、下载 WordPress、生成配置、启动服务
-   - 集成服务健康检查，确保部署成功
+6. **高级自动化部署**
+   - 增强版 `auto_deploy.sh` 脚本集成完整部署和维护流程
+   - 环境自适应：自动检测并适配不同Linux发行版
+   - 系统资源智能优化：根据主机配置自动调整Docker资源参数
+   - 自动数据库备份：每日定时备份，智能保留策略
+   - 磁盘空间管理：监控使用率并自动清理Docker资源
+   - 自动安装缺失依赖并创建必要目录结构
 
 7. **性能优化**
    - 数据库连接池和查询缓存配置
@@ -204,7 +196,7 @@ wp-docker/
 
 ## 未来优化方向
 
-- 添加数据库自动备份功能
 - 实现 HTTPS 证书自动获取和更新
-- 添加更多性能优化配置
 - 完善监控和告警体系
+- 添加负载均衡支持
+- 实现蓝绿部署功能
