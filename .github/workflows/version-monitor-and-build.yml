@@ -245,16 +245,27 @@ jobs:
           MARIADB_VERSION=$(cat build/Dockerfiles/mariadb/mariadb_version.txt)
           REDIS_VERSION=$(cat build/Dockerfiles/redis/redis_version.txt)
           
-          # 总是先构建Base镜像，因为它是其他镜像的基础
-          echo "::group::构建Base镜像"
-          docker buildx build --platform linux/amd64,linux/arm64 \
-            -f ./build/Dockerfiles/base/Dockerfile \
-            --build-arg ALPINE_VERSION=$ALPINE_VERSION \
-            -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:$ALPINE_VERSION \
-            --push . || {
-              echo "::error::Base镜像构建失败"
-              exit 1
-            }
+          # 先检测基础镜像是否存在，如果不存在则构建
+          echo "::group::检查并构建Base镜像"
+          BASE_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:$ALPINE_VERSION"
+          
+          # 尝试拉取镜像来检查是否存在
+          echo "检查基础镜像是否存在: $BASE_IMAGE_NAME"
+          if ! docker pull $BASE_IMAGE_NAME 2>/dev/null; then
+            echo "基础镜像不存在，开始构建..."
+            # 构建基础镜像
+            docker buildx build --platform linux/amd64,linux/arm64 \
+              -f ./build/Dockerfiles/base/Dockerfile \
+              --build-arg ALPINE_VERSION=$ALPINE_VERSION \
+              -t $BASE_IMAGE_NAME \
+              --push . || {
+                echo "::error::Base镜像构建失败"
+                exit 1
+              }
+            echo "基础镜像构建成功"
+          else
+            echo "基础镜像已存在，跳过构建"
+          fi
           echo "::endgroup::"
           
           # 构建PHP镜像
