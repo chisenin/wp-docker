@@ -509,7 +509,8 @@ jobs:
           draft: false
           prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 使用RELEASE_TOKEN（需要在仓库设置中添加此secret），如果不存在则回退到GITHUB_TOKEN
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: 创建测试Release
         if: steps.get-test-mode.outputs.test_mode == 'true'
@@ -526,7 +527,8 @@ jobs:
           draft: true
           prerelease: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 使用RELEASE_TOKEN（需要在仓库设置中添加此secret），如果不存在则回退到GITHUB_TOKEN
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: 发送通知
         run: |
