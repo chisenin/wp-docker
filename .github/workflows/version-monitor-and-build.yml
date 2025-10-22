@@ -412,6 +412,9 @@ jobs:
           echo "test_mode=$TEST_MODE" >> $GITHUB_OUTPUT
 
       - name: 签名镜像
+        env:
+          COSIGN_EXPERIMENTAL: 1
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "::group::签名Docker镜像"
           TEST_MODE=${{ steps.get-test-mode.outputs.test_mode }}
@@ -428,11 +431,24 @@ jobs:
             TAG_SUFFIX="-test-$(date +%s)"
           fi
           
-          # 签名镜像
-          cosign sign --yes ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:$PHP_VERSION$TAG_SUFFIX
-          cosign sign --yes ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:$NGINX_VERSION$TAG_SUFFIX
-          cosign sign --yes ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-mariadb:$MARIADB_VERSION$TAG_SUFFIX
-          cosign sign --yes ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-redis:$REDIS_VERSION$TAG_SUFFIX
+          # 使用GitHub Actions OIDC token进行签名，并添加重试机制
+          for image in php nginx mariadb redis; do
+            VERSION_VAR="${image^^}_VERSION"
+            VERSION="${!VERSION_VAR}"
+            echo "签名 $image 镜像，版本: $VERSION"
+            
+            # 尝试签名最多3次
+            for attempt in {1..3}; do
+              echo "尝试 $attempt: cosign sign ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-$image:$VERSION$TAG_SUFFIX"
+              if cosign sign --yes --allow-insecure-registry ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-$image:$VERSION$TAG_SUFFIX; then
+                echo "签名成功: wordpress-$image:$VERSION$TAG_SUFFIX"
+                break
+              else
+                echo "签名失败，5秒后重试..."
+                sleep 5
+              fi
+            done
+          done
 
       - name: 更新版本文件并提交
         run: |
