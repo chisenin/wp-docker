@@ -30,9 +30,13 @@ RUN apk add --no-cache \
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo "Asia/Shanghai" > /etc/timezone
 
-# 创建Redis用户和组
-RUN addgroup -g 1000 redis && \
-    adduser -u 1000 -G redis -s /bin/false -D redis
+# 检查并创建Redis用户和组，避免重复创建错误
+RUN if ! grep -q "redis" /etc/group; then \
+        addgroup -g 1000 redis; \
+    fi && \
+    if ! grep -q "redis" /etc/passwd; then \
+        adduser -u 1000 -G redis -s /bin/false -D redis; \
+    fi
 
 # 创建必要的目录
 RUN mkdir -p /data /etc/redis && \
