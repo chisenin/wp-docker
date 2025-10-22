@@ -245,19 +245,17 @@ jobs:
           MARIADB_VERSION=$(cat build/Dockerfiles/mariadb/mariadb_version.txt)
           REDIS_VERSION=$(cat build/Dockerfiles/redis/redis_version.txt)
           
-          # 如果是基础镜像重构，先构建base
-          if [[ "$REBUILD_TYPE" == "base" || "$MODULES" == *"base"* ]]; then
-            echo "::group::构建Base镜像"
-            docker buildx build --platform linux/amd64,linux/arm64 \
-              -f ./build/Dockerfiles/base/Dockerfile \
-              --build-arg ALPINE_VERSION=$ALPINE_VERSION \
-              -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:$ALPINE_VERSION \
-              --push . || {
-                echo "::error::Base镜像构建失败"
-                exit 1
-              }
-            echo "::endgroup::"
-          fi
+          # 总是先构建Base镜像，因为它是其他镜像的基础
+          echo "::group::构建Base镜像"
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -f ./build/Dockerfiles/base/Dockerfile \
+            --build-arg ALPINE_VERSION=$ALPINE_VERSION \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:$ALPINE_VERSION \
+            --push . || {
+              echo "::error::Base镜像构建失败"
+              exit 1
+            }
+          echo "::endgroup::"
           
           # 构建PHP镜像
           if [[ "$MODULES" == *"php"* ]]; then
