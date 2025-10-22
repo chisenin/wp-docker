@@ -4,41 +4,24 @@ ARG BASE_IMAGE=alpine:3.22
 ARG REDIS_VERSION=7.4.0
 
 # 使用Alpine作为基础镜像
-FROM ${BASE_IMAGE} as builder
+FROM ${BASE_IMAGE}
 
 # 标签信息
 LABEL maintainer="wp-docker project" \
       description="Redis image for WordPress Docker environment" \
-      redis-version="${REDIS_VERSION}"
+      redis-version="7.4.0"
 
-# 安装构建依赖
+# 直接设置版本号，避免变量未定义问题
+ENV REDIS_VERSION=7.4.0
+
+# 安装Redis预编译包
 RUN apk update --no-cache && \
     apk add --no-cache \
-    build-base \
-    linux-headers \
-    openssl-dev \
-    wget \
-    tar \
+    redis \
     && rm -rf /var/cache/apk/*
 
-# 下载并编译Redis
-RUN mkdir -p /usr/src/redis && \
-    wget -O redis.tar.gz https://download.redis.io/releases/redis-${REDIS_VERSION}.tar.gz && \
-    tar -xzf redis.tar.gz -C /usr/src/redis --strip-components=1 && \
-    rm redis.tar.gz && \
-    cd /usr/src/redis && \
-    make && \
-    make PREFIX=/usr/local install
-
-# 最终阶段
-FROM ${BASE_IMAGE}
-
-# 复制编译好的Redis
-COPY --from=builder /usr/local/bin/redis-* /usr/local/bin/
-
-# 安装运行时依赖
-RUN apk update --no-cache && \
-    apk add --no-cache \
+# 安装额外运行时依赖
+RUN apk add --no-cache \
     bash \
     tzdata \
     && rm -rf /var/cache/apk/*
