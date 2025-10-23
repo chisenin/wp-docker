@@ -494,20 +494,52 @@ jobs:
           
           git push origin main || echo "推送失败或没有更改"
 
+      - name: 设置日期变量
+        id: set_date
+        run: |
+          echo "TODAY=$(date +'%Y%m%d')" >> $GITHUB_ENV
+          echo "TODAY_FULL=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+          echo "TIMESTAMP=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+          echo "TIMESTAMP_FULL=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+          
+          # 读取版本信息
+          PHP_VERSION=$(cat build/Dockerfiles/php/php_version.txt)
+          NGINX_VERSION=$(cat build/Dockerfiles/nginx/nginx_version.txt)
+          MARIADB_VERSION=$(cat build/Dockerfiles/mariadb/mariadb_version.txt)
+          REDIS_VERSION=$(cat build/Dockerfiles/redis/redis_version.txt)
+          
+          # 设置版本信息到环境变量
+          echo "PHP_VERSION=$PHP_VERSION" >> $GITHUB_ENV
+          echo "NGINX_VERSION=$NGINX_VERSION" >> $GITHUB_ENV
+          echo "MARIADB_VERSION=$MARIADB_VERSION" >> $GITHUB_ENV
+          echo "REDIS_VERSION=$REDIS_VERSION" >> $GITHUB_ENV
+          
+          # 生成版本哈希（用于验证完整性）
+          VERSION_HASH=$(echo -n "$PHP_VERSION-$NGINX_VERSION-$MARIADB_VERSION-$REDIS_VERSION-$TIMESTAMP" | sha256sum | cut -d' ' -f1)
+          echo "VERSION_HASH=$VERSION_HASH" >> $GITHUB_ENV
+          
+          # 输出版本哈希到文件，用于后续验证
+          echo $VERSION_HASH > /tmp/version-hash.txt
+          echo "版本哈希已生成并保存: $VERSION_HASH"
+      
       - name: 创建GitHub Release
         if: steps.get-test-mode.outputs.test_mode == 'false'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v$(date +%Y%m%d)
-          name: Release $(date +%Y-%m-%d)
+          tag_name: v${{ env.TODAY }}
+          name: Release ${{ env.TODAY_FULL }}
           body: |
             自动生成的版本更新
-            - PHP: $(cat build/Dockerfiles/php/php_version.txt)
-            - Nginx: $(cat build/Dockerfiles/nginx/nginx_version.txt)
-            - MariaDB: $(cat build/Dockerfiles/mariadb/mariadb_version.txt)
-            - Redis: $(cat build/Dockerfiles/redis/redis_version.txt)
+            - PHP: ${{ env.PHP_VERSION }}
+            - Nginx: ${{ env.NGINX_VERSION }}
+            - MariaDB: ${{ env.MARIADB_VERSION }}
+            - Redis: ${{ env.REDIS_VERSION }}
+            
+            ## 版本哈希（用于验证完整性）
+            ${{ env.VERSION_HASH }}
           draft: false
           prerelease: false
+          files: /tmp/version-hash.txt
         env:
           # 使用RELEASE_TOKEN（需要在仓库设置中添加此secret），如果不存在则回退到GITHUB_TOKEN
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
@@ -516,16 +548,20 @@ jobs:
         if: steps.get-test-mode.outputs.test_mode == 'true'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: test-v$(date +%Y%m%d-%H%M%S)
-          name: Test Release $(date +%Y-%m-%d %H:%M:%S)
+          tag_name: test-v${{ env.TIMESTAMP }}
+          name: Test Release ${{ env.TIMESTAMP_FULL }}
           body: |
             测试版本
-            - PHP: $(cat build/Dockerfiles/php/php_version.txt)
-            - Nginx: $(cat build/Dockerfiles/nginx/nginx_version.txt)
-            - MariaDB: $(cat build/Dockerfiles/mariadb/mariadb_version.txt)
-            - Redis: $(cat build/Dockerfiles/redis/redis_version.txt)
+            - PHP: ${{ env.PHP_VERSION }}
+            - Nginx: ${{ env.NGINX_VERSION }}
+            - MariaDB: ${{ env.MARIADB_VERSION }}
+            - Redis: ${{ env.REDIS_VERSION }}
+            
+            ## 版本哈希（用于验证完整性）
+            ${{ env.VERSION_HASH }}
           draft: true
           prerelease: true
+          files: /tmp/version-hash.txt
         env:
           # 使用RELEASE_TOKEN（需要在仓库设置中添加此secret），如果不存在则回退到GITHUB_TOKEN
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
