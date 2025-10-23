@@ -581,7 +581,11 @@ jobs:
             ${{ env.VERSION_HASH }}
           draft: false
           prerelease: false
-          files: /tmp/version-hash.txt
+          files: |
+            /tmp/version-hash.txt
+            deploy/scripts/auto_deploy.sh
+            .env.example
+            docker-compose.yml
         env:
           # 使用RELEASE_TOKEN（需要在仓库设置中添加此secret），如果不存在则回退到GITHUB_TOKEN
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
@@ -603,7 +607,11 @@ jobs:
             ${{ env.VERSION_HASH }}
           draft: true
           prerelease: true
-          files: /tmp/version-hash.txt
+          files: |
+            /tmp/version-hash.txt
+            deploy/scripts/auto_deploy.sh
+            .env.example
+            docker-compose.yml
         env:
           # 使用RELEASE_TOKEN（需要在仓库设置中添加此secret），如果不存在则回退到GITHUB_TOKEN
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
