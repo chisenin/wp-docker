@@ -420,86 +420,19 @@ jobs:
           TEST_MODE=${{ github.event.inputs.test_mode || 'false' }}
           echo "test_mode=$TEST_MODE" >> $GITHUB_OUTPUT
 
-      - name: 签名镜像（可选）
-        id: sign_images
-        env:
-          # 使用GitHub Actions的OIDC提供者替代Fulcio的交互式认证
-          COSIGN_REPOSITORY: ${{ secrets.DOCKERHUB_USERNAME }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "::group::签名Docker镜像（优化版本）"
-          TEST_MODE=${{ steps.get-test-mode.outputs.test_mode }}
-          
-          # 获取版本信息
-          PHP_VERSION=$(cat build/Dockerfiles/php/php_version.txt)
-          NGINX_VERSION=$(cat build/Dockerfiles/nginx/nginx_version.txt)
-          MARIADB_VERSION=$(cat build/Dockerfiles/mariadb/mariadb_version.txt)
-          REDIS_VERSION=$(cat build/Dockerfiles/redis/redis_version.txt)
-          
-          # 设置标签后缀
-          TAG_SUFFIX=""
-          if [[ "$TEST_MODE" == "true" ]]; then
-            TAG_SUFFIX="-test-$(date +%s)"
-          fi
-          
-          # 创建一个文件记录签名状态
-          echo "签名状态日志" > /tmp/sign-status.log
-          
-          # 优化的签名函数，包含超时控制和改进的错误处理
-          sign_image() {
-            local image=$1
-            local version=$2
-            local tag_suffix=$3
-            local max_attempts=2  # 减少重试次数以加快失败时的处理
-            local timeout=60      # 设置60秒超时
-            local success=false
-            
-            for attempt in {1..$max_attempts}; do
-              echo "[$(date '+%H:%M:%S')] 尝试 $attempt/$max_attempts: 签名 $image 镜像，版本: $version"
-              
-              # 使用超时控制，避免单个签名操作耗时过长
-              if timeout $timeout cosign sign --yes --allow-insecure-registry \
-                --recursive=false \
-                ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-$image:$version$tag_suffix 2>&1; then
-                
-                echo "[$(date '+%H:%M:%S')] 签名成功: wordpress-$image:$version$tag_suffix"
-                echo "SUCCESS: $image:$version$tag_suffix" >> /tmp/sign-status.log
-                success=true
-                break
-              else
-                local exit_code=$?
-                if [ $exit_code -eq 124 ]; then
-                  echo "[$(date '+%H:%M:%S')] 签名超时（${timeout}秒），跳过此镜像..."
-                else
-                  echo "[$(date '+%H:%M:%S')] 签名失败，退出码: $exit_code"
-                fi
-                echo "FAILED: $image:$version$tag_suffix" >> /tmp/sign-status.log
-                
-                # 指数退避策略，但最大等待时间不超过10秒
-                local wait_time=$((2 * attempt))
-                wait_time=$((wait_time > 10 ? 10 : wait_time))
-                echo "等待 $wait_time 秒后重试..."
-                sleep $wait_time
-              fi
-            done
-            
-            return $([ "$success" = true ] && echo 0 || echo 1)
-          }
-          
-          # 并行签名镜像（可选）- 这里改为串行以减少资源竞争
-          sign_image php "$PHP_VERSION" "$TAG_SUFFIX"
-          sign_image nginx "$NGINX_VERSION" "$TAG_SUFFIX"
-          sign_image mariadb "$MARIADB_VERSION" "$TAG_SUFFIX"
-          sign_image redis "$REDIS_VERSION" "$TAG_SUFFIX"
-          
-          # 显示签名摘要
-          echo "::endgroup::"
-          echo "签名过程完成，详细状态请查看日志文件"
-          cat /tmp/sign-status.log
-          
-          # 即使签名失败也继续流程（非阻断式）
-          echo "sign_completed=true" >> $GITHUB_OUTPUT
-          echo "签名阶段完成，继续后续流程（签名失败不会阻断构建）"
+      # 注释掉签名镜像环节，因为所有签名都持续失败且不影响核心功能
+      # 如需重新启用，请删除以下注释符号
+      # - name: 签名镜像
+      #   id: sign_images
+      #   env:
+      #     COSIGN_REPOSITORY: ${{ secrets.DOCKERHUB_USERNAME }}
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   run: |
+      #     echo "::group::签名Docker镜像"
+      #     # 签名镜像逻辑（已禁用，因为持续失败）
+      #     echo "签名功能暂未启用"
+      #     echo "::endgroup::"
+      #     echo "sign_completed=true" >> $GITHUB_OUTPUT
 
       - name: 更新版本文件并提交
         run: |
