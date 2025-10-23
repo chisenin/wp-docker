@@ -550,7 +550,7 @@ jobs:
           echo "工作流执行完成"
 
       - name: 上传执行日志
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: workflow-execution-logs
           path: /tmp/workflow-logs/
