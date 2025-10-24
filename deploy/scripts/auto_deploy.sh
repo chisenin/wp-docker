@@ -18,11 +18,11 @@ DEPLOY_DIR=""
 BACKUP_DIR=""
 BACKUP_RETENTION_DAYS=7
 
-# 彩色输出函数
-print_green() { echo -e "\033[0;32m$1\033[0m"; }
-print_yellow() { echo -e "\033[1;33m$1\033[0m"; }
-print_red() { echo -e "\033[0;31m$1\033[0m"; }
-print_blue() { echo -e "\033[0;34m$1\033[0m"; }
+# 输出函数（简化版本，兼容Windows环境）
+print_green() { echo "$1"; }
+print_yellow() { echo "$1"; }
+print_red() { echo "$1"; }
+print_blue() { echo "$1"; }
 
 # 错误处理函数
 handle_error() {
