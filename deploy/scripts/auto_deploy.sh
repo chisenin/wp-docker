@@ -168,10 +168,18 @@ determine_deployment_directory() {
         DEPLOY_DIR="/opt/wp-docker"
     fi
     
-    # 创建备份目录
+    # 创建必要的目录结构
     BACKUP_DIR="$DEPLOY_DIR/backups"
+    SCRIPTS_DIR="$DEPLOY_DIR/scripts"
+    LOGS_DIR="$DEPLOY_DIR/logs"
+    
     mkdir -p "$BACKUP_DIR" || handle_error "无法创建备份目录"
+    mkdir -p "$SCRIPTS_DIR" || handle_error "无法创建脚本目录"
+    mkdir -p "$LOGS_DIR" || handle_error "无法创建日志目录"
+    
     print_green "备份目录: $BACKUP_DIR"
+    print_green "脚本目录: $SCRIPTS_DIR"
+    print_green "日志目录: $LOGS_DIR"
     
     # 切换到部署目录
     cd "$DEPLOY_DIR" || handle_error "无法切换到部署目录"
