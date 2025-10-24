@@ -192,14 +192,16 @@ generate_password() {
     tr -dc 'A-Za-z0-9!@#$%^&*()_+-=' < /dev/urandom | head -c "$length" || echo "default_password_change_me"
 }
 
-# 生成 WordPress 安全密钥（格式化为Python-dotenv兼容）
+# 生成 WordPress 安全密钥（格式化为环境变量格式）
 generate_wordpress_keys() {
     print_blue "生成 WordPress 安全密钥..."
     local keys_url="https://api.wordpress.org/secret-key/1.1/salt/"
-    # 获取密钥并移除单引号，替换空格为连字符，确保Python-dotenv兼容
+    # 获取密钥并转换为环境变量格式
     local keys=$(curl -s "$keys_url" || wget -qO- "$keys_url" || echo "# 安全密钥生成失败，请手动替换")
-    # 移除单引号并处理格式，确保Python-dotenv兼容
-    keys=$(echo "$keys" | sed "s/'//g" | sed "s/ /-/g")
+    # 将PHP define格式转换为环境变量格式
+    keys=$(echo "$keys" | \
+        sed "s/define('\([^']*\)', '\([^']*\)');/WORDPRESS_\1=\2/" | \
+        sed "s/define(\"\([^\"]*\)", \"\([^\"]*\)\");/WORDPRESS_\1=\2/")
     echo "$keys"
 }
 
@@ -638,7 +640,8 @@ BACKUP_DIR="$DEPLOY_DIR/backups"
 
 # 从 .env 文件加载环境变量
 if [ -f "$DEPLOY_DIR/.env" ]; then
-    export $(grep -v '^#' "$DEPLOY_DIR/.env" | xargs)
+    # 只导出有效的环境变量，忽略注释和空行
+    export $(grep -v '^#' "$DEPLOY_DIR/.env" | sed 's/[[:space:]]*#.*$//' | grep -v '^$' | xargs)
 fi
 
 # 设置默认值
