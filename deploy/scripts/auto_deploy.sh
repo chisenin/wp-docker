@@ -192,11 +192,14 @@ generate_password() {
     tr -dc 'A-Za-z0-9!@#$%^&*()_+-=' < /dev/urandom | head -c "$length" || echo "default_password_change_me"
 }
 
-# 生成 WordPress 安全密钥
+# 生成 WordPress 安全密钥（格式化为Python-dotenv兼容）
 generate_wordpress_keys() {
     print_blue "生成 WordPress 安全密钥..."
     local keys_url="https://api.wordpress.org/secret-key/1.1/salt/"
+    # 获取密钥并移除单引号，替换空格为连字符，确保Python-dotenv兼容
     local keys=$(curl -s "$keys_url" || wget -qO- "$keys_url" || echo "# 安全密钥生成失败，请手动替换")
+    # 移除单引号并处理格式，确保Python-dotenv兼容
+    keys=$(echo "$keys" | sed "s/'//g" | sed "s/ /-/g")
     echo "$keys"
 }
 
@@ -593,9 +596,12 @@ deploy_wordpress_stack() {
         print_green "✓ WordPress 配置文件已存在，跳过下载"
     fi
     
-    # 拉取最新镜像
-    print_blue "拉取最新镜像..."
-    docker-compose pull
+    # 构建镜像（优先）
+    print_blue "构建Docker镜像..."
+    docker-compose build
+    
+    # 可选：如果需要从Docker Hub拉取，可以在这里添加条件拉取逻辑
+    # 但默认情况下使用本地构建的镜像
     
     # 启动服务
     print_blue "启动 Docker 服务..."
