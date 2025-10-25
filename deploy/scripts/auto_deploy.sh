@@ -200,8 +200,9 @@ generate_wordpress_keys() {
     keys+="WORDPRESS_NONCE_KEY=\"$(generate_password 64)\"\n"
     keys+="WORDPRESS_AUTH_SALT=\"$(generate_password 64)\"\n"
     keys+="WORDPRESS_SECURE_AUTH_SALT=\"$(generate_password 64)\"\n"
-    keys+="WORDPRESS_LOGGED_IN_SALT=\"$(generate_password 64)\"\n"
-    keys+="WORDPRESS_NONCE_SALT=\"$(generate_password 64)\""
+    keys=$(echo "$keys" | \
+        sed "s/define('\([^']*\)', '\([^']*\)');/WORDPRESS_\1=\2/" | \
+        sed 's/define("\([^"]*\)", "\([^"]*\)");/WORDPRESS_\1=\2/')
     echo "$keys"
 }
 
