@@ -58,7 +58,7 @@ detect_host_environment() {
         OS_TYPE="alpine"
         OS_VERSION="$(cat /etc/alpine-release)"
     else
-        handle_error "涓嶆敮鎸佺殑鎿嶄綔绯荤粺绫诲瀷"
+        handle_error "不支持的操作系统类型"
     fi
     
     log_message "鎿嶄綔绯荤粺: $OS_TYPE $OS_VERSION"
