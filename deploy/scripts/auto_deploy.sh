@@ -52,15 +52,21 @@ load_env_file() {
                 export "$key"="$value"
             fi
         done < .env
-        CPU_LIMIT="${CPU_LIMIT:-2}"
-        MEMORY_LIMIT="${MEMORY_LIMIT:-2048m}"
-        MARIADB_CPU_LIMIT="${MARIADB_CPU_LIMIT:-0.5}"
-        MARIADB_MEMORY_LIMIT="${MARIADB_MEMORY_LIMIT:-512m}"
-        NGINX_CPU_LIMIT="${NGINX_CPU_LIMIT:-1}"
-        NGINX_MEMORY_LIMIT="${NGINX_MEMORY_LIMIT:-256m}"
     else
-        log_message "Warning: .env file does not exist"
+        log_message "Warning: .env file does not exist. Using default values and creating .env from example..."
+        if [ -f ".env.example" ]; then
+            cp .env.example .env || log_message "Warning: Failed to copy .env.example"
+        else
+            log_message "Warning: .env.example file also does not exist."
+        fi
     fi
+    # 确保变量不为空字符串且使用默认值
+    CPU_LIMIT="${CPU_LIMIT:-2}"
+    MEMORY_LIMIT="${MEMORY_LIMIT:-2048m}"
+    MARIADB_CPU_LIMIT="${MARIADB_CPU_LIMIT:-0.5}"
+    MARIADB_MEMORY_LIMIT="${MARIADB_MEMORY_LIMIT:-512m}"
+    NGINX_CPU_LIMIT="${NGINX_CPU_LIMIT:-1}"
+    NGINX_MEMORY_LIMIT="${NGINX_MEMORY_LIMIT:-256m}"
 }
 
 detect_host_environment() {
@@ -103,8 +109,11 @@ environment_preparation() {
 
 check_disk_space() {
     log_message "[Stage 3] Checking disk space..."
+    # 避免使用bc命令，改用整数比较
     AVAILABLE_DISK=$(df -h "$DEPLOY_DIR" | tail -1 | awk '{print $4}' | sed 's/G//')
-    if (( $(echo "$AVAILABLE_DISK < 10" | bc -l) )); then
+    # 提取整数部分进行比较
+    DISK_INT=$(echo "$AVAILABLE_DISK" | cut -d. -f1)
+    if [ "$DISK_INT" -lt 10 ]; then
         handle_error "Insufficient disk space: $AVAILABLE_DISK GB (required: 10 GB)"
     fi
     log_message "Available disk space: ${AVAILABLE_DISK}GB"
@@ -272,8 +281,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${MARIADB_CPU_LIMIT}"
-          memory: "${MARIADB_MEMORY_LIMIT}"
+          cpus: ${MARIADB_CPU_LIMIT}
+          memory: ${MARIADB_MEMORY_LIMIT}
 
   redis:
     image: redis:$REDIS_VERSION
@@ -320,8 +329,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${CPU_LIMIT}"
-          memory: "${MEMORY_LIMIT}"
+          cpus: ${CPU_LIMIT}
+          memory: ${MEMORY_LIMIT}
 
   nginx:
     build:
@@ -350,8 +359,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${NGINX_CPU_LIMIT}"
-          memory: "${NGINX_MEMORY_LIMIT}"
+          cpus: ${NGINX_CPU_LIMIT}
+          memory: ${NGINX_MEMORY_LIMIT}
 
 networks:
   wp_network:
