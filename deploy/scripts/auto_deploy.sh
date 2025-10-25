@@ -1,5 +1,7 @@
 ﻿#!/bin/sh
-set -euo pipefail
+# 使用sh兼容的选项设置
+set -eu
+# pipefail是bash特有选项，在sh中不可用
 
 # WordPress Docker 全栈自动部署脚本（生产环境优化版）
 # 功能：环境检测、系统参数收集、智能参数优化、自动数据库备份、磁盘空间管理
