@@ -2,6 +2,7 @@
 
 # WordPress Docker 自动部署脚本
 # 改进版功能：自动创建www-data用户/组、.env修复、Docker容器冲突清理
+# 触发GitHub Actions工作流测试
 
 set -e
 
