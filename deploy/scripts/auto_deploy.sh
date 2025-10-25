@@ -153,45 +153,29 @@ collect_system_parameters() {
     AVAILABLE_DISK=$(df -h / | tail -1 | awk '{print $4}' | sed 's/G//')
     log_message "可用磁盘空间: ${AVAILABLE_DISK}GB"
     
-    # 检查Docker和Docker Compose是否安装
-    if ! command -v docker >/dev/null; then
-        log_message "安装Docker..."
-        
-        if [[ "$OS_TYPE" == "debian" || "$OS_TYPE" == "ubuntu" ]]; then
-            apt-get update
-            apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
-            add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-            apt-get update
-            apt-get install -y docker-ce
-        elif [[ "$OS_TYPE" == "centos" ]]; then
-            yum install -y yum-utils device-mapper-persistent-data lvm2
-            yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-            yum install -y docker-ce
-            systemctl start docker
-            systemctl enable docker
-        elif [[ "$OS_TYPE" == "alpine" ]]; then
-            apk update
-            apk add docker
-            service docker start
-            rc-update add docker boot
-        fi
-        
-        log_message "✓ Docker 安装完成"
+    # 检查Docker是否安装，不强制安装以避免权限问题
+    if ! command -v docker >/dev/null 2>&1; then
+        log_message "警告: Docker未找到。请确保Docker已安装并在PATH中"
+        # 不自动安装，因为需要root权限
+    else
+        log_message "✓ Docker 已安装"
     fi
     
-    if ! command -v docker-compose >/dev/null; then
-        log_message "安装Docker Compose..."
-        
-        # 安装Docker Compose
-        curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        chmod +x /usr/local/bin/docker-compose
-        
-        log_message "✓ Docker Compose 安装完成"
+    # 检查Docker Compose (支持v1和v2语法)
+    if command -v docker-compose >/dev/null 2>&1; then
+        DOCKER_COMPOSE_CMD="docker-compose"
+        log_message "✓ Docker Compose v1 已安装"
+    elif docker compose version >/dev/null 2>&1; then
+        DOCKER_COMPOSE_CMD="docker compose"
+        log_message "✓ Docker Compose v2 已安装"
+    else
+        log_message "警告: Docker Compose未找到。请确保Docker Compose已安装"
+        DOCKER_COMPOSE_CMD="docker compose"  # 默认使用v2语法
     fi
     
-    # 检查磁盘空间 (使用bash内置算术，避免依赖bc命令)
-    if (( $(echo "$AVAILABLE_DISK" | tr -d '.' | cut -d'G' -f1) < 10000000 )); then
+    # 检查磁盘空间 (使用纯bash方式，避免依赖bc命令)
+    # AVAILABLE_DISK已经是数字形式（例如"17"），无需再提取数字部分
+    if (( $(echo "$AVAILABLE_DISK < 10" | awk '{print ($1 < 10) ? 1 : 0}') )); then
         handle_error "磁盘空间不足，需要至少10GB可用空间"
     fi
     
