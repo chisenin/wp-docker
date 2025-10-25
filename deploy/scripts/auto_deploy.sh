@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 
 # WordPress Docker 自动部署脚本
 # 增强版功能：自动创建www-data用户/组、.env修复、Docker容器冲突清理
@@ -290,26 +290,30 @@ optimize_parameters() {
     
     log_message "PHP内存限制: $PHP_MEMORY_LIMIT"
     
-    # 生成.env文件(如果不存在)
-    if [ ! -f ".env" ]; then
-        log_message "生成.env文件..."
-        
-        # 生成密码
-        MYSQL_ROOT_PASSWORD="$(generate_password 20)"
-        MYSQL_PASSWORD="$(generate_password 20)"
-        REDIS_PASSWORD="$(generate_password 20)"
-        
-        # 生成WordPress密钥
-        wp_keys="$(generate_wordpress_keys)"
-        
-        # 定义版本
-        PHP_VERSION="8.1"
-        NGINX_VERSION="1.24"
-        MARIADB_VERSION="10.11"
-        REDIS_VERSION="7.0"
-        
-        # 创建.env文件
-        cat > .env << EOF
+    # 生成.env文件(删除并重新生成)
+    if [ -f ".env" ]; then
+        log_message "检测到.env文件已存在，删除并重新生成..."
+        rm -f ".env"
+    fi
+    
+    log_message "生成.env文件..."
+    
+    # 生成密码
+    MYSQL_ROOT_PASSWORD="$(generate_password 20)"
+    MYSQL_PASSWORD="$(generate_password 20)"
+    REDIS_PASSWORD="$(generate_password 20)"
+    
+    # 生成WordPress密钥
+    wp_keys="$(generate_wordpress_keys)"
+    
+    # 定义版本
+    PHP_VERSION="8.1"
+    NGINX_VERSION="1.24"
+    MARIADB_VERSION="10.11"
+    REDIS_VERSION="7.0"
+    
+    # 创建.env文件
+    cat > .env << EOF
 # Docker配置
 COMPOSE_PROJECT_NAME=wp_docker
 
@@ -346,13 +350,10 @@ BACKUP_RETENTION_DAYS="$BACKUP_RETENTION_DAYS"
 # WordPress安全密钥
 $wp_keys
 EOF
-        
-        log_message "✓ .env文件生成完成"
-    else
-        log_message "警告: .env文件已存在，使用现有配置"
-        # 从.env文件加载环境变量
-        source .env
-    fi
+    
+    log_message "✓ .env文件生成完成"
+    # 从新生成的.env文件加载环境变量
+    source .env
 }
 
 # 权限设置
