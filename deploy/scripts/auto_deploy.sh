@@ -5,7 +5,7 @@ set -e
 # 更健壮的DEPLOY_DIR确定逻辑
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-FORCE_CONFIG=${FORCE_CONFIG:-false}
+if [ -z "$FORCE_CONFIG" ]; then FORCE_CONFIG="false"; fi
 
 mkdir -p "$DEPLOY_DIR/logs" 2>/dev/null
 
@@ -70,15 +70,15 @@ load_env_file() {
             log_message "Warning: .env.example file also does not exist."
         fi
     fi
-    # 确保变量不为空字符串且使用默认值
-    CPU_LIMIT="${CPU_LIMIT:-2}"
-    MEMORY_LIMIT="${MEMORY_LIMIT:-2048m}"
-    MARIADB_CPU_LIMIT="${MARIADB_CPU_LIMIT:-0.5}"
-    MARIADB_MEMORY_LIMIT="${MARIADB_MEMORY_LIMIT:-512m}"
-    NGINX_CPU_LIMIT="${NGINX_CPU_LIMIT:-1}"
-    NGINX_MEMORY_LIMIT="${NGINX_MEMORY_LIMIT:-256m}"
-    REDIS_CPU_LIMIT="${REDIS_CPU_LIMIT:-0.5}"
-    REDIS_MEMORY_LIMIT="${REDIS_MEMORY_LIMIT:-128m}"
+    # 使用sh兼容的方式设置默认值
+    if [ -z "$CPU_LIMIT" ]; then CPU_LIMIT="2"; fi
+    if [ -z "$MEMORY_LIMIT" ]; then MEMORY_LIMIT="2048m"; fi
+    if [ -z "$MARIADB_CPU_LIMIT" ]; then MARIADB_CPU_LIMIT="0.5"; fi
+    if [ -z "$MARIADB_MEMORY_LIMIT" ]; then MARIADB_MEMORY_LIMIT="512m"; fi
+    if [ -z "$NGINX_CPU_LIMIT" ]; then NGINX_CPU_LIMIT="1"; fi
+    if [ -z "$NGINX_MEMORY_LIMIT" ]; then NGINX_MEMORY_LIMIT="256m"; fi
+    if [ -z "$REDIS_CPU_LIMIT" ]; then REDIS_CPU_LIMIT="0.5"; fi
+    if [ -z "$REDIS_MEMORY_LIMIT" ]; then REDIS_MEMORY_LIMIT="128m"; fi
 }
 
 detect_host_environment() {
@@ -201,16 +201,17 @@ generate_wordpress_keys() {
 
 optimize_env_variables() {
     log_message "[Stage 8] Optimizing environment variables..."
-    MYSQL_DATABASE="${MYSQL_DATABASE:-wordpress}"
-    MYSQL_USER="${MYSQL_USER:-wordpress}"
-    WORDPRESS_DB_NAME="${WORDPRESS_DB_NAME:-wordpress}"
-    WORDPRESS_DB_USER="${WORDPRESS_DB_USER:-wordpress}"
-    WORDPRESS_DB_HOST="${WORDPRESS_DB_HOST:-mariadb}"
-    REDIS_HOST="${REDIS_HOST:-redis}"
-    PHP_VERSION="${PHP_VERSION:-8.1}"
-    MARIADB_VERSION="${MARIADB_VERSION:-10.9}"
-    NGINX_VERSION="${NGINX_VERSION:-1.23}"
-    REDIS_VERSION="${REDIS_VERSION:-7.0}"
+    # 使用sh兼容的方式设置默认值
+    if [ -z "$MYSQL_DATABASE" ]; then MYSQL_DATABASE="wordpress"; fi
+    if [ -z "$MYSQL_USER" ]; then MYSQL_USER="wordpress"; fi
+    if [ -z "$WORDPRESS_DB_NAME" ]; then WORDPRESS_DB_NAME="wordpress"; fi
+    if [ -z "$WORDPRESS_DB_USER" ]; then WORDPRESS_DB_USER="wordpress"; fi
+    if [ -z "$WORDPRESS_DB_HOST" ]; then WORDPRESS_DB_HOST="mariadb"; fi
+    if [ -z "$REDIS_HOST" ]; then REDIS_HOST="redis"; fi
+    if [ -z "$PHP_VERSION" ]; then PHP_VERSION="8.1"; fi
+    if [ -z "$MARIADB_VERSION" ]; then MARIADB_VERSION="10.9"; fi
+    if [ -z "$NGINX_VERSION" ]; then NGINX_VERSION="1.23"; fi
+    if [ -z "$REDIS_VERSION" ]; then REDIS_VERSION="7.0"; fi
     export MYSQL_DATABASE MYSQL_USER WORDPRESS_DB_NAME WORDPRESS_DB_USER WORDPRESS_DB_HOST REDIS_HOST
     export PHP_VERSION MARIADB_VERSION NGINX_VERSION REDIS_VERSION
     log_message "Environment variables optimized successfully"
@@ -388,7 +389,7 @@ volumes:
   wordpress_data:
 EOF
     fi
-    log_message "Current resource limits: CPU=$CPU_LIMIT, Memory=$MEMORY_LIMIT, MARIADB_CPU=$MARIADB_CPU_LIMIT, MARIADB_MEMORY=$MARIADB_MEMORY_LIMIT, NGINX_CPU=$NGINX_CPU_LIMIT, NGINX_MEMORY=$NGINX_MEMORY_LIMIT, REDIS_CPU=${REDIS_CPU_LIMIT:-0.5}, REDIS_MEMORY=${REDIS_MEMORY_LIMIT:-128m}"
+    log_message "Current resource limits: CPU=$CPU_LIMIT, Memory=$MEMORY_LIMIT, MARIADB_CPU=$MARIADB_CPU_LIMIT, MARIADB_MEMORY=$MARIADB_MEMORY_LIMIT, NGINX_CPU=$NGINX_CPU_LIMIT, NGINX_MEMORY=$NGINX_MEMORY_LIMIT, REDIS_CPU=$REDIS_CPU_LIMIT, REDIS_MEMORY=$REDIS_MEMORY_LIMIT"
     log_message "Validating docker-compose.yml..."
     # 添加详细的错误输出和文件内容显示
     if ! $DOCKER_COMPOSE_CMD -f "$docker_compose_file" config --quiet; then
@@ -589,7 +590,7 @@ setup_backup_config() {
 
 BACKUP_DIR="$(cd "$SCRIPT_DIR/../backups" && pwd)"
 DATE=$(date +"%Y-%m-%d_%H-%M-%S")
-BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
+if [ -z "$BACKUP_RETENTION_DAYS" ]; then BACKUP_RETENTION_DAYS="7"; fi
 
 log_message() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$BACKUP_DIR/backup.log"
