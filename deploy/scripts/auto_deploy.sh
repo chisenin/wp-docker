@@ -108,7 +108,7 @@ environment_preparation() {
     log_message "Checking and creating www-data user/group..."
     if ! id -u www-data >/dev/null 2>&1; then
         log_message "Creating www-data user and group..."
-        if [[ "$OS_TYPE" == "alpine" ]]; then
+        if [ "$OS_TYPE" = "alpine" ]; then
             addgroup -g 33 -S www-data || handle_error "Failed to create www-data group"
             adduser -u 33 -D -S -G www-data www-data || handle_error "Failed to create www-data user"
         else
@@ -126,14 +126,14 @@ check_disk_space() {
     # 提取整数部分进行比较
     DISK_INT=$(echo "$AVAILABLE_DISK" | cut -d. -f1)
     if [ "$DISK_INT" -lt 10 ]; then
-        handle_error "Insufficient disk space: $AVAILABLE_DISK GB (required: 10 GB)"
+        handle_error "Insufficient disk space: $AVAILABLE_DISK GB required: 10 GB"
     fi
     log_message "Available disk space: ${AVAILABLE_DISK}GB"
 }
 
 check_memory() {
     log_message "[Stage 4] Checking memory..."
-    if [[ "$OS_TYPE" == "alpine" ]]; then
+    if [ "$OS_TYPE" = "alpine" ]; then
         AVAILABLE_RAM=$(free -m | awk '/Mem:/ {print $2}')
     else
         AVAILABLE_RAM=$(free -m | grep Mem | awk '{print $2}')
@@ -244,27 +244,27 @@ cleanup_old_containers() {
 
 build_images() {
     log_message "[Stage 10] Building Docker images..."
-    if [[ -z "$CPU_LIMIT" || "$CPU_LIMIT" == "" ]]; then
+    if [ -z "$CPU_LIMIT" ] || [ "$CPU_LIMIT" = "" ]; then
         log_message "Warning: CPU_LIMIT not set or empty, using default value 2"
         CPU_LIMIT="2"
     fi
-    if [[ -z "$MEMORY_LIMIT" || "$MEMORY_LIMIT" == "" ]]; then
+    if [ -z "$MEMORY_LIMIT" ] || [ "$MEMORY_LIMIT" = "" ]; then
         log_message "Warning: MEMORY_LIMIT not set or empty, using default value 2048m"
         MEMORY_LIMIT="2048m"
     fi
-    if [[ -z "$MARIADB_CPU_LIMIT" || "$MARIADB_CPU_LIMIT" == "" ]]; then
+    if [ -z "$MARIADB_CPU_LIMIT" ] || [ "$MARIADB_CPU_LIMIT" = "" ]; then
         log_message "Warning: MARIADB_CPU_LIMIT not set or empty, using default value 0.5"
         MARIADB_CPU_LIMIT="0.5"
     fi
-    if [[ -z "$MARIADB_MEMORY_LIMIT" || "$MARIADB_MEMORY_LIMIT" == "" ]]; then
+    if [ -z "$MARIADB_MEMORY_LIMIT" ] || [ "$MARIADB_MEMORY_LIMIT" = "" ]; then
         log_message "Warning: MARIADB_MEMORY_LIMIT not set or empty, using default value 512m"
         MARIADB_MEMORY_LIMIT="512m"
     fi
-    if [[ -z "$NGINX_CPU_LIMIT" || "$NGINX_CPU_LIMIT" == "" ]]; then
+    if [ -z "$NGINX_CPU_LIMIT" ] || [ "$NGINX_CPU_LIMIT" = "" ]; then
         log_message "Warning: NGINX_CPU_LIMIT not set or empty, using default value 1"
         NGINX_CPU_LIMIT="1"
     fi
-    if [[ -z "$NGINX_MEMORY_LIMIT" || "$NGINX_MEMORY_LIMIT" == "" ]]; then
+    if [ -z "$NGINX_MEMORY_LIMIT" ] || [ "$NGINX_MEMORY_LIMIT" = "" ]; then
         log_message "Warning: NGINX_MEMORY_LIMIT not set or empty, using default value 256m"
         NGINX_MEMORY_LIMIT="256m"
     fi
@@ -406,7 +406,7 @@ generate_configs() {
     if [ ! -f "configs/nginx.conf" ] || [ "$FORCE_CONFIG" = true ]; then
         log_message "Generating Nginx configuration files..."
         local worker_processes="auto"
-        if [[ "$OS_TYPE" == "alpine" ]]; then
+        if [ "$OS_TYPE" = "alpine" ]; then
             worker_processes="$(nproc)"
         fi
         mkdir -p "configs/conf.d"
