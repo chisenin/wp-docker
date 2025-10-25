@@ -193,11 +193,23 @@ generate_wordpress_keys() {
     echo "生成 WordPress 安全密钥..."
     local keys_url="https://api.wordpress.org/secret-key/1.1/salt/"
     # 获取密钥并转换为环境变量格式
-    local keys=$(curl -s "$keys_url" || wget -qO- "$keys_url" || echo "# 安全密钥生成失败，请手动替换")
+    local keys=$(curl -s "$keys_url" || wget -qO- "$keys_url" || echo "define('AUTH_KEY', 'fallback-key-change-me');")
     # 将PHP define格式转换为环境变量格式
     keys=$(echo "$keys" | \
         sed "s/define('\([^']*\)', '\([^']*\)');/WORDPRESS_\1=\2/" | \
         sed "s/define(\"\([^\"]*\)\", \"\([^\"]*\)\");/WORDPRESS_\1=\2/")
+    # 如果转换后仍包含特殊字符或中文，使用备用方式生成
+    if echo "$keys" | grep -q -E '[^a-zA-Z0-9_=\-\.\,\:\;\!\@\#\$\%\^\&\*\(\)\[\]\{\}\|\\/\?\<\>\~]'; then
+        # 生成安全的备用密钥
+        keys="WORDPRESS_AUTH_KEY=$(generate_password 64)\n"
+        keys+="WORDPRESS_SECURE_AUTH_KEY=$(generate_password 64)\n"
+        keys+="WORDPRESS_LOGGED_IN_KEY=$(generate_password 64)\n"
+        keys+="WORDPRESS_NONCE_KEY=$(generate_password 64)\n"
+        keys+="WORDPRESS_AUTH_SALT=$(generate_password 64)\n"
+        keys+="WORDPRESS_SECURE_AUTH_SALT=$(generate_password 64)\n"
+        keys+="WORDPRESS_LOGGED_IN_SALT=$(generate_password 64)\n"
+        keys+="WORDPRESS_NONCE_SALT=$(generate_password 64)"
+    fi
     echo "$keys"
 }
 
