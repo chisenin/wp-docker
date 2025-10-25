@@ -318,58 +318,12 @@ optimize_parameters() {
     
     log_message "生成.env文件..."
     
-    # 使用临时文件先写入基本配置
-    cat > .env << 'EOF'
-# Docker Configuration
-COMPOSE_PROJECT_NAME=wp_docker
-
-# Database Configuration
-MYSQL_ROOT_PASSWORD="MYSQL_ROOT_PASSWORD_PLACEHOLDER"
-MYSQL_DATABASE="wordpress"
-MYSQL_USER="wordpress"
-MYSQL_PASSWORD="MYSQL_PASSWORD_PLACEHOLDER"
-
-# WordPress Configuration
-WORDPRESS_DB_HOST="mariadb"
-WORDPRESS_DB_USER="wordpress"
-WORDPRESS_DB_PASSWORD="MYSQL_PASSWORD_PLACEHOLDER"
-WORDPRESS_DB_NAME="wordpress"
-WORDPRESS_TABLE_PREFIX="wp_"
-
-# Redis Configuration
-REDIS_HOST="redis"
-REDIS_PASSWORD="REDIS_PASSWORD_PLACEHOLDER"
-REDIS_PORT=6379
-REDIS_MAXMEMORY=256mb
-
-# Resource Limits
-MEMORY_LIMIT="MEMORY_LIMIT_PLACEHOLDER"
-CPU_LIMIT="CPU_LIMIT_PLACEHOLDER"
-
-# Optional Configuration
-PHP_MEMORY_LIMIT=512M
-UPLOAD_MAX_FILESIZE=64M
-USE_CN_MIRROR=false
-
-# Image Versions
-PHP_VERSION="PHP_VERSION_PLACEHOLDER"
-NGINX_VERSION="NGINX_VERSION_PLACEHOLDER"
-MARIADB_VERSION="MARIADB_VERSION_PLACEHOLDER"
-REDIS_VERSION="REDIS_VERSION_PLACEHOLDER"
-
-# Backup Retention
-BACKUP_RETENTION_DAYS="BACKUP_RETENTION_DAYS_PLACEHOLDER"
-
-# WordPress Security Keys will be added below
-EOF
-    
-    # 使用更安全的方式生成密码，避免特殊字符
-    MYSQL_ROOT_PASSWORD=$(openssl rand -hex 16)
-    MYSQL_PASSWORD=$(openssl rand -hex 16)
-    REDIS_PASSWORD=$(openssl rand -hex 16)
-    
-    # 直接构建完整的.env文件内容，避免使用sed替换
+    # 确保使用英文注释和避免中文编码问题
+    # 直接生成.env文件，使用英文注释
     cat > .env << EOF
+# WordPress Docker Environment Configuration
+# Please modify according to your actual environment
+
 # Docker Configuration
 COMPOSE_PROJECT_NAME=wp_docker
 
@@ -410,7 +364,7 @@ REDIS_VERSION="$REDIS_VERSION"
 # Backup Retention
 BACKUP_RETENTION_DAYS="$BACKUP_RETENTION_DAYS"
 
-# WordPress Security Keys
+# WordPress Security Keys - Auto generated
 EOF
     
     # 直接生成WordPress密钥并追加到文件
@@ -419,8 +373,6 @@ EOF
         value=$(openssl rand -hex 32)
         echo "WORDPRESS_${key}=\"${value}\"" >> .env
     done
-    
-    # WordPress密钥已在.env文件生成过程中处理
     
     # 确保文件权限正确
     chmod 600 .env
