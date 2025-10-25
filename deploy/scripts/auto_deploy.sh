@@ -587,7 +587,6 @@ setup_backup_config() {
     log_message "[Stage 12] Setting up backup configuration..."
     mkdir -p "$DEPLOY_DIR/scripts"
     cat > "$DEPLOY_DIR/scripts/backup.sh" << 'EOF'
-#!/bin/bash
 
 BACKUP_DIR="$(cd "$SCRIPT_DIR/../backups" && pwd)"
 DATE=$(date +"%Y-%m-%d_%H-%M-%S")
