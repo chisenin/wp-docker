@@ -552,15 +552,15 @@ start_services() {
         sed -i "s/username_here/$WORDPRESS_DB_USER/" html/wp-config.php
         sed -i "s/password_here/$WORDPRESS_DB_PASSWORD/" html/wp-config.php
         sed -i "s/localhost/$WORDPRESS_DB_HOST/" html/wp-config.php
-        # 使用单引号包裹sed命令，并使用不同的分隔符避免冲突
-        sed -i 's@define([ \t]*["\']AUTH_KEY["\'],.*@define( "AUTH_KEY",         "'"$WORDPRESS_AUTH_KEY"'" );@g' html/wp-config.php
-        sed -i 's@define([ \t]*["\']SECURE_AUTH_KEY["\'],.*@define( "SECURE_AUTH_KEY",  "'"$WORDPRESS_SECURE_AUTH_KEY"'" );@g' html/wp-config.php
-        sed -i 's@define([ \t]*["\']LOGGED_IN_KEY["\'],.*@define( "LOGGED_IN_KEY",    "'"$WORDPRESS_LOGGED_IN_KEY"'" );@g' html/wp-config.php
-        sed -i 's@define([ \t]*["\']NONCE_KEY["\'],.*@define( "NONCE_KEY",        "'"$WORDPRESS_NONCE_KEY"'" );@g' html/wp-config.php
-        sed -i 's@define([ \t]*["\']AUTH_SALT["\'],.*@define( "AUTH_SALT",        "'"$WORDPRESS_AUTH_SALT"'" );@g' html/wp-config.php
-        sed -i 's@define([ \t]*["\']SECURE_AUTH_SALT["\'],.*@define( "SECURE_AUTH_SALT", "'"$WORDPRESS_SECURE_AUTH_SALT"'" );@g' html/wp-config.php
-        sed -i 's@define([ \t]*["\']LOGGED_IN_SALT["\'],.*@define( "LOGGED_IN_SALT",   "'"$WORDPRESS_LOGGED_IN_SALT"'" );@g' html/wp-config.php
-        sed -i 's@define([ \t]*["\']NONCE_SALT["\'],.*@define( "NONCE_SALT",       "'"$WORDPRESS_NONCE_SALT"'" );@g' html/wp-config.php
+        # 使用双引号包裹sed命令，但对内部特殊字符进行转义
+        sed -i "s@define([ \\t]*[\"\\']AUTH_KEY[\"\\'],.*@define( \"AUTH_KEY\",         \"$WORDPRESS_AUTH_KEY\" );@g" html/wp-config.php
+        sed -i "s@define([ \\t]*[\"\\']SECURE_AUTH_KEY[\"\\'],.*@define( \"SECURE_AUTH_KEY\",  \"$WORDPRESS_SECURE_AUTH_KEY\" );@g" html/wp-config.php
+        sed -i "s@define([ \\t]*[\"\\']LOGGED_IN_KEY[\"\\'],.*@define( \"LOGGED_IN_KEY\",    \"$WORDPRESS_LOGGED_IN_KEY\" );@g" html/wp-config.php
+        sed -i "s@define([ \\t]*[\"\\']NONCE_KEY[\"\\'],.*@define( \"NONCE_KEY\",        \"$WORDPRESS_NONCE_KEY\" );@g" html/wp-config.php
+        sed -i "s@define([ \\t]*[\"\\']AUTH_SALT[\"\\'],.*@define( \"AUTH_SALT\",        \"$WORDPRESS_AUTH_SALT\" );@g" html/wp-config.php
+        sed -i "s@define([ \\t]*[\"\\']SECURE_AUTH_SALT[\"\\'],.*@define( \"SECURE_AUTH_SALT\", \"$WORDPRESS_SECURE_AUTH_SALT\" );@g" html/wp-config.php
+        sed -i "s@define([ \\t]*[\"\\']LOGGED_IN_SALT[\"\\'],.*@define( \"LOGGED_IN_SALT\",   \"$WORDPRESS_LOGGED_IN_SALT\" );@g" html/wp-config.php
+        sed -i "s@define([ \\t]*[\"\\']NONCE_SALT[\"\\'],.*@define( \"NONCE_SALT\",       \"$WORDPRESS_NONCE_SALT\" );@g" html/wp-config.php
         # 使用cat和here-document写入配置，使用简单分隔符避免解析问题
         cat >> html/wp-config.php << 'EOF'
 
