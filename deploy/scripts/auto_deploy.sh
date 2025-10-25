@@ -226,9 +226,13 @@ optimize_parameters() {
         # ??wp_keys?????????????
         local sanitized_keys=$(echo "$wp_keys" | sed 's/\r//g' | sed 's/"/\\"/g')
         
+        # 先计算日期值
+        local current_date=$(date)
+        local redis_pwd=$(generate_password 16)
+        
         cat > .env << EOF
 # WordPress Docker??????
-# ????: $(date)
+# ????: $current_date
 
 DOCKERHUB_USERNAME=chisenin
 PHP_VERSION=$php_version
@@ -251,7 +255,7 @@ WORDPRESS_TABLE_PREFIX=wp_
 
 REDIS_HOST=redis
 REDIS_PORT=6379
-REDIS_PASSWORD=$(generate_password 16)
+REDIS_PASSWORD=$redis_pwd
 REDIS_MAXMEMORY=256mb
 
 CPU_LIMIT=$CPU_LIMIT
