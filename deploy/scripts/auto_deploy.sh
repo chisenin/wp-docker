@@ -560,16 +560,15 @@ start_services() {
         sed -i 's@define(\s*["\']SECURE_AUTH_SALT["\'],.*@define( "SECURE_AUTH_SALT", "'"$WORDPRESS_SECURE_AUTH_SALT"'" );@g' html/wp-config.php
         sed -i 's@define(\s*["\']LOGGED_IN_SALT["\'],.*@define( "LOGGED_IN_SALT",   "'"$WORDPRESS_LOGGED_IN_SALT"'" );@g' html/wp-config.php
         sed -i 's@define(\s*["\']NONCE_SALT["\'],.*@define( "NONCE_SALT",       "'"$WORDPRESS_NONCE_SALT"'" );@g' html/wp-config.php
-        cat >> html/wp-config.php << EOF
-
-/** Redis Configuration */
-define('WP_CACHE', true);
-define('WP_REDIS_HOST', '$REDIS_HOST');
-define('WP_REDIS_PASSWORD', '$REDIS_PASSWORD');
-define('WP_REDIS_PORT', 6379);
-define('WP_REDIS_TIMEOUT', 1);
-define('WP_REDIS_READ_TIMEOUT', 1);
-EOF
+        # 使用echo命令替代heredoc，避免潜在的解析问题
+        echo "" >> html/wp-config.php
+        echo "/** Redis Configuration */" >> html/wp-config.php
+        echo "define('WP_CACHE', true);" >> html/wp-config.php
+        echo "define('WP_REDIS_HOST', '$REDIS_HOST');" >> html/wp-config.php
+        echo "define('WP_REDIS_PASSWORD', '$REDIS_PASSWORD');" >> html/wp-config.php
+        echo "define('WP_REDIS_PORT', 6379);" >> html/wp-config.php
+        echo "define('WP_REDIS_TIMEOUT', 1);" >> html/wp-config.php
+        echo "define('WP_REDIS_READ_TIMEOUT', 1);" >> html/wp-config.php
         log_message "WordPress configured successfully"
     fi
     log_message "Starting Docker containers..."
