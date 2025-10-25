@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+﻿#!/bin/bash
 set -euo pipefail
 
 # WordPress Docker 全栈自动部署脚本（生产环境优化版）
@@ -297,7 +297,40 @@ deploy_wordpress_stack() {
                 mv wordpress/* html/
                 rm -rf wordpress "$temp_file"
                 print_green "设置文件权限..."
-                docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R www-data:www-data /var/www/html
+                # 尝试使用Docker设置权限，添加重试机制和国内镜像源支持
+                local retry_count=3
+                local retry_delay=5
+                local docker_success=false
+                
+                # 尝试设置国内Docker镜像源（可根据实际环境取消注释）
+                # echo '{"registry-mirrors": ["https://registry.docker-cn.com", "https://docker.mirrors.ustc.edu.cn"]}' > /etc/docker/daemon.json 2>/dev/null || true
+                
+                for ((i=1; i<=retry_count; i++)); do
+                    print_blue "尝试拉取alpine镜像 (第$i次尝试)..."
+                    if docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R www-data:www-data /var/www/html 2>/dev/null; then
+                        docker_success=true
+                        print_green "✓ Docker设置权限成功"
+                        break
+                    else
+                        print_yellow "警告: Docker操作失败，$retry_delay秒后重试..."
+                        sleep $retry_delay
+                    fi
+                done
+                
+                # 如果Docker操作失败，尝试直接使用chown命令
+                if [ "$docker_success" = false ]; then
+                    print_yellow "警告: Docker操作失败，尝试使用系统chown命令..."
+                    if command -v chown >/dev/null; then
+                        if chown -R 33:33 "$(pwd)/html" 2>/dev/null; then  # 33是www-data的通常UID
+                            print_green "✓ 系统chown命令设置权限成功"
+                        else
+                            print_yellow "警告: 无法设置文件权限，建议手动执行: chown -R www-data:www-data $(pwd)/html"
+                        fi
+                    else
+                        print_yellow "警告: 找不到chown命令，无法设置文件权限"
+                    fi
+                fi
+                
                 print_green "✓ WordPress 下载并解压完成"
             else
                 print_yellow "警告: WordPress 下载失败，请手动下载并解压到 html 目录"
