@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 
 # WordPress Docker 自动部署脚本
 # 增强版功能：自动创建www-data用户/组、.env修复、Docker容器冲突清理
