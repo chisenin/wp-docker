@@ -336,7 +336,11 @@ REDIS_PASSWORD="$REDIS_PASSWORD"
 
 # 资源限制
 MEMORY_LIMIT="$((AVAILABLE_RAM / 2))m"
+# 确保CPU_LIMIT始终有有效值，避免空字符串
 CPU_LIMIT="$((CPU_CORES / 2))"
+if [ -z "$CPU_LIMIT" ] || [ "$CPU_LIMIT" -lt 1 ]; then
+    CPU_LIMIT="1"
+fi
 
 # 镜像版本
 PHP_VERSION="$PHP_VERSION"
