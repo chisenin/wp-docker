@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+﻿#!/bin/sh
 set -euo pipefail
 
 # WordPress Docker 全栈自动部署脚本（生产环境优化版）
@@ -344,29 +344,33 @@ deploy_wordpress_stack() {
     
     # ===== 插入：更新 WordPress 安全密钥 =====
     print_blue "更新 WordPress 安全密钥..."
-    if sed --version >/dev/null 2>&1; then
-        SED_INPLACE=(-i)
+    if [ ! -f "html/wp-config.php" ]; then
+        print_yellow "警告: html/wp-config.php 文件不存在，跳过密钥更新"
     else
-        SED_INPLACE=(-i '')
+        if sed --version >/dev/null 2>&1; then
+            SED_INPLACE=(-i)
+        else
+            SED_INPLACE=(-i '')
+        fi
+
+        update_wp_key() {
+            local key_name="$1"
+            local key_value="$2"
+            local file_path="html/wp-config.php"
+            sed "${SED_INPLACE[@]}" -E "s@define\s*\(['\"]${key_name}[\"\'],[^)]*\)@define( '${key_name}', '${key_value}' )@g" "$file_path"
+        }
+
+        update_wp_key "AUTH_KEY"           "${WORDPRESS_AUTH_KEY:-}"
+        update_wp_key "SECURE_AUTH_KEY"    "${WORDPRESS_SECURE_AUTH_KEY:-}"
+        update_wp_key "LOGGED_IN_KEY"      "${WORDPRESS_LOGGED_IN_KEY:-}"
+        update_wp_key "NONCE_KEY"          "${WORDPRESS_NONCE_KEY:-}"
+        update_wp_key "AUTH_SALT"          "${WORDPRESS_AUTH_SALT:-}"
+        update_wp_key "SECURE_AUTH_SALT"   "${WORDPRESS_SECURE_AUTH_SALT:-}"
+        update_wp_key "LOGGED_IN_SALT"     "${WORDPRESS_LOGGED_IN_SALT:-}"
+        update_wp_key "NONCE_SALT"         "${WORDPRESS_NONCE_SALT:-}"
+
+        print_green "✓ WordPress 密钥更新完成"
     fi
-
-    update_wp_key() {
-        local key_name="$1"
-        local key_value="$2"
-        local file_path="html/wp-config.php"
-        sed "${SED_INPLACE[@]}" -E "s@define\s*\(['\"]${key_name}['\"],[^)]*\)@define( '${key_name}', '${key_value}' )@g" "$file_path"
-    }
-
-    update_wp_key "AUTH_KEY"           "${WORDPRESS_AUTH_KEY:-}"
-    update_wp_key "SECURE_AUTH_KEY"    "${WORDPRESS_SECURE_AUTH_KEY:-}"
-    update_wp_key "LOGGED_IN_KEY"      "${WORDPRESS_LOGGED_IN_KEY:-}"
-    update_wp_key "NONCE_KEY"          "${WORDPRESS_NONCE_KEY:-}"
-    update_wp_key "AUTH_SALT"          "${WORDPRESS_AUTH_SALT:-}"
-    update_wp_key "SECURE_AUTH_SALT"   "${WORDPRESS_SECURE_AUTH_SALT:-}"
-    update_wp_key "LOGGED_IN_SALT"     "${WORDPRESS_LOGGED_IN_SALT:-}"
-    update_wp_key "NONCE_SALT"         "${WORDPRESS_NONCE_SALT:-}"
-
-    print_green "✓ WordPress 密钥更新完成"
     # ===== 插入结束 =====
 
     print_blue "构建Docker镜像..."
