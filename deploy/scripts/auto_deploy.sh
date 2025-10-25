@@ -10,7 +10,7 @@ if [ -z "$FORCE_CONFIG" ]; then FORCE_CONFIG="false"; fi
 mkdir -p "$DEPLOY_DIR/logs" 2>/dev/null
 
 print_blue() {
-    echo -e "\033[34m$1\033[0m"
+    echo "\033[34m$1\033[0m"
 }
 
 OS_TYPE=""
