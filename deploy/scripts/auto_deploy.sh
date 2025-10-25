@@ -312,47 +312,50 @@ optimize_parameters() {
     MARIADB_VERSION="10.11"
     REDIS_VERSION="7.0"
     
-    # 创建.env文件
-    cat > .env << EOF
-# Docker配置
+    # 创建.env文件，使用安全的格式确保Python-dotenv可以正确解析
+    cat > .env << 'EOF'
+# Docker Configuration
 COMPOSE_PROJECT_NAME=wp_docker
 
-# 数据库配置
-MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD"
+# Database Configuration
+MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD}"
 MYSQL_DATABASE="wordpress"
 MYSQL_USER="wordpress"
-MYSQL_PASSWORD="$MYSQL_PASSWORD"
+MYSQL_PASSWORD="${MYSQL_PASSWORD}"
 
-# WordPress配置
+# WordPress Configuration
 WORDPRESS_DB_HOST="mariadb"
 WORDPRESS_DB_USER="wordpress"
-WORDPRESS_DB_PASSWORD="$MYSQL_PASSWORD"
+WORDPRESS_DB_PASSWORD="${MYSQL_PASSWORD}"
 WORDPRESS_DB_NAME="wordpress"
 WORDPRESS_TABLE_PREFIX="wp_"
 
-# Redis配置
+# Redis Configuration
 REDIS_HOST="redis"
-REDIS_PASSWORD="$REDIS_PASSWORD"
+REDIS_PASSWORD="${REDIS_PASSWORD}"
+REDIS_PORT=6379
+REDIS_MAXMEMORY=256mb
 
-# 资源限制
-MEMORY_LIMIT="$((AVAILABLE_RAM / 2))m"
-# 确保CPU_LIMIT始终有有效值，避免空字符串
-CPU_LIMIT="$((CPU_CORES / 2))"
-if [ -z "$CPU_LIMIT" ] || [ "$CPU_LIMIT" -lt 1 ]; then
-    CPU_LIMIT="1"
-fi
+# Resource Limits
+MEMORY_LIMIT="${MEMORY_LIMIT}"
+CPU_LIMIT="${CPU_LIMIT}"
 
-# 镜像版本
-PHP_VERSION="$PHP_VERSION"
-NGINX_VERSION="$NGINX_VERSION"
-MARIADB_VERSION="$MARIADB_VERSION"
-REDIS_VERSION="$REDIS_VERSION"
+# Optional Configuration
+PHP_MEMORY_LIMIT=512M
+UPLOAD_MAX_FILESIZE=64M
+USE_CN_MIRROR=false
 
-# 备份保留天数
-BACKUP_RETENTION_DAYS="$BACKUP_RETENTION_DAYS"
+# Image Versions
+PHP_VERSION="${PHP_VERSION}"
+NGINX_VERSION="${NGINX_VERSION}"
+MARIADB_VERSION="${MARIADB_VERSION}"
+REDIS_VERSION="${REDIS_VERSION}"
 
-# WordPress安全密钥
-$wp_keys
+# Backup Retention
+BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS}"
+
+# WordPress Security Keys
+${wp_keys}
 EOF
     
     log_message "✓ .env文件生成完成"
