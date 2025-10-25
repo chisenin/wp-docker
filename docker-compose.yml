@@ -30,8 +30,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: 1
-          memory: 1G
+          cpus: ${CPU_LIMIT:-1}
+          memory: ${MEMORY_LIMIT:-1G}
 
   # --- Redis 缓存服务 ---
   redis:
