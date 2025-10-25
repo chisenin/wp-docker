@@ -25,6 +25,8 @@ MARIADB_CPU_LIMIT="0.5"
 MARIADB_MEMORY_LIMIT="512m"
 NGINX_CPU_LIMIT="1"
 NGINX_MEMORY_LIMIT="256m"
+REDIS_CPU_LIMIT="0.5"
+REDIS_MEMORY_LIMIT="128m"
 
 handle_error() {
     echo "Error: $1" >&2
@@ -38,8 +40,12 @@ log_message() {
 }
 
 load_env_file() {
-    if [ -f ".env" ]; then
-        log_message "Loading environment variables from .env file..."
+    # 确保在DEPLOY_DIR目录下查找.env文件
+    local env_file="$DEPLOY_DIR/.env"
+    local env_example="$DEPLOY_DIR/.env.example"
+    
+    if [ -f "$env_file" ]; then
+        log_message "Loading environment variables from $env_file..."
         while IFS= read -r line || [[ -n "$line" ]]; do
             [[ -z "$line" || "$line" =~ ^\s*# ]] && continue
             if [[ "$line" =~ ^([A-Za-z0-9_]+)\s*=\s*(.*)$ ]]; then
@@ -51,11 +57,11 @@ load_env_file() {
                 value="${value#\'}"
                 export "$key"="$value"
             fi
-        done < .env
+        done < "$env_file"
     else
         log_message "Warning: .env file does not exist. Using default values and creating .env from example..."
-        if [ -f ".env.example" ]; then
-            cp .env.example .env || log_message "Warning: Failed to copy .env.example"
+        if [ -f "$env_example" ]; then
+            cp "$env_example" "$env_file" || log_message "Warning: Failed to copy .env.example"
         else
             log_message "Warning: .env.example file also does not exist."
         fi
@@ -67,6 +73,8 @@ load_env_file() {
     MARIADB_MEMORY_LIMIT="${MARIADB_MEMORY_LIMIT:-512m}"
     NGINX_CPU_LIMIT="${NGINX_CPU_LIMIT:-1}"
     NGINX_MEMORY_LIMIT="${NGINX_MEMORY_LIMIT:-256m}"
+    REDIS_CPU_LIMIT="${REDIS_CPU_LIMIT:-0.5}"
+    REDIS_MEMORY_LIMIT="${REDIS_MEMORY_LIMIT:-128m}"
 }
 
 detect_host_environment() {
@@ -299,8 +307,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: "128m"
+          cpus: ${REDIS_CPU_LIMIT:-0.5}
+          memory: ${REDIS_MEMORY_LIMIT:-128m}
 
   php:
     build:
