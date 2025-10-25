@@ -1,0 +1,103 @@
+name: Auto Deploy Development Workflow
+
+on:
+  push:
+    branches: [ debug-auto-deploy ]
+  workflow_dispatch:
+    # 允许手动触发
+    inputs:
+      test_mode:
+        description: '测试模式（true/false）'
+        required: true
+        default: 'false'
+        type: string
+
+jobs:
+  # 专注于auto_deploy功能的工作流
+  prepare-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置日期和版本变量
+        id: set_vars
+        run: |
+          echo "TODAY=$(date +'%Y%m%d')" >> $GITHUB_ENV
+          echo "TODAY_FULL=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+          echo "TIMESTAMP=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+          echo "TIMESTAMP_FULL=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+          
+          # 生成版本哈希
+          VERSION_HASH=$(echo -n "auto-deploy-${{ github.sha }}-${TIMESTAMP}" | sha256sum | cut -d' ' -f1)
+          echo "VERSION_HASH=$VERSION_HASH" >> $GITHUB_ENV
+          echo "版本哈希: $VERSION_HASH"
+          echo "$VERSION_HASH" > /tmp/auto-deploy-hash.txt
+
+      - name: 验证auto_deploy脚本
+        run: |
+          echo "::group::验证auto_deploy.sh脚本"
+          # 检查脚本是否存在
+          if [ -f "./deploy/scripts/auto_deploy.sh" ]; then
+            echo "找到auto_deploy.sh脚本"
+            # 检查脚本权限
+            chmod +x ./deploy/scripts/auto_deploy.sh
+            # 执行基本语法检查
+            bash -n ./deploy/scripts/auto_deploy.sh
+            if [ $? -eq 0 ]; then
+              echo "auto_deploy.sh脚本语法检查通过"
+            else
+              echo "::error::auto_deploy.sh脚本语法检查失败"
+              exit 1
+            fi
+          else
+            echo "::error::未找到auto_deploy.sh脚本"
+            exit 1
+          fi
+
+      - name: 准备发布文件
+        run: |
+          echo "::group::准备发布文件"
+          # 复制auto_deploy脚本到临时目录
+          mkdir -p /tmp/release-files
+          cp ./deploy/scripts/auto_deploy.sh /tmp/release-files/
+          # 添加版本信息文件
+          echo "Auto Deploy Script Version: dev-${TIMESTAMP}" > /tmp/release-files/version.txt
+          echo "Build Date: ${TIMESTAMP_FULL}" >> /tmp/release-files/version.txt
+          echo "Git Commit: ${{ github.sha }}" >> /tmp/release-files/version.txt
+          echo "Version Hash: ${VERSION_HASH}" >> /tmp/release-files/version.txt
+
+      - name: 创建GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: auto-deploy-${{ env.TIMESTAMP }}
+          name: Auto Deploy Dev Build ${{ env.TIMESTAMP_FULL }}
+          body: |
+            ## Auto Deploy脚本开发构建
+            
+            构建时间: ${{ env.TIMESTAMP_FULL }}
+            提交哈希: ${{ github.sha }}
+            版本哈希: ${{ env.VERSION_HASH }}
+            
+            ### 包含文件
+            - auto_deploy.sh - WordPress自动部署脚本
+            - version.txt - 版本信息
+            
+            此版本仅用于debug-auto-deploy分支的测试和开发目的。
+          draft: false
+          prerelease: true
+          files: |
+            /tmp/release-files/auto_deploy.sh
+            /tmp/release-files/version.txt
+            /tmp/auto-deploy-hash.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 发送通知
+        run: |
+          echo "::group::发送构建完成通知"
+          echo "Auto Deploy脚本构建完成并已发布到GitHub Releases"
+          echo "Release标签: auto-deploy-${{ env.TIMESTAMP }}"
+          echo "请访问 https://github.com/${{ github.repository }}/releases/tag/auto-deploy-${{ env.TIMESTAMP }} 下载最新版本"
