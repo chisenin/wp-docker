@@ -224,7 +224,7 @@ optimize_parameters() {
         
         # 确保生成的环境变量格式正确，不含特殊字符问题
         # 清理wp_keys中的特殊字符，确保格式正确
-        sanitized_keys=$(echo "$wp_keys" | sed 's/\r//g' | sed 's/"/\\"/g')
+        local sanitized_keys=$(echo "$wp_keys" | sed 's/\r//g' | sed 's/"/\\"/g')
         
         cat > .env << EOF
 # WordPress Docker环境变量配置
