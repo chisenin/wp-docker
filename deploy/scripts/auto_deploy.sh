@@ -1,4 +1,4 @@
-#!/bin/sh
+ï»¿#!/bin/sh
 # ??sh???????
 set -eu
 # pipefail?bash??????sh????
@@ -394,7 +394,7 @@ deploy_wordpress_stack() {
                 # ??????Docker????????????????
                 # echo '{"registry-mirrors": ["https://registry.docker-cn.com", "https://docker.mirrors.ustc.edu.cn"]}' > /etc/docker/daemon.json 2>/dev/null || true
                 
-                for ((i=1; i<=retry_count; i++)); do
+                for i in $(seq 1 $retry_count); do
                     print_blue "????alpine?? (?$i???)..."
                     if docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R www-data:www-data /var/www/html 2>/dev/null; then
                         docker_success=true
@@ -543,5 +543,5 @@ main() {
 main
 x 
  
- \ n #   4NöeîO9e
+ \ n #   4Nï¿½eï¿½O9e
  
