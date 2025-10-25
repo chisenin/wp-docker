@@ -230,7 +230,7 @@ optimize_parameters() {
 # WordPress Docker环境变量配置
 # 生成时间: $(date)
 
-DOCKERHUB_USERNAME=library
+DOCKERHUB_USERNAME=chisenin
 PHP_VERSION=$php_version
 NGINX_VERSION=$nginx_version
 MARIADB_VERSION=$mariadb_version
@@ -259,8 +259,8 @@ MEM_LIMIT=${MEM_LIMIT}MB
 PHP_MEMORY_LIMIT=$PHP_MEMORY_LIMIT
 UPLOAD_MAX_FILESIZE=64M
 
-# WordPress安全密钥
-$sanitized_keys
+# WordPress安全密钥 - 以下行使用export格式确保python-dotenv能正确解析
+export $(echo "$sanitized_keys" | sed 's/WORDPRESS_//g')
 EOF
         
         # 添加说明关于换行符问题
@@ -285,13 +285,13 @@ EOF
             CPU_LIMIT=1
         fi
         
-        # 生成docker-compose.yml文件，确保CPU限制设置正确
+        # 生成docker-compose.yml文件，使用项目主分支重构的镜像
         cat > docker-compose.yml << EOF
 version: '3.8'
 
 services:
   nginx:
-    image: ${DOCKERHUB_USERNAME:-library}/nginx:${NGINX_VERSION:-latest}
+    image: chisenin/wp-docker-nginx:${NGINX_VERSION:-latest}
     container_name: nginx
     ports:
       - "80:80"
@@ -310,7 +310,7 @@ services:
           memory: "${MEM_LIMIT:-512M}"
 
   php:
-    image: ${DOCKERHUB_USERNAME:-library}/php:${PHP_VERSION:-latest}-fpm
+    image: chisenin/wp-docker-php:${PHP_VERSION:-latest}-fpm
     container_name: php
     volumes:
       - ./html:/var/www/html
@@ -326,7 +326,7 @@ services:
           memory: "${MEM_LIMIT:-512M}"
 
   mariadb:
-    image: ${DOCKERHUB_USERNAME:-library}/mariadb:${MARIADB_VERSION:-latest}
+    image: chisenin/wp-docker-mariadb:${MARIADB_VERSION:-latest}
     container_name: mariadb
     volumes:
       - ./mysql:/var/lib/mysql
@@ -343,7 +343,7 @@ services:
           memory: "1024M"
 
   redis:
-    image: ${DOCKERHUB_USERNAME:-library}/redis:${REDIS_VERSION:-latest}
+    image: chisenin/wp-docker-redis:${REDIS_VERSION:-latest}
     container_name: redis
     volumes:
       - ./redis:/data
