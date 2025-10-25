@@ -139,7 +139,7 @@ check_memory() {
         AVAILABLE_RAM=$(free -m | grep Mem | awk '{print $2}')
     fi
     if [ "$AVAILABLE_RAM" -lt 2048 ]; then
-        handle_error "Insufficient memory: ${AVAILABLE_RAM}MB (required: 2048 MB)"
+        handle_error "Insufficient memory: ${AVAILABLE_RAM}MB required: 2048 MB"
     fi
     log_message "Available memory: ${AVAILABLE_RAM}MB"
 }
