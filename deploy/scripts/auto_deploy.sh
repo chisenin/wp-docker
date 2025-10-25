@@ -1,36 +1,4 @@
-﻿### 错误分析
-
-从您提供的错误日志来看，`auto_deploy.sh` 脚本在执行时出现了大量错误，提示类似 `command not found`，并且包含了乱码（如 `\357\273\277###`、`馃殌` 等）。这些错误表明脚本文件的编码或格式存在问题，导致 Bash 无法正确解析。以下是具体问题和原因：
-
-1. **文件编码问题**：
-   - 日志中的 `\357\273\277` 是 UTF-8 BOM（Byte Order Mark，字节顺序标记，`EF BB BF`），表明脚本文件可能以 UTF-8-BOM 编码保存，而 Bash 脚本需要纯 UTF-8 或 ASCII 编码。
-   - 中文字符（如 `馃殌`、`馃帀`）出现在错误输出中，可能是因为脚本在保存或传输过程中引入了不兼容的字符编码，或者复制粘贴时引入了不可见字符。
-
-2. **脚本内容被错误解析**：
-   - 错误如 `auto_deploy.sh: line 1: $'\357\273\277###': command not found` 表明 Bash 将注释或文档说明（如 `### 修正说明`）误认为是命令，可能是因为 BOM 或换行符问题导致脚本开头被破坏。
-   - 后续错误（如 `docker-compose.yml: command not found`、`cpus: command not found`）表明脚本的每一行都被错误解析，可能是文件格式损坏或包含不可执行的字符。
-
-3. **换行符问题**：
-   - 如果脚本是在 Windows 环境下编辑的，可能包含 Windows 换行符（CRLF，`\r\n`），而 Linux/Unix 环境期望 Unix 换行符（LF，`\n`）。这会导致 Bash 解析失败，出现 `command not found` 错误。
-
-4. **文件传输或复制问题**：
-   - 脚本可能在从某个来源（如 GitHub 或其他编辑器）复制到服务器时，引入了额外的字符、BOM 或格式问题。
-   - 日志中的中文乱码（如 `警告:`、`修复后的`）可能是复制粘贴时从文档或其他来源带入了不兼容的字符。
-
-### 解决方案
-
-为了解决这些问题，我们需要：
-1. 移除 UTF-8 BOM 和不兼容字符，确保脚本使用纯 UTF-8 编码。
-2. 转换为 Unix 换行符（LF）。
-3. 确保脚本内容完整且可执行。
-4. 提供一个干净的、修正后的 `auto_deploy.sh` 文件，避免复制粘贴引入问题。
-
-以下是修正后的 `auto_deploy.sh` 脚本，已移除所有可能导致编码问题的注释，并确保使用纯 UTF-8 编码和 Unix 换行符。脚本内容基于您提供的原始脚本，并包含之前修复的 MariaDB CPU 限制错误和 Nginx 资源警告问题。
-
-### 修正后的 `auto_deploy.sh`
-
-```bash
-#!/bin/bash
+﻿#!/bin/bash
 
 set -e
 
@@ -374,8 +342,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "$MARIADB_CPU_LIMIT"
-          memory: "$MARIADB_MEMORY_LIMIT"
+          cpus: "${MARIADB_CPU_LIMIT:-0.5}"
+          memory: "${MARIADB_MEMORY_LIMIT:-512m}"
 
   redis:
     image: redis:$REDIS_VERSION
@@ -422,8 +390,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "$CPU_LIMIT"
-          memory: "$MEMORY_LIMIT"
+          cpus: "${CPU_LIMIT:-2}"
+          memory: "${MEMORY_LIMIT:-2048m}"
 
   nginx:
     build:
@@ -452,8 +420,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "$NGINX_CPU_LIMIT"
-          memory: "$NGINX_MEMORY_LIMIT"
+          cpus: "${NGINX_CPU_LIMIT:-1}"
+          memory: "${NGINX_MEMORY_LIMIT:-256m}"
 
 networks:
   wp_network:
@@ -726,100 +694,3 @@ main() {
 }
 
 main "$@"
-```
-
-### 修复步骤
-
-1. **保存脚本**：
-   - 将上述内容保存为 `/opt/auto_deploy.sh`。
-   - **确保使用纯文本编辑器**（如 `vim`、`nano`）保存，避免引入 BOM 或其他不可见字符：
-     ```bash
-     nano /opt/auto_deploy.sh
-     ```
-     粘贴内容，保存并退出（`Ctrl+O`, `Enter`, `Ctrl+X`）。
-   - 设置执行权限：
-     ```bash
-     chmod +x /opt/auto_deploy.sh
-     ```
-
-2. **检查文件编码**：
-   - 验证文件没有 BOM：
-     ```bash
-     file /opt/auto_deploy.sh
-     ```
-     期望输出：` Bourne-Again shell script, ASCII text executable` 或类似。
-     如果显示 `with BOM`，移除 BOM：
-     ```bash
-     sed -i '1s/^\xEF\xBB\xBF//' /opt/auto_deploy.sh
-     ```
-
-3. **转换为 Unix 换行符**：
-   - 如果脚本包含 Windows 换行符（CRLF），转换为 Unix 换行符（LF）：
-     ```bash
-     dos2unix /opt/auto_deploy.sh
-     ```
-     如果 `dos2unix` 未安装，安装：
-     ```bash
-     apt-get update && apt-get install -y dos2unix
-     ```
-
-4. **运行脚本**：
-   ```bash
-   cd /opt
-   ./auto_deploy.sh
-   ```
-   - 使用 `--force` 强制重新生成配置文件：
-     ```bash
-     ./auto_deploy.sh --force
-     ```
-
-5. **验证**：
-   - 检查日志文件：`/opt/logs/deploy.log`。
-   - 确认 `docker-compose.yml` 生成且包含有效 `cpus` 值：
-     ```bash
-     cat /opt/docker-compose.yml | grep cpus
-     ```
-     期望输出类似：
-     ```
-     cpus: "0.5"  # mariadb
-     cpus: "2"    # php
-     cpus: "1"    # nginx
-     ```
-   - 检查服务状态：
-     ```bash
-     docker-compose ps
-     ```
-
-6. **调试**：
-   - 如果仍有错误，查看 Docker Compose 日志：
-     ```bash
-     docker-compose logs --tail=50
-     ```
-   - 验证 `docker-compose.yml` 语法：
-     ```bash
-     docker-compose config
-     ```
-
-### 预防措施
-
-- **避免复制粘贴问题**：直接在服务器上使用 `nano` 或 `vim` 编辑脚本，避免从网页或其他编辑器复制引入不可见字符。
-- **备份**：在运行脚本前备份现有配置文件（`.env`、`docker-compose.yml`、 `configs/*`）。
-- **依赖检查**：确保 Docker 和 Docker Compose 已安装：
-  ```bash
-  docker --version
-  docker-compose --version || docker compose version
-  ```
-  如果未安装，安装 Docker 和 Docker Compose：
-  ```bash
-  apt-get update && apt-get install -y docker.io docker-compose
-  ```
-
-### 如果问题仍未解决
-
-如果执行仍失败，请提供以下信息：
-- 当前 `/opt/auto_deploy.sh` 的开头几行：`head -n 20 /opt/auto_deploy.sh`
-- 文件编码信息：`file /opt/auto_deploy.sh`
-- 完整错误日志：`./auto_deploy.sh > deploy_error.log 2>&1 && cat deploy_error.log`
-- 是否存在 `../build/Dockerfiles/php` 和 `../build/Dockerfiles/nginx`（脚本中 PHP 和 Nginx 服务使用自定义构建）。
-
-这些信息将帮助我进一步诊断问题！
