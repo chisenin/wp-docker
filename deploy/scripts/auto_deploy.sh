@@ -289,8 +289,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: ${MARIADB_CPU_LIMIT}
-          memory: ${MARIADB_MEMORY_LIMIT}
+          cpus: "${MARIADB_CPU_LIMIT}"
+          memory: "${MARIADB_MEMORY_LIMIT}"
 
   redis:
     image: redis:$REDIS_VERSION
@@ -307,8 +307,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: ${REDIS_CPU_LIMIT:-0.5}
-          memory: ${REDIS_MEMORY_LIMIT:-128m}
+          cpus: "${REDIS_CPU_LIMIT:-0.5}"
+          memory: "${REDIS_MEMORY_LIMIT:-128m}"
 
   php:
     build:
@@ -337,8 +337,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: ${CPU_LIMIT}
-          memory: ${MEMORY_LIMIT}
+          cpus: "${CPU_LIMIT}"
+          memory: "${MEMORY_LIMIT}"
 
   nginx:
     build:
@@ -367,8 +367,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: ${NGINX_CPU_LIMIT}
-          memory: ${NGINX_MEMORY_LIMIT}
+          cpus: "${NGINX_CPU_LIMIT}"
+          memory: "${NGINX_MEMORY_LIMIT}"
 
 networks:
   wp_network:
@@ -382,9 +382,14 @@ EOF
     if ! $DOCKER_COMPOSE_CMD config >/dev/null 2>&1; then
         handle_error "docker-compose.yml configuration syntax error"
     fi
-    log_message "Current resource limits: CPU=$CPU_LIMIT, Memory=$MEMORY_LIMIT, MARIADB_CPU=$MARIADB_CPU_LIMIT, MARIADB_MEMORY=$MARIADB_MEMORY_LIMIT, NGINX_CPU=$NGINX_CPU_LIMIT, NGINX_MEMORY=$NGINX_MEMORY_LIMIT"
-    log_message "Building Docker images..."
-    $DOCKER_COMPOSE_CMD build || handle_error "Failed to build Docker images"
+    log_message "Current resource limits: CPU=$CPU_LIMIT, Memory=$MEMORY_LIMIT, MARIADB_CPU=$MARIADB_CPU_LIMIT, MARIADB_MEMORY=$MARIADB_MEMORY_LIMIT, NGINX_CPU=$NGINX_CPU_LIMIT, NGINX_MEMORY=$NGINX_MEMORY_LIMIT, REDIS_CPU=${REDIS_CPU_LIMIT:-0.5}, REDIS_MEMORY=${REDIS_MEMORY_LIMIT:-128m}"
+    # 添加临时文件保存docker-compose.yml以便调试
+    log_message "Saving docker-compose.yml for validation..."
+    if ! $DOCKER_COMPOSE_CMD config >/dev/null 2>&1; then
+        log_message "docker-compose.yml validation failed, printing generated file..."
+        cat docker-compose.yml
+        handle_error "docker-compose.yml configuration syntax error"
+    fi
     log_message "Success: Image building completed"
 }
 
