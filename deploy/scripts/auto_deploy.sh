@@ -596,7 +596,7 @@ setup_backup_config() {
     cat > "$DEPLOY_DIR/scripts/backup.sh" << 'EOF'
 #!/bin/bash
 
-BACKUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../backups" && pwd)"
+BACKUP_DIR="$(cd "$SCRIPT_DIR/../backups" && pwd)"
 DATE=$(date +"%Y-%m-%d_%H-%M-%S")
 BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
 
