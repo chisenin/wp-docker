@@ -553,14 +553,14 @@ start_services() {
         sed -i "s/password_here/$WORDPRESS_DB_PASSWORD/" html/wp-config.php
         sed -i "s/localhost/$WORDPRESS_DB_HOST/" html/wp-config.php
         # 使用单引号包裹sed命令，并使用不同的分隔符避免冲突
-        sed -i 's@define(\s*["\']AUTH_KEY["\'],.*@define( "AUTH_KEY",         "'"$WORDPRESS_AUTH_KEY"'" );@g' html/wp-config.php
-        sed -i 's@define(\s*["\']SECURE_AUTH_KEY["\'],.*@define( "SECURE_AUTH_KEY",  "'"$WORDPRESS_SECURE_AUTH_KEY"'" );@g' html/wp-config.php
-        sed -i 's@define(\s*["\']LOGGED_IN_KEY["\'],.*@define( "LOGGED_IN_KEY",    "'"$WORDPRESS_LOGGED_IN_KEY"'" );@g' html/wp-config.php
-        sed -i 's@define(\s*["\']NONCE_KEY["\'],.*@define( "NONCE_KEY",        "'"$WORDPRESS_NONCE_KEY"'" );@g' html/wp-config.php
-        sed -i 's@define(\s*["\']AUTH_SALT["\'],.*@define( "AUTH_SALT",        "'"$WORDPRESS_AUTH_SALT"'" );@g' html/wp-config.php
-        sed -i 's@define(\s*["\']SECURE_AUTH_SALT["\'],.*@define( "SECURE_AUTH_SALT", "'"$WORDPRESS_SECURE_AUTH_SALT"'" );@g' html/wp-config.php
-        sed -i 's@define(\s*["\']LOGGED_IN_SALT["\'],.*@define( "LOGGED_IN_SALT",   "'"$WORDPRESS_LOGGED_IN_SALT"'" );@g' html/wp-config.php
-        sed -i 's@define(\s*["\']NONCE_SALT["\'],.*@define( "NONCE_SALT",       "'"$WORDPRESS_NONCE_SALT"'" );@g' html/wp-config.php
+        sed -i 's@define([ \t]*["\']AUTH_KEY["\'],.*@define( "AUTH_KEY",         "'"$WORDPRESS_AUTH_KEY"'" );@g' html/wp-config.php
+        sed -i 's@define([ \t]*["\']SECURE_AUTH_KEY["\'],.*@define( "SECURE_AUTH_KEY",  "'"$WORDPRESS_SECURE_AUTH_KEY"'" );@g' html/wp-config.php
+        sed -i 's@define([ \t]*["\']LOGGED_IN_KEY["\'],.*@define( "LOGGED_IN_KEY",    "'"$WORDPRESS_LOGGED_IN_KEY"'" );@g' html/wp-config.php
+        sed -i 's@define([ \t]*["\']NONCE_KEY["\'],.*@define( "NONCE_KEY",        "'"$WORDPRESS_NONCE_KEY"'" );@g' html/wp-config.php
+        sed -i 's@define([ \t]*["\']AUTH_SALT["\'],.*@define( "AUTH_SALT",        "'"$WORDPRESS_AUTH_SALT"'" );@g' html/wp-config.php
+        sed -i 's@define([ \t]*["\']SECURE_AUTH_SALT["\'],.*@define( "SECURE_AUTH_SALT", "'"$WORDPRESS_SECURE_AUTH_SALT"'" );@g' html/wp-config.php
+        sed -i 's@define([ \t]*["\']LOGGED_IN_SALT["\'],.*@define( "LOGGED_IN_SALT",   "'"$WORDPRESS_LOGGED_IN_SALT"'" );@g' html/wp-config.php
+        sed -i 's@define([ \t]*["\']NONCE_SALT["\'],.*@define( "NONCE_SALT",       "'"$WORDPRESS_NONCE_SALT"'" );@g' html/wp-config.php
         # 使用echo命令替代heredoc，避免潜在的解析问题
         echo "" >> html/wp-config.php
         echo "/** Redis Configuration */" >> html/wp-config.php
