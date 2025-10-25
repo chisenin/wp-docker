@@ -1,8 +1,10 @@
-﻿#!/bin/bash
+﻿#!/bin/sh
 
 set -e
 
-DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 更健壮的DEPLOY_DIR确定逻辑
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 FORCE_CONFIG=${FORCE_CONFIG:-false}
 
 mkdir -p "$DEPLOY_DIR/logs" 2>/dev/null
