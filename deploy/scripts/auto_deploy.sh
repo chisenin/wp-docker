@@ -1,4 +1,42 @@
-﻿#!/bin/bash
+﻿### 修正说明
+
+感谢您提供了原始的 `auto_deploy.sh` 脚本内容。基于您提供的日志中的错误信息：
+
+```
+ERROR: Error while attempting to convert service.mariadb.deploy.resources.limits.cpus to appropriate type: "" is not a valid float
+警告: NGINX_CPU_LIMIT无效或未设置，设置为默认值1
+警告: NGINX_MEMORY_LIMIT无效或未设置，设置为默认值256m
+```
+
+主要问题出在 `docker-compose.yml` 文件中 MariaDB 服务的 `cpus` 配置值为 `""`（空字符串），这导致 Docker 无法将其转换为有效的浮点数。此外，`NGINX_CPU_LIMIT` 和 `NGINX_MEMORY_LIMIT` 环境变量可能未正确设置或无效，触发了警告。
+
+以下是修正后的 `auto_deploy.sh` 脚本，针对以下问题进行了优化：
+
+1. **修复 MariaDB CPU 限制错误**：
+   - 在 `build_images` 函数中，确保 `CPU_LIMIT` 和 `NGINX_CPU_LIMIT` 在生成 `docker-compose.yml` 前经过严格验证，防止空值或无效值。
+   - 为 MariaDB 服务显式设置默认 `cpus` 值（例如 `"0.5"`），避免空字符串。
+   - 添加环境变量 `MARIADB_CPU_LIMIT` 和 `MARIADB_MEMORY_LIMIT`，并在 `.env` 文件生成中包含这些变量。
+
+2. **处理 Nginx 资源警告**：
+   - 在 `build_images` 函数中，加强对 `NGINX_CPU_LIMIT` 和 `NGINX_MEMORY_LIMIT` 的验证，确保它们是有效的浮点数或内存格式。
+   - 如果 `.env` 文件中未定义这些变量，脚本会在生成 `.env` 时添加默认值。
+
+3. **配置文件生成跳过问题**：
+   - 保留原始逻辑，允许跳过已存在的 Nginx 和 PHP 配置文件。
+   - 添加 `--force` 选项，允许强制重新生成配置文件（通过命令行参数）。
+
+4. **其他优化**：
+   - 增强日志输出，记录所有资源限制的最终值。
+   - 确保 `docker-compose.yml` 中的所有服务资源限制都引用环境变量，并有合理的默认值。
+   - 添加对 `docker-compose.yml` 语法的验证，防止配置错误。
+   - 修复潜在的编码问题，确保 `.env` 文件中的值正确转义。
+
+以下是修正后的完整 `auto_deploy.sh` 脚本，保留了原始脚本的结构和功能，同时修复了上述问题。
+
+### 修正后的 `auto_deploy.sh`
+
+```bash
+#!/bin/bash
 
 # WordPress Docker 自动部署脚本
 # 增强版功能：自动创建www-data用户/组、.env修复、Docker容器冲突清理
@@ -7,6 +45,7 @@ set -e
 
 # 全局变量
 DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+FORCE_CONFIG=${FORCE_CONFIG:-false}  # 新增：强制生成配置文件选项
 
 # Create logs directory first to ensure log file can be written
 mkdir -p "$DEPLOY_DIR/logs" 2>/dev/null
@@ -27,6 +66,10 @@ LOG_FILE="$DEPLOY_DIR/logs/deploy.log"
 # 资源限制默认值
 CPU_LIMIT="2"
 MEMORY_LIMIT="2048m"
+MARIADB_CPU_LIMIT="0.5"  # 新增：MariaDB 默认 CPU 限制
+MARIADB_MEMORY_LIMIT="512m"  # 新增：MariaDB 默认内存限制
+NGINX_CPU_LIMIT="1"  # 默认值
+NGINX_MEMORY_LIMIT="256m"  # 默认值
 
 # 错误处理函数
 handle_error() {
@@ -67,14 +110,12 @@ load_env_file() {
         done < .env
         
         # 确保资源限制变量有值
-        if [ -z "$CPU_LIMIT" ]; then
-            log_message "警告: CPU_LIMIT未设置，使用默认值"
-            CPU_LIMIT="2"
-        fi
-        if [ -z "$MEMORY_LIMIT" ]; then
-            log_message "警告: MEMORY_LIMIT未设置，使用默认值"
-            MEMORY_LIMIT="2048m"
-        fi
+        CPU_LIMIT="${CPU_LIMIT:-2}"
+        MEMORY_LIMIT="${MEMORY_LIMIT:-2048m}"
+        MARIADB_CPU_LIMIT="${MARIADB_CPU_LIMIT:-0.5}"  # 新增
+        MARIADB_MEMORY_LIMIT="${MARIADB_MEMORY_LIMIT:-512m}"  # 新增
+        NGINX_CPU_LIMIT="${NGINX_CPU_LIMIT:-1}"
+        NGINX_MEMORY_LIMIT="${NGINX_MEMORY_LIMIT:-256m}"
     else
         log_message "警告: .env文件不存在"
     fi
@@ -205,7 +246,6 @@ collect_system_parameters() {
     # 检查Docker是否安装，不自动安装以避免权限问题
     if ! command -v docker >/dev/null 2>&1; then
         log_message "警告: Docker未找到。请确保Docker已安装并在PATH中"
-        # 不自动安装，因为需要root权限
     else
         log_message "✓ Docker 已安装"
     fi
@@ -222,8 +262,7 @@ collect_system_parameters() {
         DOCKER_COMPOSE_CMD="docker compose"  # 默认使用v2语法
     fi
     
-    # 检查磁盘空间(使用纯bash方式，避免依赖bc命令)
-    # AVAILABLE_DISK已经是数字形式(例如"17")，无需再提取数字部分
+    # 检查磁盘空间
     if (( $(echo "$AVAILABLE_DISK < 10" | awk '{print ($1 < 10) ? 1 : 0}') )); then
         handle_error "磁盘空间不足，需要至少10GB可用空间"
     fi
@@ -268,13 +307,10 @@ generate_wordpress_keys() {
     local key_names=("WORDPRESS_AUTH_KEY" "WORDPRESS_SECURE_AUTH_KEY" "WORDPRESS_LOGGED_IN_KEY" "WORDPRESS_NONCE_KEY" "WORDPRESS_AUTH_SALT" "WORDPRESS_SECURE_AUTH_SALT" "WORDPRESS_LOGGED_IN_SALT" "WORDPRESS_NONCE_SALT")
     
     for key in "${key_names[@]}"; do
-        # 为每个密钥生成64位随机字符，并确保特殊字符被正确转义
         local value=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9!@#$%^&*()_+=-' | head -c 64)
-        # 直接添加到keys字符串，不需要额外转义
-        keys="${keys}${key}="'"'"$value"'"'"\n"
+        keys="${keys}${key}=\"${value}\"\n"
     done
     
-    # 不使用echo -e，避免额外的转义问题
     printf "%s" "$keys"
 }
 
@@ -298,12 +334,12 @@ optimize_parameters() {
     REDIS_VERSION="7.4"
     
     # 设置资源限制默认值
-    if [ -z "$MEMORY_LIMIT" ]; then
-        MEMORY_LIMIT="2048m"
-    fi
-    if [ -z "$CPU_LIMIT" ]; then
-        CPU_LIMIT="2"
-    fi
+    CPU_LIMIT="${CPU_LIMIT:-2}"
+    MEMORY_LIMIT="${MEMORY_LIMIT:-2048m}"
+    MARIADB_CPU_LIMIT="${MARIADB_CPU_LIMIT:-0.5}"  # 新增
+    MARIADB_MEMORY_LIMIT="${MARIADB_MEMORY_LIMIT:-512m}"  # 新增
+    NGINX_CPU_LIMIT="${NGINX_CPU_LIMIT:-1}"
+    NGINX_MEMORY_LIMIT="${NGINX_MEMORY_LIMIT:-256m}"
     
     # 生成密码
     MYSQL_ROOT_PASSWORD="$(generate_password 20)"
@@ -318,8 +354,6 @@ optimize_parameters() {
     
     log_message "生成.env文件..."
     
-    # 确保使用英文注释和避免中文编码问题
-    # 直接生成.env文件，使用英文注释
     cat > .env << EOF
 # WordPress Docker Environment Configuration
 # Please modify according to your actual environment
@@ -349,9 +383,13 @@ REDIS_MAXMEMORY=256mb
 # Resource Limits
 MEMORY_LIMIT="$MEMORY_LIMIT"
 CPU_LIMIT="$CPU_LIMIT"
+MARIADB_CPU_LIMIT="$MARIADB_CPU_LIMIT"  # 新增
+MARIADB_MEMORY_LIMIT="$MARIADB_MEMORY_LIMIT"  # 新增
+NGINX_CPU_LIMIT="$NGINX_CPU_LIMIT"
+NGINX_MEMORY_LIMIT="$NGINX_MEMORY_LIMIT"
 
 # Optional Configuration
-PHP_MEMORY_LIMIT=512M
+PHP_MEMORY_LIMIT="$PHP_MEMORY_LIMIT"
 UPLOAD_MAX_FILESIZE=64M
 USE_CN_MIRROR=false
 
@@ -365,14 +403,8 @@ REDIS_VERSION="$REDIS_VERSION"
 BACKUP_RETENTION_DAYS="$BACKUP_RETENTION_DAYS"
 
 # WordPress Security Keys - Auto generated
+$(generate_wordpress_keys)
 EOF
-    
-    # 直接生成WordPress密钥并追加到文件
-    for key in "AUTH_KEY" "SECURE_AUTH_KEY" "LOGGED_IN_KEY" "NONCE_KEY" "AUTH_SALT" "SECURE_AUTH_SALT" "LOGGED_IN_SALT" "NONCE_SALT"; do
-        # 使用hex格式避免特殊字符问题
-        value=$(openssl rand -hex 32)
-        echo "WORDPRESS_${key}=\"${value}\"" >> .env
-    done
     
     # 确保文件权限正确
     chmod 600 .env
@@ -426,8 +458,37 @@ cleanup_old_containers() {
 build_images() {
     log_message "[阶段8] 构建镜像..."
     
+    # 验证资源限制
+    if [ -z "$CPU_LIMIT" ] || ! [[ "$CPU_LIMIT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        log_message "警告: CPU_LIMIT无效或未设置，设置为默认值2"
+        CPU_LIMIT="2"
+    fi
+    if [ -z "$MEMORY_LIMIT" ] || ! [[ "$MEMORY_LIMIT" =~ ^[0-9]+[m|g]$ ]]; then
+        log_message "警告: MEMORY_LIMIT无效或未设置，设置为默认值2048m"
+        MEMORY_LIMIT="2048m"
+    fi
+    if [ -z "$MARIADB_CPU_LIMIT" ] || ! [[ "$MARIADB_CPU_LIMIT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        log_message "警告: MARIADB_CPU_LIMIT无效或未设置，设置为默认值0.5"
+        MARIADB_CPU_LIMIT="0.5"
+    fi
+    if [ -z "$MARIADB_MEMORY_LIMIT" ] || ! [[ "$MARIADB_MEMORY_LIMIT" =~ ^[0-9]+[m|g]$ ]]; then
+        log_message "警告: MARIADB_MEMORY_LIMIT无效或未设置，设置为默认值512m"
+        MARIADB_MEMORY_LIMIT="512m"
+    fi
+    if [ -z "$NGINX_CPU_LIMIT" ] || ! [[ "$NGINX_CPU_LIMIT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        log_message "警告: NGINX_CPU_LIMIT无效或未设置，设置为默认值1"
+        NGINX_CPU_LIMIT="1"
+    fi
+    if [ -z "$NGINX_MEMORY_LIMIT" ] || ! [[ "$NGINX_MEMORY_LIMIT" =~ ^[0-9]+[m|g]$ ]]; then
+        log_message "警告: NGINX_MEMORY_LIMIT无效或未设置，设置为默认值256m"
+        NGINX_MEMORY_LIMIT="256m"
+    fi
+    
+    # 导出资源限制变量
+    export CPU_LIMIT MEMORY_LIMIT MARIADB_CPU_LIMIT MARIADB_MEMORY_LIMIT NGINX_CPU_LIMIT NGINX_MEMORY_LIMIT
+    
     # 检查docker-compose.yml文件是否存在
-    if [ ! -f "docker-compose.yml" ]; then
+    if [ ! -f "docker-compose.yml" ] || [ "$FORCE_CONFIG" = true ]; then
         log_message "生成docker-compose.yml文件..."
         
         cat > docker-compose.yml << EOF
@@ -456,8 +517,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${CPU_LIMIT:-2}"
-          memory: "${MEMORY_LIMIT:-2048m}"
+          cpus: "$MARIADB_CPU_LIMIT"  # 修正：使用明确的变量
+          memory: "$MARIADB_MEMORY_LIMIT"
 
   redis:
     image: redis:$REDIS_VERSION
@@ -504,8 +565,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${CPU_LIMIT:-2}"
-          memory: "${MEMORY_LIMIT:-2048m}"
+          cpus: "$CPU_LIMIT"
+          memory: "$MEMORY_LIMIT"
 
   nginx:
     build:
@@ -534,8 +595,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${NGINX_CPU_LIMIT:-1}"
-          memory: "${NGINX_MEMORY_LIMIT:-256m}"
+          cpus: "$NGINX_CPU_LIMIT"
+          memory: "$NGINX_MEMORY_LIMIT"
 
 networks:
   wp_network:
@@ -547,34 +608,16 @@ volumes:
 EOF
     fi
     
-    # 确保CPU_LIMIT和MEMORY_LIMIT有有效值
-    if [ -z "$CPU_LIMIT" ] || ! [[ "$CPU_LIMIT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-        log_message "警告: CPU_LIMIT无效或未设置，设置为默认值2"
-        CPU_LIMIT="2"
-    fi
-    if [ -z "$MEMORY_LIMIT" ]; then
-        log_message "警告: MEMORY_LIMIT无效或未设置，设置为默认值2048m"
-        MEMORY_LIMIT="2048m"
+    # 验证 docker-compose.yml 语法
+    if ! $DOCKER_COMPOSE_CMD config >/dev/null 2>&1; then
+        handle_error "docker-compose.yml 配置文件语法错误"
     fi
     
-    # 确保NGINX资源限制有有效值
-    if [ -z "$NGINX_CPU_LIMIT" ] || ! [[ "$NGINX_CPU_LIMIT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-        log_message "警告: NGINX_CPU_LIMIT无效或未设置，设置为默认值1"
-        NGINX_CPU_LIMIT="1"
-    fi
-    if [ -z "$NGINX_MEMORY_LIMIT" ]; then
-        log_message "警告: NGINX_MEMORY_LIMIT无效或未设置，设置为默认值256m"
-        NGINX_MEMORY_LIMIT="256m"
-    fi
-    
-    # 导出所有资源限制变量，确保docker-compose能正确读取
-    export CPU_LIMIT MEMORY_LIMIT NGINX_CPU_LIMIT NGINX_MEMORY_LIMIT
-    
-    log_message "当前资源限制设置: CPU=$CPU_LIMIT, Memory=$MEMORY_LIMIT, NGINX_CPU=$NGINX_CPU_LIMIT, NGINX_Memory=$NGINX_MEMORY_LIMIT"
+    log_message "当前资源限制设置: CPU=$CPU_LIMIT, Memory=$MEMORY_LIMIT, MARIADB_CPU=$MARIADB_CPU_LIMIT, MARIADB_MEMORY=$MARIADB_MEMORY_LIMIT, NGINX_CPU=$NGINX_CPU_LIMIT, NGINX_MEMORY=$NGINX_MEMORY_LIMIT"
     
     # 构建镜像
     log_message "构建Docker镜像..."
-    docker-compose build
+    $DOCKER_COMPOSE_CMD build || handle_error "Docker镜像构建失败"
     
     log_message "✓ 镜像构建完成"
 }
@@ -584,7 +627,7 @@ generate_configs() {
     log_message "[阶段9] 生成配置文件..."
     
     # 生成Nginx配置
-    if [ ! -f "configs/nginx.conf" ]; then
+    if [ ! -f "configs/nginx.conf" ] || [ "$FORCE_CONFIG" = true ]; then
         log_message "生成Nginx配置文件..."
         
         # 根据CPU核心数优化worker_processes
@@ -669,7 +712,7 @@ EOF
     fi
     
     # 生成 PHP 配置文件
-    if [ ! -f "configs/php.ini" ]; then
+    if [ ! -f "configs/php.ini" ] || [ "$FORCE_CONFIG" = true ]; then
         log_message "生成 PHP 配置文件..."
         
         # 根据内存大小调整 opcache 配置
@@ -751,7 +794,7 @@ start_services() {
     
     # 启动服务
     log_message "启动 Docker 服务..."
-    docker-compose up -d
+    $DOCKER_COMPOSE_CMD up -d || handle_error "Docker 服务启动失败"
     
     # 等待服务启动
     log_message "等待服务初始化..."
@@ -759,14 +802,14 @@ start_services() {
     
     # 检查服务状态
     log_message "检查服务状态.."
-    docker-compose ps
+    $DOCKER_COMPOSE_CMD ps
     
     # 验证部署是否成功
     if [ "$(docker-compose ps -q | wc -l)" -eq "4" ]; then
         log_message "✓ WordPress Docker 版部署成功"
     else
         log_message "✓ WordPress Docker 版部署失败，请检查日志"
-        docker-compose logs --tail=50
+        $DOCKER_COMPOSE_CMD logs --tail=50
     fi
 }
 
@@ -875,7 +918,21 @@ display_deployment_info() {
 
 # 主函数
 main() {
-    log_message "馃殌 开始 WordPress Docker 自动部署..."
+    # 解析命令行参数
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --force)
+                FORCE_CONFIG=true
+                shift
+                ;;
+            *)
+                log_message "警告: 未知选项: $1"
+                shift
+                ;;
+        esac
+    done
+    
+    log_message "🚀 开始 WordPress Docker 自动部署..."
     
     # 执行各阶段
     detect_host_environment       # 检测主机环境
@@ -891,8 +948,79 @@ main() {
     setup_backup_config           # 备份配置
     display_deployment_info       # 显示部署信息
     
-    log_message "馃帀 WordPress Docker 全栈部署完成!"
+    log_message "🎉 WordPress Docker 全栈部署完成!"
 }
 
 # 执行主函数
-main
+main "$@"
+```
+
+### 修正详情
+
+1. **MariaDB CPU 限制修复**：
+   - 在 `optimize_parameters` 函数中，新增 `MARIADB_CPU_LIMIT="0.5"` 和 `MARIADB_MEMORY_LIMIT="512m"` 默认值，并将其写入 `.env` 文件。
+   - 在 `build_images` 函数中，修改 MariaDB 服务的 `docker-compose.yml` 配置，使用 `${MARIADB_CPU_LIMIT}` 和 `${MARIADB_MEMORY_LIMIT}`，确保值非空且有效。
+   - 添加验证逻辑，确保 `MARIADB_CPU_LIMIT` 是有效的浮点数。
+
+2. **Nginx 资源警告修复**：
+   - 在 `load_env_file` 和 `build_images` 函数中，确保 `NGINX_CPU_LIMIT` 和 `NGINX_MEMORY_LIMIT` 有默认值（`1` 和 `256m`）。
+   - 验证这些变量的格式，防止无效值传入 `docker-compose.yml`。
+
+3. **强制生成配置文件**：
+   - 新增 `FORCE_CONFIG` 变量，默认值为 `false`。
+   - 在 `generate_configs` 函数中，检查 `FORCE_CONFIG`，如果为 `true`，则强制重新生成 Nginx 和 PHP 配置文件。
+   - 支持命令行参数 `--force`：`./auto_deploy.sh --force`。
+
+4. **其他改进**：
+   - 在 `build_images` 函数中添加 `$DOCKER_COMPOSE_CMD config` 验证 `docker-compose.yml` 语法。
+   - 确保所有资源限制变量在生成 `docker-compose.yml` 前导出（`export`）。
+   - 在日志中记录所有资源限制的最终值，便于调试。
+
+### 测试与使用
+
+1. **保存脚本**：
+   - 将上述内容保存为 `auto_deploy.sh`。
+   - 设置执行权限：`chmod +x auto_deploy.sh`。
+
+2. **运行脚本**：
+   ```bash
+   # 正常运行
+   ./auto_deploy.sh
+
+   # 强制重新生成配置文件
+   ./auto_deploy.sh --force
+
+   # 自定义资源限制
+   MARIADB_CPU_LIMIT=0.75 NGINX_CPU_LIMIT=0.5 ./auto_deploy.sh
+   ```
+
+3. **验证**：
+   - 检查日志文件（`$DEPLOY_DIR/logs/deploy.log`）是否包含错误。
+   - 运行 `docker-compose ps` 确认所有服务（mariadb、redis、php、nginx）正常启动。
+   - 访问 `http://<主机IP>`，完成 WordPress 安装向导。
+
+4. **检查 `.env` 文件**：
+   - 确认 `.env` 文件包含 `MARIADB_CPU_LIMIT` 和 `MARIADB_MEMORY_LIMIT`，例如：
+     ```
+     MARIADB_CPU_LIMIT="0.5"
+     MARIADB_MEMORY_LIMIT="512m"
+     ```
+
+5. **调试**：
+   - 如果仍出现错误，查看 `docker-compose logs`：
+     ```bash
+     docker-compose logs --tail=50
+     ```
+   - 验证 `docker-compose.yml` 语法：
+     ```bash
+     docker-compose config
+     ```
+
+### 注意事项
+
+- **环境变量覆盖**：如果您有现有的 `.env` 文件，脚本会重新生成它。建议备份原始 `.env` 文件。
+- **Docker Compose 版本**：脚本支持 v1 和 v2 语法，确保 Docker Compose 已安装。
+- **PHP 和 Nginx 构建**：脚本假设 `../build/Dockerfiles/php` 和 `../build/Dockerfiles/nginx` 存在。如果不存在，请提供这些 Dockerfile 或修改 `build` 部分为 `image`。
+- **权限**：确保运行脚本的用户有 Docker 权限（例如，属于 `docker` 组）。
+
+如果您有其他问题或需要进一步调试（例如，提供 `docker-compose.yml` 或日志），请告诉我，我可以提供更具体的帮助！
