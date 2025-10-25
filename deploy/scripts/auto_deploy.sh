@@ -429,8 +429,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${CPU_LIMIT}"
-          memory: "${MEMORY_LIMIT}"
+          cpus: "${CPU_LIMIT:-2}"
+          memory: "${MEMORY_LIMIT:-2048m}"
 
   redis:
     image: redis:$REDIS_VERSION
@@ -477,8 +477,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${CPU_LIMIT}"
-          memory: "${MEMORY_LIMIT}"
+          cpus: "${CPU_LIMIT:-2}"
+          memory: "${MEMORY_LIMIT:-2048m}"
 
   nginx:
     build:
@@ -507,8 +507,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: "256m"
+          cpus: "${NGINX_CPU_LIMIT:-1}"
+          memory: "${NGINX_MEMORY_LIMIT:-256m}"
 
 networks:
   wp_network:
