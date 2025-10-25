@@ -1,34 +1,40 @@
 #!/bin/bash
 
-# WordPress Docker 全栈自动部署脚本（生产环境优化版）
-# 功能：环境检测、系统参数收集、智能参数优化、自动数据库备份、磁盘空间管理
+# WordPress Docker 自动部署脚本
+# 改进版功能：自动创建www-data用户/组、.env修复、Docker容器冲突清理
 
-echo "=================================================="
-echo "WordPress Docker 全栈自动部署脚本 - 生产环境优化版"
-echo "=================================================="
+set -e
 
 # 全局变量
+DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OS_TYPE=""
 OS_VERSION=""
 CPU_CORES=0
 AVAILABLE_RAM=0
-DISK_SPACE=0
-DISK_USAGE=0
-DEPLOY_DIR=""
-BACKUP_DIR=""
+AVAILABLE_DISK=0
+PHP_MEMORY_LIMIT="512M"
 BACKUP_RETENTION_DAYS=7
-
-# 输出函数已直接替换为echo语句
+LOG_FILE="$DEPLOY_DIR/logs/deploy.log"
 
 # 错误处理函数
 handle_error() {
-    echo "错误: $1"
+    echo "错误: $1" >&2
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 错误: $1" >> "$LOG_FILE"
     exit 1
 }
 
-# 检查宿主机环境
+# 记录日志
+log_message() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# 检测宿主机环境
 detect_host_environment() {
-    echo "[阶段1] 检测宿主机环境..."
+    log_message "[阶段1] 检测宿主机环境..."
+    
+    # 创建日志目录
+    mkdir -p "$DEPLOY_DIR/logs" 2>/dev/null
     
     # 检测操作系统类型
     if [ -f /etc/os-release ]; then
@@ -37,475 +43,530 @@ detect_host_environment() {
         OS_VERSION="$VERSION_ID"
     elif [ -f /etc/debian_version ]; then
         OS_TYPE="debian"
-        OS_VERSION=$(cat /etc/debian_version)
+        OS_VERSION="$(cat /etc/debian_version)"
     elif [ -f /etc/centos-release ]; then
         OS_TYPE="centos"
-        OS_VERSION=$(rpm -q --queryformat '%{VERSION}' centos-release)
+        OS_VERSION="$(cat /etc/centos-release | sed 's/^.*release //;s/ .*$//')"
+    elif [ -f /etc/alpine-release ]; then
+        OS_TYPE="alpine"
+        OS_VERSION="$(cat /etc/alpine-release)"
     else
-        handle_error "无法识别操作系统类型，请使用 CentOS、Debian、Ubuntu 或 Alpine"
+        handle_error "不支持的操作系统类型"
     fi
     
-    echo "操作系统: $OS_TYPE $OS_VERSION"
+    log_message "操作系统: $OS_TYPE $OS_VERSION"
+}
+
+# 环境准备：创建www-data用户/组、修复.env文件、清理Docker冲突
+environment_preparation() {
+    log_message "[阶段2] 环境准备..."
     
-    # 验证是否支持的操作系统
-    case "$OS_TYPE" in
-        centos|debian|ubuntu|alpine)
-            echo "✓ 操作系统受支持"
-            ;;
-        *)
-            handle_error "不支持的操作系统: $OS_TYPE，请使用 CentOS、Debian、Ubuntu 或 Alpine"
-            ;;
-    esac
+    # 1. 检测并创建www-data用户/组
+    log_message "检查并创建www-data用户/组..."
+    if ! id -u www-data >/dev/null 2>&1; then
+        log_message "创建www-data用户和组..."
+        # 根据不同系统创建用户
+        if [[ "$OS_TYPE" == "alpine" ]]; then
+            addgroup -g 33 -S www-data || handle_error "创建www-data组失败"
+            adduser -u 33 -D -S -G www-data www-data || handle_error "创建www-data用户失败"
+        else
+            groupadd -g 33 www-data 2>/dev/null || :
+            useradd -u 33 -g www-data -s /sbin/nologin -M www-data 2>/dev/null || :
+        fi
+        log_message "✓ www-data用户/组创建成功"
+    else
+        log_message "✓ www-data用户已存在"
+    fi
+    
+    # 2. 修复.env文件
+    if [ -f "$DEPLOY_DIR/.env" ]; then
+        log_message "修复.env文件中的特殊字符问题..."
+        # 创建临时文件
+        TEMP_FILE="$DEPLOY_DIR/.env.tmp"
+        # 复制.env文件，确保所有值都用双引号包裹
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            # 跳过注释和空行
+            if [[ "$line" == \#* ]] || [[ -z "$line" ]]; then
+                echo "$line" >> "$TEMP_FILE"
+                continue
+            fi
+            
+            # 检查是否已经有引号
+            if [[ "$line" == *=* ]]; then
+                key="${line%%=*}"
+                value="${line#*=}"
+                
+                # 如果值没有被引号包裹，添加双引号
+                if [[ ! "$value" =~ ^['"].*['"]$ ]]; then
+                    echo "$key=\"$value\"" >> "$TEMP_FILE"
+                else
+                    echo "$line" >> "$TEMP_FILE"
+                fi
+            else
+                echo "$line" >> "$TEMP_FILE"
+            fi
+        done < "$DEPLOY_DIR/.env"
+        
+        # 替换原文件
+        mv "$TEMP_FILE" "$DEPLOY_DIR/.env"
+        log_message "✓ .env文件修复完成"
+    fi
+    
+    # 3. 清理Docker容器冲突
+    log_message "检查并清理Docker容器冲突..."
+    # 检查是否有重名容器在运行
+    CONTAINERS=("wp_db" "wp_redis" "wp_php" "wp_nginx")
+    for container in "${CONTAINERS[@]}"; do
+        if docker ps -a | grep -q "$container"; then
+            log_message "检测到冲突容器: $container，尝试停止并移除..."
+            docker stop "$container" 2>/dev/null || :
+            docker rm "$container" 2>/dev/null || :
+            log_message "✓ 容器 $container 已移除"
+        fi
+    done
+    
+    # 检查是否有重名网络
+    if docker network ls | grep -q "wp_network"; then
+        log_message "检测到冲突网络: wp_network，尝试移除..."
+        docker network rm wp_network 2>/dev/null || :
+        log_message "✓ 网络 wp_network 已移除"
+    fi
 }
 
 # 收集系统参数
 collect_system_parameters() {
-    echo "[阶段2] 收集系统参数..."
+    log_message "[阶段3] 收集系统参数..."
     
-    # 收集 CPU 核心数
-    CPU_CORES=$(nproc)
-    echo "CPU 核心数: $CPU_CORES"
+    # 获取CPU核心数
+    CPU_CORES=$(grep -c '^processor' /proc/cpuinfo)
+    log_message "CPU核心数: $CPU_CORES"
     
-    # 收集内存信息（MB）
-    if [ "$OS_TYPE" == "alpine" ]; then
-        AVAILABLE_RAM=$(free -m | grep Mem | awk '{print $2}')
-    else
-        AVAILABLE_RAM=$(free -m | grep Mem | awk '{print $2}')
-    fi
-    echo "可用内存: ${AVAILABLE_RAM}MB"
+    # 获取可用内存（MB）
+    AVAILABLE_RAM=$(free -m | grep Mem | awk '{print $2}')
+    log_message "可用内存: ${AVAILABLE_RAM}MB"
     
-    # 收集磁盘空间信息
-    if [ "$OS_TYPE" == "alpine" ]; then
-        DISK_SPACE=$(df -h / | tail -1 | awk '{print $4}')
-        DISK_USAGE=$(df -h / | tail -1 | awk '{print $5}' | sed 's/%//')
-    else
-        DISK_SPACE=$(df -h / | tail -1 | awk '{print $4}')
-        DISK_USAGE=$(df -h / | tail -1 | awk '{print $5}' | sed 's/%//')
-    fi
-    echo "可用磁盘空间: $DISK_SPACE"
-    echo "磁盘使用率: ${DISK_USAGE}%"
+    # 获取可用磁盘空间（GB）
+    AVAILABLE_DISK=$(df -h / | tail -1 | awk '{print $4}' | sed 's/G//')
+    log_message "可用磁盘空间: ${AVAILABLE_DISK}GB"
     
-    # 检查 Docker 安装状态
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "Docker 未安装，正在尝试安装..."
-        install_docker
-    else
-        DOCKER_VERSION=$(docker --version | awk '{print $3}' | sed 's/,//')
-        echo "Docker 版本: $DOCKER_VERSION"
-    fi
-    
-    # 检查 docker-compose 安装状态
-    if ! command -v docker-compose >/dev/null 2>&1; then
-        echo "Docker Compose 未安装，正在尝试安装..."
-        install_docker_compose
-    else
-        COMPOSE_VERSION=$(docker-compose --version | awk '{print $3}' | sed 's/,//')
-        echo "Docker Compose 版本: $COMPOSE_VERSION"
-    fi
-    
-    # 检查磁盘空间是否充足
-    if [ "$DISK_USAGE" -gt 80 ]; then
-        echo "警告: 磁盘使用率超过 80%，建议清理磁盘空间"
-        BACKUP_RETENTION_DAYS=3
-        echo "自动将备份保留天数调整为: $BACKUP_RETENTION_DAYS 天"
-    fi
-    
-    # 检查内存是否充足
-    if [ "$AVAILABLE_RAM" -lt 2048 ]; then
-        echo "警告: 内存小于 2GB，可能影响性能"
-    fi
-}
-
-# 根据操作系统安装 Docker
-install_docker() {
-    case "$OS_TYPE" in
-        debian|ubuntu)
-            apt-get update && apt-get install -y apt-transport-https ca-certificates curl gnupg
-            curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/$OS_TYPE $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
-            apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io
-            ;;
-        centos)
-            yum install -y yum-utils
+    # 检查Docker和Docker Compose是否安装
+    if ! command -v docker >/dev/null; then
+        log_message "安装Docker..."
+        
+        if [[ "$OS_TYPE" == "debian" || "$OS_TYPE" == "ubuntu" ]]; then
+            apt-get update
+            apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+            add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+            apt-get update
+            apt-get install -y docker-ce
+        elif [[ "$OS_TYPE" == "centos" ]]; then
+            yum install -y yum-utils device-mapper-persistent-data lvm2
             yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-            yum install -y docker-ce docker-ce-cli containerd.io
-            systemctl start docker && systemctl enable docker
-            ;;
-        alpine)
-            apk add --no-cache docker
-            rc-update add docker boot
+            yum install -y docker-ce
+            systemctl start docker
+            systemctl enable docker
+        elif [[ "$OS_TYPE" == "alpine" ]]; then
+            apk update
+            apk add docker
             service docker start
-            ;;
-    esac
-}
-
-# 安装 Docker Compose
-install_docker_compose() {
-    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-    chmod +x /usr/local/bin/docker-compose
+            rc-update add docker boot
+        fi
+        
+        log_message "✓ Docker 安装完成"
+    fi
+    
+    if ! command -v docker-compose >/dev/null; then
+        log_message "安装Docker Compose..."
+        
+        # 安装Docker Compose
+        curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        chmod +x /usr/local/bin/docker-compose
+        
+        log_message "✓ Docker Compose 安装完成"
+    fi
+    
+    # 检查磁盘空间
+    if (( $(echo "$AVAILABLE_DISK < 10" | bc -l) )); then
+        handle_error "磁盘空间不足，需要至少10GB可用空间"
+    fi
+    
+    # 检查内存
+    if [[ "$AVAILABLE_RAM" -lt 2048 ]]; then
+        log_message "警告: 可用内存低于2GB，可能影响性能"
+    fi
 }
 
 # 确定部署目录
 determine_deployment_directory() {
-    echo "[阶段3] 确定部署目录..."
+    log_message "[阶段4] 确定部署目录..."
     
-    # 优先检查 /opt/wp-docker
-    if [ -d "/opt/wp-docker" ]; then
-        DEPLOY_DIR="/opt/wp-docker"
-        echo "使用现有目录: $DEPLOY_DIR"
-    # 其次检查 /var/wp-docker
-    elif [ -d "/var/wp-docker" ]; then
-        DEPLOY_DIR="/var/wp-docker"
-        echo "使用现有目录: $DEPLOY_DIR"
-    # 都不存在则创建 /opt/wp-docker
-    else
-        echo "创建部署目录: /opt/wp-docker"
-        mkdir -p /opt/wp-docker || handle_error "无法创建部署目录"
-        DEPLOY_DIR="/opt/wp-docker"
+    # 检查目录是否存在，不存在则创建
+    if [ ! -d "$DEPLOY_DIR" ]; then
+        mkdir -p "$DEPLOY_DIR" || handle_error "创建部署目录失败"
     fi
     
-    # 创建必要的目录结构
-    BACKUP_DIR="$DEPLOY_DIR/backups"
-    SCRIPTS_DIR="$DEPLOY_DIR/scripts"
-    LOGS_DIR="$DEPLOY_DIR/logs"
-    
-    mkdir -p "$BACKUP_DIR" || handle_error "无法创建备份目录"
-    mkdir -p "$SCRIPTS_DIR" || handle_error "无法创建脚本目录"
-    mkdir -p "$LOGS_DIR" || handle_error "无法创建日志目录"
-    
-    echo "备份目录: $BACKUP_DIR"
-    echo "脚本目录: $SCRIPTS_DIR"
-    echo "日志目录: $LOGS_DIR"
-    
     # 切换到部署目录
-    cd "$DEPLOY_DIR" || handle_error "无法切换到部署目录"
-    echo "当前工作目录: $(pwd)"
+    cd "$DEPLOY_DIR" || handle_error "切换到部署目录失败"
+    
+    # 创建必要的目录结构
+    mkdir -p html configs backups scripts logs || handle_error "创建目录结构失败"
+    
+    log_message "部署目录: $DEPLOY_DIR"
 }
 
-# 生成随机密码
+# 生成密码
 generate_password() {
-    local length=${1:-24}
-    tr -dc 'A-Za-z0-9!@#$%^&*()_+-=' < /dev/urandom | head -c "$length" || echo "default_password_change_me"
+    local length=${1:-16}
+    # 使用urandom生成随机密码
+    local password=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9!@#$%^&*()_+-=[]{}|;:,.<>?~' | head -c "$length")
+    echo "$password"
 }
 
-# 生成 WordPress 安全密钥（格式化为环境变量格式）
+# 生成WordPress密钥
 generate_wordpress_keys() {
-    echo "生成 WordPress 安全密钥..."
-    local keys_url="https://api.wordpress.org/secret-key/1.1/salt/"
-    # 直接生成安全的备用密钥，避免特殊字符问题
-    # 使用base64编码确保生成的字符串只包含安全字符
-    local keys="WORDPRESS_AUTH_KEY=\"$(generate_password 64)\"\n"
-    keys+="WORDPRESS_SECURE_AUTH_KEY=\"$(generate_password 64)\"\n"
-    keys+="WORDPRESS_LOGGED_IN_KEY=\"$(generate_password 64)\"\n"
-    keys+="WORDPRESS_NONCE_KEY=\"$(generate_password 64)\"\n"
-    keys+="WORDPRESS_AUTH_SALT=\"$(generate_password 64)\"\n"
-    keys+="WORDPRESS_SECURE_AUTH_SALT=\"$(generate_password 64)\"\n"
-    keys=$(echo "$keys" | \
-        sed "s/define('\([^']*\)', '\([^']*\)');/WORDPRESS_\1=\2/" | \
-        sed 's/define("\([^"]*\)", "\([^"]*\)");/WORDPRESS_\1=\2/')
+    local keys=""
+    
+    # 生成所有需要的WordPress密钥
+    local key_names=("AUTH_KEY" "SECURE_AUTH_KEY" "LOGGED_IN_KEY" "NONCE_KEY" "AUTH_SALT" "SECURE_AUTH_SALT" "LOGGED_IN_SALT" "NONCE_SALT")
+    
+    for key in "${key_names[@]}"; do
+        # 为每个密钥生成64位随机字符
+        local value="$(generate_password 64)"
+        # 确保值都用双引号包裹
+        keys="${keys}${key}=\"${value}\"\n"
+    done
+    
     echo "$keys"
 }
 
-# 根据系统参数优化配置
+# 优化参数
 optimize_parameters() {
-    echo "[阶段4] 根据系统参数优化配置..."
+    log_message "[阶段5] 优化参数..."
     
-    # 创建必要的目录结构
-    mkdir -p configs/nginx/conf.d
-    mkdir -p configs/mariadb
-    mkdir -p configs/redis
-    mkdir -p html
-    mkdir -p logs/nginx
-    mkdir -p logs/php
-    
-    # 计算资源限制
-    local CPU_LIMIT=$((CPU_CORES / 2))
-    local MEM_LIMIT=$((AVAILABLE_RAM / 2))
-    
-    # 根据内存大小调整 PHP 内存限制
-    local PHP_MEMORY_LIMIT="512M"
+    # 根据系统资源优化PHP内存限制
     if [ "$AVAILABLE_RAM" -lt 2048 ]; then
         PHP_MEMORY_LIMIT="256M"
-    elif [ "$AVAILABLE_RAM" -lt 4096 ]; then
-        PHP_MEMORY_LIMIT="384M"
-    else
-        PHP_MEMORY_LIMIT="512M"
+    elif [ "$AVAILABLE_RAM" -gt 4096 ]; then
+        PHP_MEMORY_LIMIT="1024M"
     fi
     
-    echo "CPU 限制: $CPU_LIMIT 核"
-    echo "内存限制: ${MEM_LIMIT}MB"
-    echo "PHP 内存限制: $PHP_MEMORY_LIMIT"
+    log_message "PHP内存限制: $PHP_MEMORY_LIMIT"
     
-    # 生成 .env 文件（如果不存在）
+    # 生成.env文件（如果不存在）
     if [ ! -f ".env" ]; then
-        echo "生成环境配置文件 (.env)..."
+        log_message "生成.env文件..."
         
-        # 生成随机密码
-        local root_password=$(generate_password)
-        local db_user_password=$(generate_password)
-        local wp_keys=$(generate_wordpress_keys)
+        # 生成密码
+        MYSQL_ROOT_PASSWORD="$(generate_password 20)"
+        MYSQL_PASSWORD="$(generate_password 20)"
+        REDIS_PASSWORD="$(generate_password 20)"
         
-        # 定义版本变量（与根目录docker-compose.yml保持一致）
-        local php_version="8.3.26"
-        local nginx_version="1.27.2"
-        local mariadb_version="11.3.2"
-        local redis_version="7.4.0"
+        # 生成WordPress密钥
+        wp_keys="$(generate_wordpress_keys)"
         
-        # 写入 .env 文件
+        # 定义版本
+        PHP_VERSION="8.1"
+        NGINX_VERSION="1.24"
+        MARIADB_VERSION="10.11"
+        REDIS_VERSION="7.0"
+        
+        # 创建.env文件
         cat > .env << EOF
-# WordPress Docker环境变量配置
-# 生成时间: $(date)
-
-# Docker相关配置
-DOCKERHUB_USERNAME=library  # Docker Hub用户名
-PHP_VERSION=$php_version  # PHP版本
-NGINX_VERSION=$nginx_version  # Nginx版本
-MARIADB_VERSION=$mariadb_version  # MariaDB版本
-REDIS_VERSION=$redis_version  # Redis版本
+# Docker配置
+COMPOSE_PROJECT_NAME=wp_docker
 
 # 数据库配置
-MYSQL_ROOT_PASSWORD=$root_password  # MySQL root用户密码
-MYSQL_DATABASE=wordpress  # WordPress数据库名称
-MYSQL_USER=wordpress  # WordPress数据库用户
-MYSQL_PASSWORD=$db_user_password  # WordPress数据库用户密码
+MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD"
+MYSQL_DATABASE="wordpress"
+MYSQL_USER="wordpress"
+MYSQL_PASSWORD="$MYSQL_PASSWORD"
 
 # WordPress配置
-WORDPRESS_DB_HOST=mariadb:3306  # 数据库主机
-WORDPRESS_DB_USER=${MYSQL_USER}  # WordPress数据库用户
-WORDPRESS_DB_PASSWORD=${MYSQL_PASSWORD}  # WordPress数据库密码
-WORDPRESS_DB_NAME=${MYSQL_DATABASE}  # WordPress数据库名称
-WORDPRESS_REDIS_HOST=redis  # Redis主机
-WORDPRESS_REDIS_PORT=6379  # Redis端口
-WORDPRESS_TABLE_PREFIX=wp_  # WordPress数据库表前缀
+WORDPRESS_DB_HOST="mariadb"
+WORDPRESS_DB_USER="wordpress"
+WORDPRESS_DB_PASSWORD="$MYSQL_PASSWORD"
+WORDPRESS_DB_NAME="wordpress"
+WORDPRESS_TABLE_PREFIX="wp_"
 
 # Redis配置
-REDIS_HOST=redis  # Redis主机
-REDIS_PORT=6379  # Redis端口
-REDIS_PASSWORD=$(generate_password 16)  # Redis认证密码
-REDIS_MAXMEMORY=256mb  # Redis最大内存限制
+REDIS_HOST="redis"
+REDIS_PASSWORD="$REDIS_PASSWORD"
 
-# 资源限制（自动优化）
-CPU_LIMIT=$CPU_LIMIT
-MEM_LIMIT=${MEM_LIMIT}MB
-PHP_MEMORY_LIMIT=$PHP_MEMORY_LIMIT
-UPLOAD_MAX_FILESIZE=64M  # 最大上传文件大小
+# 资源限制
+MEMORY_LIMIT="$((AVAILABLE_RAM / 2))m"
+CPU_LIMIT="$((CPU_CORES / 2))"
+
+# 镜像版本
+PHP_VERSION="$PHP_VERSION"
+NGINX_VERSION="$NGINX_VERSION"
+MARIADB_VERSION="$MARIADB_VERSION"
+REDIS_VERSION="$REDIS_VERSION"
+
+# 备份保留天数
+BACKUP_RETENTION_DAYS="$BACKUP_RETENTION_DAYS"
 
 # WordPress安全密钥
 $wp_keys
 EOF
         
-        echo "✓ .env 文件生成完成"
-        echo "注意: 敏感信息已保存在 .env 文件中，请妥善保管"
+        log_message "✓ .env文件生成完成"
     else
-        echo "警告: .env 文件已存在，跳过生成"
-        # 读取现有配置或设置默认值
-        source .env 2>/dev/null || :
-        CPU_LIMIT=${CPU_LIMIT:-$((CPU_CORES / 2))}
-        MEM_LIMIT=${MEM_LIMIT:-${AVAILABLE_RAM/2}MB}
-        PHP_MEMORY_LIMIT=${PHP_MEMORY_LIMIT:-$PHP_MEMORY_LIMIT}
+        log_message "警告: .env文件已存在，使用现有配置"
+        # 从.env文件加载环境变量
+        source .env
+    fi
+}
+
+# 权限设置
+set_permissions() {
+    log_message "[阶段6] 设置权限..."
+    
+    # 设置目录权限
+    log_message "设置部署目录权限..."
+    chown -R www-data:www-data "$DEPLOY_DIR/html" 2>/dev/null || :
+    chmod -R 755 "$DEPLOY_DIR/html" 2>/dev/null || :
+    
+    # 设置备份目录权限
+    chmod 700 "$DEPLOY_DIR/backups" 2>/dev/null || :
+    
+    # 设置脚本权限
+    chmod +x "$DEPLOY_DIR/scripts"/* 2>/dev/null || :
+    
+    log_message "✓ 权限设置完成"
+}
+
+# 旧容器清理
+cleanup_old_containers() {
+    log_message "[阶段7] 清理旧容器..."
+    
+    # 停止并移除旧的Docker容器
+    log_message "检查旧的Docker容器..."
+    
+    # 检查并停止相关服务
+    if docker-compose ps | grep -q "Up"; then
+        log_message "停止现有服务..."
+        docker-compose down --remove-orphans || log_message "警告: 停止服务时出现问题"
     fi
     
-    # 生成 docker-compose.yml 文件（如果不存在）
+    # 清理悬空镜像
+    if [ "$(docker images -f "dangling=true" -q)" != "" ]; then
+        log_message "清理悬空镜像..."
+        docker rmi $(docker images -f "dangling=true" -q) 2>/dev/null || :
+    fi
+    
+    log_message "✓ 旧容器清理完成"
+}
+
+# 镜像构建
+build_images() {
+    log_message "[阶段8] 构建镜像..."
+    
+    # 检查docker-compose.yml文件是否存在
     if [ ! -f "docker-compose.yml" ]; then
-        echo "生成 Docker Compose 配置文件..."
+        log_message "生成docker-compose.yml文件..."
         
         cat > docker-compose.yml << EOF
 version: '3.8'
 
 services:
-  # --- MariaDB 数据库服务 ---
   mariadb:
-    # 使用官方MariaDB镜像
-    image: mariadb:\${MARIADB_VERSION:-11.3.2}
+    image: mariadb:$MARIADB_VERSION
     container_name: wp_db
     restart: unless-stopped
     networks:
-      - app-network
+      - wp_network
     volumes:
-      - db_data:/var/lib/mysql
-      - $BACKUP_DIR:/backup
-      - ./configs/mariadb/my.cnf:/etc/my.cnf:ro
+      - ./backups/mysql:/var/lib/mysql
+      - ./configs/mariadb:/etc/mysql/conf.d
     environment:
-      MYSQL_ROOT_PASSWORD: \${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: \${MYSQL_DATABASE:-wordpress}
-      MYSQL_USER: \${MYSQL_USER:-wordpress}
-      MYSQL_PASSWORD: \${MYSQL_PASSWORD}
-    expose:
-      - "3306"
+      - MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
+      - MYSQL_DATABASE=$MYSQL_DATABASE
+      - MYSQL_USER=$MYSQL_USER
+      - MYSQL_PASSWORD=$MYSQL_PASSWORD
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-u", "root", "-p\${MYSQL_ROOT_PASSWORD}"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "mysqladmin", "ping", "-u", "root", "-p$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT}"
+          memory: "${MEMORY_LIMIT}"
 
-  # --- Redis 缓存服务 ---
   redis:
-    # 使用官方Redis镜像
-    image: redis:\${REDIS_VERSION:-7.4.0}
+    image: redis:$REDIS_VERSION
     container_name: wp_redis
     restart: unless-stopped
     networks:
-      - app-network
-    volumes:
-      - redis_data:/data
-      - ./configs/redis/redis.conf:/etc/redis/redis.conf:ro
-    environment:
-      REDIS_PASSWORD: \${REDIS_PASSWORD:-}
-      REDIS_MAXMEMORY: \${REDIS_MAXMEMORY:-256mb}
-    expose:
-      - "6379"
+      - wp_network
+    command: redis-server --requirepass $REDIS_PASSWORD
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "128m"
 
-  # --- PHP-FPM 服务 ---
   php:
-    # 使用官方PHP镜像
-    image: php:\${PHP_VERSION:-8.3.26}-fpm
-    container_name: wp_fpm
+    build:
+      context: ../build/Dockerfiles/php
+      args:
+        PHP_VERSION: $PHP_VERSION
+    container_name: wp_php
     restart: unless-stopped
     networks:
-      - app-network
+      - wp_network
     volumes:
-      # 注意：宿主机 html 目录挂载到容器内 /var/www/html
       - ./html:/var/www/html
-      # 使用配置目录中的PHP配置
-      - ./configs/php.ini:/usr/local/etc/php/php.ini:ro
-      - ./logs:/var/log/php
-    expose:
-      - "9000"
-    depends_on:
-      mariadb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - ./configs/php.ini:/usr/local/etc/php/conf.d/custom.ini
     environment:
-      WORDPRESS_DB_HOST: mariadb:3306
-      WORDPRESS_DB_USER: \${MYSQL_USER}
-      WORDPRESS_DB_PASSWORD: \${MYSQL_PASSWORD}
-      WORDPRESS_DB_NAME: \${MYSQL_DATABASE}
-      WORDPRESS_REDIS_HOST: redis
-      WORDPRESS_REDIS_PORT: 6379
-      PHP_OPCACHE_ENABLE: 1
-      PHP_MEMORY_LIMIT: \${PHP_MEMORY_LIMIT:-512M}
+      - MYSQL_HOST=$WORDPRESS_DB_HOST
+      - MYSQL_DATABASE=$WORDPRESS_DB_NAME
+      - MYSQL_USER=$WORDPRESS_DB_USER
+      - MYSQL_PASSWORD=$WORDPRESS_DB_PASSWORD
+      - REDIS_HOST=$REDIS_HOST
+      - REDIS_PASSWORD=$REDIS_PASSWORD
     healthcheck:
       test: ["CMD", "php-fpm", "-t"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT}"
+          memory: "${MEMORY_LIMIT}"
 
-  # --- Nginx 服务 ---
   nginx:
-    # 使用官方Nginx镜像
-    image: nginx:\${NGINX_VERSION:-1.27.2}
+    build:
+      context: ../build/Dockerfiles/nginx
+      args:
+        NGINX_VERSION: $NGINX_VERSION
     container_name: wp_nginx
     restart: unless-stopped
     networks:
-      - app-network
+      - wp_network
     volumes:
-      # 挂载自定义配置文件
-      - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./configs/nginx/conf.d:/etc/nginx/conf.d:ro
       - ./html:/var/www/html
+      - ./configs/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./configs/conf.d:/etc/nginx/conf.d:ro
       - ./logs/nginx:/var/log/nginx
     ports:
       - "80:80"
       - "443:443"
     depends_on:
-      php:
-        condition: service_healthy
+      - php
     healthcheck:
       test: ["CMD", "nginx", "-t"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "256m"
 
 networks:
-  app-network:
+  wp_network:
     driver: bridge
-    ipam:
-      driver: default
-      config:
-        - subnet: 172.18.0.0/16
 
 volumes:
-  db_data:
-    driver: local
-  redis_data:
-    driver: local
+  mysql_data:
+  wordpress_data:
 EOF
-        
-        echo "✓ docker-compose.yml 文件生成完成"
-    else
-        echo "警告: docker-compose.yml 文件已存在，跳过生成"
     fi
     
-    # 生成 Nginx 配置文件
-    if [ ! -f "configs/nginx/nginx.conf" ]; then
-        echo "生成 Nginx 配置文件..."
+    # 构建镜像
+    log_message "构建Docker镜像..."
+    docker-compose build
+    
+    log_message "✓ 镜像构建完成"
+}
+
+# 生成配置文件
+generate_configs() {
+    log_message "[阶段9] 生成配置文件..."
+    
+    # 生成Nginx配置
+    if [ ! -f "configs/nginx.conf" ]; then
+        log_message "生成Nginx配置文件..."
         
-        # 根据 CPU 核心数优化 worker_processes
+        # 根据CPU核心数优化worker_processes
         local worker_processes="auto"
-        if [ "$CPU_CORES" -le 2 ]; then
-            worker_processes=$CPU_CORES
+        if [[ "$OS_TYPE" == "alpine" ]]; then
+            worker_processes="$(nproc)"
         fi
         
-        # 生成主配置文件
-        cat > configs/nginx/nginx.conf << EOF
-user nginx;
-worker_processes $worker_processes;
-error_log /var/log/nginx/error.log warn;
-pid /var/run/nginx.pid;
+        # 创建nginx配置目录
+        mkdir -p configs/conf.d
+        
+        # 主配置文件
+        cat > configs/nginx.conf << EOF
+user  nginx;
+worker_processes  $worker_processes;
+
+error_log  /var/log/nginx/error.log warn;
+pid        /var/run/nginx.pid;
 
 events {
-    worker_connections $((1024 * CPU_CORES));
-    multi_accept on;
+    worker_connections  1024;
 }
 
 http {
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
-    log_format main '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" "$http_x_forwarded_for"';
-    access_log /var/log/nginx/access.log main;
-    sendfile on;
-    tcp_nopush on;
-    tcp_nodelay on;
-    keepalive_timeout 65;
-    gzip on;
-    gzip_comp_level 6;
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log  /var/log/nginx/access.log  main;
+
+    sendfile        on;
+    #tcp_nopush     on;
+
+    keepalive_timeout  65;
+
+    #gzip  on;
+
     include /etc/nginx/conf.d/*.conf;
 }
 EOF
         
-        # 生成站点配置文件
-        cat > configs/nginx/conf.d/default.conf << 'EOF'
+        # 站点配置文件
+        cat > configs/conf.d/default.conf << EOF
 server {
     listen 80;
     server_name localhost;
     root /var/www/html;
     index index.php index.html index.htm;
-    
+
     location / {
-        try_files $uri $uri/ /index.php?$args;
+        try_files \$uri \$uri/ /index.php?\$args;
     }
-    
+
     location ~ \.php$ {
-        fastcgi_pass wp_fpm:9000;
+        try_files \$uri =404;
+        fastcgi_pass php:9000;
         fastcgi_index index.php;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
         include fastcgi_params;
         fastcgi_buffer_size 64k;
         fastcgi_buffers 4 64k;
         fastcgi_busy_buffers_size 128k;
     }
-    
+
     location ~ /\.ht {
         deny all;
     }
-    
+
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
@@ -513,14 +574,14 @@ server {
 }
 EOF
         
-        echo "✓ Nginx 配置文件生成完成"
+        log_message "✓ Nginx 配置文件生成完成"
     else
-        echo "警告: Nginx 配置文件已存在，跳过生成"
+        log_message "警告: Nginx 配置文件已存在，跳过生成"
     fi
     
     # 生成 PHP 配置文件
     if [ ! -f "configs/php.ini" ]; then
-        echo "生成 PHP 配置文件..."
+        log_message "生成 PHP 配置文件..."
         
         # 根据内存大小调整 opcache 配置
         local opcache_memory="128"
@@ -554,20 +615,20 @@ opcache.revalidate_freq = 60
 opcache.fast_shutdown = 1
 EOF
         
-        echo "✓ PHP 配置文件生成完成"
+        log_message "✓ PHP 配置文件生成完成"
     else
-        echo "警告: PHP 配置文件已存在，跳过生成"
+        log_message "警告: PHP 配置文件已存在，跳过生成"
     fi
 }
 
-# 部署 WordPress Docker 栈
-deploy_wordpress_stack() {
-    echo "[阶段5] 部署 WordPress Docker 栈..."
+# 服务启动
+start_services() {
+    log_message "[阶段10] 启动服务..."
     
     # 下载 WordPress（如果需要）
     if [ ! -f "html/wp-config.php" ]; then
         if [ -z "$(ls -A html 2>/dev/null)" ]; then
-            echo "下载 WordPress 最新版本..."
+            log_message "下载 WordPress 最新版本..."
             
             # 下载并解压 WordPress
             local temp_file="/tmp/wordpress-latest.tar.gz"
@@ -585,51 +646,44 @@ deploy_wordpress_stack() {
                 rm -rf wordpress "$temp_file"
                 
                 # 设置权限
-                echo "设置文件权限..."
-                docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R www-data:www-data /var/www/html
+                log_message "设置文件权限..."
+                chown -R www-data:www-data html
                 
-                echo "✓ WordPress 下载并解压完成"
+                log_message "✓ WordPress 下载并解压完成"
             else
-                echo "警告: WordPress 下载失败，请手动下载并解压到 html 目录"
+                log_message "警告: WordPress 下载失败，请手动下载并解压到 html 目录"
             fi
         else
-            echo "✓ html 目录已存在内容，跳过 WordPress 下载"
+            log_message "✓ html 目录已存在内容，跳过 WordPress 下载"
         fi
     else
-        echo "✓ WordPress 配置文件已存在，跳过下载"
+        log_message "✓ WordPress 配置文件已存在，跳过下载"
     fi
     
-    # 构建镜像（优先）
-    echo "构建Docker镜像..."
-    docker-compose build
-    
-    # 可选：如果需要从Docker Hub拉取，可以在这里添加条件拉取逻辑
-    # 但默认情况下使用本地构建的镜像
-    
     # 启动服务
-    echo "启动 Docker 服务..."
+    log_message "启动 Docker 服务..."
     docker-compose up -d
     
     # 等待服务启动
-    echo "等待服务初始化..."
+    log_message "等待服务初始化..."
     sleep 10
     
     # 检查服务状态
-    echo "检查服务状态..."
+    log_message "检查服务状态..."
     docker-compose ps
     
     # 验证部署是否成功
     if [ "$(docker-compose ps -q | wc -l)" -eq "4" ]; then
-        echo "✓ WordPress Docker 栈部署成功"
+        log_message "✓ WordPress Docker 栈部署成功"
     else
-        echo "✗ WordPress Docker 栈部署失败，请检查日志"
+        log_message "✗ WordPress Docker 栈部署失败，请检查日志"
         docker-compose logs --tail=50
     fi
 }
 
-# 设置自动数据库备份
-setup_auto_backup() {
-    echo "[阶段6] 设置自动数据库备份..."
+# 备份配置
+setup_backup_config() {
+    log_message "[阶段11] 设置备份配置..."
     
     # 创建备份脚本
     cat > "$DEPLOY_DIR/scripts/backup_db.sh" << 'EOF'
@@ -641,8 +695,8 @@ BACKUP_DIR="$DEPLOY_DIR/backups"
 
 # 从 .env 文件加载环境变量
 if [ -f "$DEPLOY_DIR/.env" ]; then
-    # 只导出需要的数据库相关环境变量，避免导出包含特殊字符的WordPress密钥
-    source "$DEPLOY_DIR/.env"
+    # 只导出需要的数据库相关环境变量
+    export $(grep -E '^MYSQL_|^BACKUP_RETENTION_DAYS' "$DEPLOY_DIR/.env" | xargs)
 fi
 
 # 设置默认值
@@ -680,164 +734,75 @@ EOF
     if ! crontab -l 2>/dev/null | grep -q "backup_db.sh"; then
         # 添加到 cron
         (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
-        echo "✓ 数据库备份 cron 任务已创建（每天凌晨 3 点执行）"
+        log_message "✓ 数据库备份 cron 任务已创建（每天凌晨 3 点执行）"
     else
-        echo "警告: 数据库备份 cron 任务已存在"
+        log_message "警告: 数据库备份 cron 任务已存在"
     fi
     
     # 立即执行一次备份测试
-    echo "执行备份测试..."
+    log_message "执行备份测试..."
     "$DEPLOY_DIR/scripts/backup_db.sh"
-}
-
-# 配置磁盘空间管理
-setup_disk_space_management() {
-    echo "[阶段7] 配置磁盘空间管理..."
-    
-    # 创建磁盘监控脚本
-    cat > "$DEPLOY_DIR/scripts/disk_monitor.sh" << 'EOF'
-#!/bin/bash
-
-# 获取脚本所在目录的父目录
-DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOG_FILE="$DEPLOY_DIR/logs/disk_monitor.log"
-
-# 设置警告阈值
-THRESHOLD=80
-
-# 获取磁盘使用率
-DISK_USAGE=$(df -h / | tail -1 | awk '{print $5}' | sed 's/%//')
-
-# 记录当前状态
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] 磁盘使用率: ${DISK_USAGE}%" >> "$LOG_FILE"
-
-# 检查是否超过阈值
-if [ "$DISK_USAGE" -gt "$THRESHOLD" ]; then
-    WARNING_MSG="警告: 磁盘使用率已达 ${DISK_USAGE}%，超过阈值 ${THRESHOLD}%"
-    echo "$WARNING_MSG" >> "$LOG_FILE"
-    
-    # 尝试清理 Docker 系统
-    echo "自动清理 Docker 系统..." >> "$LOG_FILE"
-    docker system prune -f >> "$LOG_FILE" 2>&1
-    
-    # 尝试发送邮件（如果配置了 mail 命令）
-    if command -v mail >/dev/null; then
-        echo "$WARNING_MSG" | mail -s "磁盘空间警告" root
-    fi
-fi
-EOF
-    
-    # 创建 Docker 清理脚本
-    cat > "$DEPLOY_DIR/scripts/docker_cleanup.sh" << 'EOF'
-#!/bin/bash
-
-# 获取脚本所在目录的父目录
-DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOG_FILE="$DEPLOY_DIR/logs/docker_cleanup.log"
-
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] 开始清理 Docker 系统..." >> "$LOG_FILE"
-
-# 清理未使用的镜像
-echo "清理未使用的镜像..." >> "$LOG_FILE"
-docker image prune -f >> "$LOG_FILE" 2>&1
-
-# 清理未使用的卷
-echo "清理未使用的卷..." >> "$LOG_FILE"
-docker volume prune -f >> "$LOG_FILE" 2>&1
-
-# 清理未使用的网络
-echo "清理未使用的网络..." >> "$LOG_FILE"
-docker network prune -f >> "$LOG_FILE" 2>&1
-
-# 清理构建缓存
-echo "清理构建缓存..." >> "$LOG_FILE"
-docker builder prune -f >> "$LOG_FILE" 2>&1
-
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] Docker 系统清理完成" >> "$LOG_FILE"
-EOF
-    
-    # 设置执行权限
-    chmod +x "$DEPLOY_DIR/scripts/disk_monitor.sh"
-    chmod +x "$DEPLOY_DIR/scripts/docker_cleanup.sh"
-    
-    # 创建磁盘监控 cron 任务（每小时执行一次）
-    MONITOR_CRON="0 * * * * $DEPLOY_DIR/scripts/disk_monitor.sh"
-    if ! crontab -l 2>/dev/null | grep -q "disk_monitor.sh"; then
-        (crontab -l 2>/dev/null; echo "$MONITOR_CRON") | crontab -
-        echo "✓ 磁盘监控 cron 任务已创建（每小时执行一次）"
-    else
-        echo "警告: 磁盘监控 cron 任务已存在"
-    fi
-    
-    # 创建 Docker 清理 cron 任务（每周日凌晨 2 点执行）
-    CLEANUP_CRON="0 2 * * 0 $DEPLOY_DIR/scripts/docker_cleanup.sh"
-    if ! crontab -l 2>/dev/null | grep -q "docker_cleanup.sh"; then
-        (crontab -l 2>/dev/null; echo "$CLEANUP_CRON") | crontab -
-        echo "✓ Docker 清理 cron 任务已创建（每周日凌晨 2 点执行）"
-    else
-        echo "警告: Docker 清理 cron 任务已存在"
-    fi
-    
-    # 立即执行一次磁盘监控测试
-    echo "执行磁盘监控测试..."
-    "$DEPLOY_DIR/scripts/disk_monitor.sh"
 }
 
 # 显示部署信息
 display_deployment_info() {
-    echo "=================================================="
-    echo "部署完成！"
-    echo "=================================================="
+    log_message "=================================================="
+    log_message "部署完成！"
+    log_message "=================================================="
     
     # 获取主机 IP
     local HOST_IP=$(hostname -I | awk '{print $1}')
     
-    echo "访问地址: http://$HOST_IP"
-    echo ""
-    echo "部署详情:"
-    echo "  - 操作系统: $OS_TYPE $OS_VERSION"
-    echo "  - CPU 核心: $CPU_CORES 核（限制使用: $((CPU_CORES / 2)) 核）"
-    echo "  - 可用内存: ${AVAILABLE_RAM}MB（限制使用: $((AVAILABLE_RAM / 2))MB）"
-    echo "  - 部署目录: $DEPLOY_DIR"
-    echo "  - 备份目录: $BACKUP_DIR"
-    echo "  - 备份保留: $BACKUP_RETENTION_DAYS 天"
-    echo ""
-    echo "数据库信息:"
-    echo "  - 数据库名: wordpress"
-    echo "  - 用户名: wordpress"
-    echo "  - 密码: 请查看 .env 文件中的 MYSQL_PASSWORD"
-    echo "  - 主机: mariadb"
-    echo ""
-    echo "自动化功能:"
-    echo "  - ✅ 每日数据库自动备份（凌晨 3 点）"
-    echo "  - ✅ 每小时磁盘空间监控（阈值: 80%）"
-    echo "  - ✅ 每周 Docker 系统清理（周日凌晨 2 点）"
-    echo ""
-    echo "后续步骤:"
-    echo "1. 打开浏览器访问上述地址"
-    echo "2. 完成 WordPress 安装向导"
-    echo "3. 推荐安装 Redis Object Cache 插件启用缓存"
-    echo ""
-    echo "重要: 请备份 .env 文件，包含所有敏感信息"
-    echo "=================================================="
+    log_message "访问地址: http://$HOST_IP"
+    log_message ""
+    log_message "部署详情:"
+    log_message "  - 操作系统: $OS_TYPE $OS_VERSION"
+    log_message "  - CPU 核心: $CPU_CORES 核（限制使用: $((CPU_CORES / 2)) 核）"
+    log_message "  - 可用内存: ${AVAILABLE_RAM}MB（限制使用: $((AVAILABLE_RAM / 2))MB）"
+    log_message "  - 部署目录: $DEPLOY_DIR"
+    log_message "  - 备份目录: $DEPLOY_DIR/backups"
+    log_message "  - 备份保留: $BACKUP_RETENTION_DAYS 天"
+    log_message ""
+    log_message "数据库信息:"
+    log_message "  - 数据库名: wordpress"
+    log_message "  - 用户名: wordpress"
+    log_message "  - 密码: 请查看 .env 文件中的 MYSQL_PASSWORD"
+    log_message "  - 主机: mariadb"
+    log_message ""
+    log_message "自动化功能:"
+    log_message "  - ✅ 每日数据库自动备份（凌晨 3 点）"
+    log_message "  - ✅ 权限自动设置"
+    log_message "  - ✅ 环境自动修复"
+    log_message "  - ✅ 容器冲突自动清理"
+    log_message ""
+    log_message "后续步骤:"
+    log_message "1. 打开浏览器访问上述地址"
+    log_message "2. 完成 WordPress 安装向导"
+    log_message "3. 推荐安装 Redis Object Cache 插件启用缓存"
+    log_message ""
+    log_message "重要: 请备份 .env 文件，包含所有敏感信息"
+    log_message "=================================================="
 }
 
 # 主函数
 main() {
-    # 创建脚本目录
-    mkdir -p "$DEPLOY_DIR/scripts" 2>/dev/null || :
+    log_message "🚀 开始 WordPress Docker 自动部署..."
     
     # 执行各阶段
-    detect_host_environment        # 检测宿主机环境
-    collect_system_parameters      # 收集系统参数
+    detect_host_environment       # 检测宿主机环境
+    environment_preparation       # 环境准备
+    collect_system_parameters     # 收集系统参数
     determine_deployment_directory # 确定部署目录
-    optimize_parameters            # 优化参数
-    deploy_wordpress_stack         # 部署 WordPress Docker 栈
-    setup_auto_backup              # 设置自动数据库备份
-    setup_disk_space_management    # 配置磁盘空间管理
-    display_deployment_info        # 显示部署信息
+    optimize_parameters           # 优化参数
+    set_permissions              # 权限设置
+    cleanup_old_containers       # 旧容器清理
+    generate_configs             # 生成配置文件
+    build_images                 # 镜像构建
+    start_services               # 服务启动
+    setup_backup_config          # 备份配置
+    display_deployment_info      # 显示部署信息
     
-    echo "🎉 WordPress Docker 全栈部署完成！"
+    log_message "🎉 WordPress Docker 全栈部署完成！"
 }
 
 # 执行主函数
