@@ -561,15 +561,16 @@ start_services() {
         sed -i 's@define([ \t]*["\']SECURE_AUTH_SALT["\'],.*@define( "SECURE_AUTH_SALT", "'"$WORDPRESS_SECURE_AUTH_SALT"'" );@g' html/wp-config.php
         sed -i 's@define([ \t]*["\']LOGGED_IN_SALT["\'],.*@define( "LOGGED_IN_SALT",   "'"$WORDPRESS_LOGGED_IN_SALT"'" );@g' html/wp-config.php
         sed -i 's@define([ \t]*["\']NONCE_SALT["\'],.*@define( "NONCE_SALT",       "'"$WORDPRESS_NONCE_SALT"'" );@g' html/wp-config.php
-        # 使用转义引号避免嵌套问题
-        echo "" >> html/wp-config.php
-        echo "/** Redis Configuration */" >> html/wp-config.php
-        echo "define(\"WP_CACHE\", true);" >> html/wp-config.php
-        echo "define(\"WP_REDIS_HOST\", \"$REDIS_HOST\");" >> html/wp-config.php
-        echo "define(\"WP_REDIS_PASSWORD\", \"$REDIS_PASSWORD\");" >> html/wp-config.php
-        echo "define(\"WP_REDIS_PORT\", 6379);" >> html/wp-config.php
-        echo "define(\"WP_REDIS_TIMEOUT\", 1);" >> html/wp-config.php
-        echo "define(\"WP_REDIS_READ_TIMEOUT\", 1);" >> html/wp-config.php
+        # 使用单引号避免shell解释问题，并通过printf或多步骤来处理变量
+        echo '' >> html/wp-config.php
+        echo '/** Redis Configuration */' >> html/wp-config.php
+        # 使用printf来处理变量展开
+        printf 'define("WP_CACHE", true);\n' >> html/wp-config.php
+        printf 'define("WP_REDIS_HOST", "%s");\n' "$REDIS_HOST" >> html/wp-config.php
+        printf 'define("WP_REDIS_PASSWORD", "%s");\n' "$REDIS_PASSWORD" >> html/wp-config.php
+        printf 'define("WP_REDIS_PORT", 6379);\n' >> html/wp-config.php
+        printf 'define("WP_REDIS_TIMEOUT", 1);\n' >> html/wp-config.php
+        printf 'define("WP_REDIS_READ_TIMEOUT", 1);\n' >> html/wp-config.php
         log_message "WordPress configured successfully"
     fi
     log_message "Starting Docker containers..."
