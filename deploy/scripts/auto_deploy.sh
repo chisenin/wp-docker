@@ -674,7 +674,7 @@ main() {
                 exit 1
                 ;;
         esac
-done
+    done
     
     detect_host_environment
     environment_preparation
