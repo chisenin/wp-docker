@@ -1,16 +1,16 @@
-﻿#!/bin/sh
-# 使用sh兼容的选项设置
+#!/bin/sh
+# ??sh???????
 set -eu
-# pipefail是bash特有选项，在sh中不可用
+# pipefail?bash??????sh????
 
-# WordPress Docker 全栈自动部署脚本（生产环境优化版）
-# 功能：环境检测、系统参数收集、智能参数优化、自动数据库备份、磁盘空间管理
+# WordPress Docker ?????????????????
+# ????????????????????????????????????
 
 echo "=================================================="
-echo "WordPress Docker 全栈自动部署脚本 - 生产环境优化版"
+echo "WordPress Docker ???????? - ???????"
 echo "=================================================="
 
-# 全局变量
+# ????
 OS_TYPE=""
 OS_VERSION=""
 CPU_CORES=0
@@ -21,21 +21,21 @@ DEPLOY_DIR=""
 BACKUP_DIR=""
 BACKUP_RETENTION_DAYS=7
 
-# 输出函数（简化版本，兼容Windows环境）
+# ????????????Windows???
 print_green() { echo "$1"; }
 print_yellow() { echo "$1"; }
 print_red() { echo "$1"; }
 print_blue() { echo "$1"; }
 
-# 错误处理函数
+# ??????
 handle_error() {
-    print_red "错误: $1"
+    print_red "??: $1"
     exit 1
 }
 
-# 检查宿主机环境
+# ???????
 detect_host_environment() {
-    print_blue "[阶段1] 检测宿主机环境..."
+    print_blue "[??1] ???????..."
     
     if [ -f /etc/os-release ]; then
         . /etc/os-release
@@ -48,64 +48,64 @@ detect_host_environment() {
         OS_TYPE="centos"
         OS_VERSION=$(rpm -q --queryformat '%{VERSION}' centos-release)
     else
-        handle_error "无法识别操作系统类型，请使用 CentOS、Debian、Ubuntu 或 Alpine"
+        handle_error "?????????????? CentOS?Debian?Ubuntu ? Alpine"
     fi
     
-    print_green "操作系统: $OS_TYPE $OS_VERSION"
+    print_green "????: $OS_TYPE $OS_VERSION"
     
     case "$OS_TYPE" in
         centos|debian|ubuntu|alpine)
-            print_green "✓ 操作系统受支持"
+            print_green "? ???????"
             ;;
         *)
-            handle_error "不支持的操作系统: $OS_TYPE，请使用 CentOS、Debian、Ubuntu 或 Alpine"
+            handle_error "????????: $OS_TYPE???? CentOS?Debian?Ubuntu ? Alpine"
             ;;
     esac
 }
 
-# 收集系统参数
+# ??????
 collect_system_parameters() {
-    print_blue "[阶段2] 收集系统参数..."
+    print_blue "[??2] ??????..."
     
     CPU_CORES=$(nproc)
-    print_green "CPU 核心数: $CPU_CORES"
+    print_green "CPU ???: $CPU_CORES"
     
     AVAILABLE_RAM=$(free -m | grep Mem | awk '{print $2}')
-    print_green "可用内存: ${AVAILABLE_RAM}MB"
+    print_green "????: ${AVAILABLE_RAM}MB"
     
     DISK_SPACE=$(df -h / | tail -1 | awk '{print $4}')
     DISK_USAGE=$(df -h / | tail -1 | awk '{print $5}' | sed 's/%//')
-    print_green "可用磁盘空间: $DISK_SPACE"
-    print_green "磁盘使用率: ${DISK_USAGE}%"
+    print_green "??????: $DISK_SPACE"
+    print_green "?????: ${DISK_USAGE}%"
     
     if ! command -v docker >/dev/null 2>&1; then
-        print_red "Docker 未安装，正在尝试安装..."
+        print_red "Docker ??????????..."
         install_docker
     else
         DOCKER_VERSION=$(docker --version | awk '{print $3}' | sed 's/,//')
-        print_green "Docker 版本: $DOCKER_VERSION"
+        print_green "Docker ??: $DOCKER_VERSION"
     fi
     
     if ! command -v docker-compose >/dev/null 2>&1; then
-        print_red "Docker Compose 未安装，正在尝试安装..."
+        print_red "Docker Compose ??????????..."
         install_docker_compose
     else
         COMPOSE_VERSION=$(docker-compose --version | awk '{print $3}' | sed 's/,//')
-        print_green "Docker Compose 版本: $COMPOSE_VERSION"
+        print_green "Docker Compose ??: $COMPOSE_VERSION"
     fi
     
     if [ "$DISK_USAGE" -gt 80 ]; then
-        print_yellow "警告: 磁盘使用率超过 80%，建议清理磁盘空间"
+        print_yellow "??: ??????? 80%?????????"
         BACKUP_RETENTION_DAYS=3
-        print_yellow "自动将备份保留天数调整为: $BACKUP_RETENTION_DAYS 天"
+        print_yellow "????????????: $BACKUP_RETENTION_DAYS ?"
     fi
     
     if [ "$AVAILABLE_RAM" -lt 2048 ]; then
-        print_yellow "警告: 内存小于 2GB，可能影响性能"
+        print_yellow "??: ???? 2GB???????"
     fi
 }
 
-# 根据操作系统安装 Docker
+# ???????? Docker
 install_docker() {
     case "$OS_TYPE" in
         debian|ubuntu)
@@ -128,25 +128,25 @@ install_docker() {
     esac
 }
 
-# 安装 Docker Compose
+# ?? Docker Compose
 install_docker_compose() {
     curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
     chmod +x /usr/local/bin/docker-compose
 }
 
-# 确定部署目录
+# ??????
 determine_deployment_directory() {
-    print_blue "[阶段3] 确定部署目录..."
+    print_blue "[??3] ??????..."
     
     if [ -d "/opt/wp-docker" ]; then
         DEPLOY_DIR="/opt/wp-docker"
-        print_green "使用现有目录: $DEPLOY_DIR"
+        print_green "??????: $DEPLOY_DIR"
     elif [ -d "/var/wp-docker" ]; then
         DEPLOY_DIR="/var/wp-docker"
-        print_green "使用现有目录: $DEPLOY_DIR"
+        print_green "??????: $DEPLOY_DIR"
     else
-        print_green "创建部署目录: /opt/wp-docker"
-        mkdir -p /opt/wp-docker || handle_error "无法创建部署目录"
+        print_green "??????: /opt/wp-docker"
+        mkdir -p /opt/wp-docker || handle_error "????????"
         DEPLOY_DIR="/opt/wp-docker"
     fi
     
@@ -154,38 +154,38 @@ determine_deployment_directory() {
     SCRIPTS_DIR="$DEPLOY_DIR/scripts"
     LOGS_DIR="$DEPLOY_DIR/logs"
     
-    mkdir -p "$BACKUP_DIR" || handle_error "无法创建备份目录"
-    mkdir -p "$SCRIPTS_DIR" || handle_error "无法创建脚本目录"
-    mkdir -p "$LOGS_DIR" || handle_error "无法创建日志目录"
+    mkdir -p "$BACKUP_DIR" || handle_error "????????"
+    mkdir -p "$SCRIPTS_DIR" || handle_error "????????"
+    mkdir -p "$LOGS_DIR" || handle_error "????????"
     
-    print_green "备份目录: $BACKUP_DIR"
-    print_green "脚本目录: $SCRIPTS_DIR"
-    print_green "日志目录: $LOGS_DIR"
+    print_green "????: $BACKUP_DIR"
+    print_green "????: $SCRIPTS_DIR"
+    print_green "????: $LOGS_DIR"
     
-    cd "$DEPLOY_DIR" || handle_error "无法切换到部署目录"
-    print_green "当前工作目录: $(pwd)"
+    cd "$DEPLOY_DIR" || handle_error "?????????"
+    print_green "??????: $(pwd)"
 }
 
-# 生成随机密码
+# ??????
 generate_password() {
     local length=${1:-24}
     tr -dc 'A-Za-z0-9!@#$%^&*()_+-=' < /dev/urandom | head -c "$length" || echo "default_password_change_me"
 }
 
-# 生成 WordPress 安全密钥（格式化为环境变量格式）
+# ?? WordPress ????????????????
 generate_wordpress_keys() {
-    print_blue "生成 WordPress 安全密钥..."
+    print_blue "?? WordPress ????..."
     local keys_url="https://api.wordpress.org/secret-key/1.1/salt/"
-    local keys=$(curl -s "$keys_url" || wget -qO- "$keys_url" || echo "# 安全密钥生成失败，请手动替换")
+    local keys=$(curl -s "$keys_url" || wget -qO- "$keys_url" || echo "# ??????????????")
     keys=$(echo "$keys" | \
         sed "s/define('\([^']*\)', '\([^']*\)');/WORDPRESS_\1=\2/" | \
         sed "s/define(\"\([^\"]*\)\", \"\([^\"]*\)\");/WORDPRESS_\1=\2/")
     echo "$keys"
 }
 
-# 根据系统参数优化配置
+# ??????????
 optimize_parameters() {
-    print_blue "[阶段4] 根据系统参数优化配置..."
+    print_blue "[??4] ??????????..."
     
     mkdir -p configs/nginx/conf.d
     mkdir -p configs/mariadb
@@ -206,12 +206,12 @@ optimize_parameters() {
         PHP_MEMORY_LIMIT="512M"
     fi
     
-    print_green "CPU 限制: $CPU_LIMIT 核"
-    print_green "内存限制: ${MEM_LIMIT}MB"
-    print_green "PHP 内存限制: $PHP_MEMORY_LIMIT"
+    print_green "CPU ??: $CPU_LIMIT ?"
+    print_green "????: ${MEM_LIMIT}MB"
+    print_green "PHP ????: $PHP_MEMORY_LIMIT"
     
     if [ ! -f ".env" ]; then
-        print_blue "生成环境配置文件 (.env)..."
+        print_blue "???????? (.env)..."
         
         local root_password=$(generate_password)
         local db_user_password=$(generate_password)
@@ -222,13 +222,13 @@ optimize_parameters() {
         local mariadb_version="11.3.2"
         local redis_version="7.4.0"
         
-        # 确保生成的环境变量格式正确，不含特殊字符问题
-        # 清理wp_keys中的特殊字符，确保格式正确
+        # ??????????????????????
+        # ??wp_keys?????????????
         local sanitized_keys=$(echo "$wp_keys" | sed 's/\r//g' | sed 's/"/\\"/g')
         
         cat > .env << EOF
-# WordPress Docker环境变量配置
-# 生成时间: $(date)
+# WordPress Docker??????
+# ????: $(date)
 
 DOCKERHUB_USERNAME=chisenin
 PHP_VERSION=$php_version
@@ -259,18 +259,18 @@ MEM_LIMIT=${MEM_LIMIT}MB
 PHP_MEMORY_LIMIT=$PHP_MEMORY_LIMIT
 UPLOAD_MAX_FILESIZE=64M
 
-# WordPress安全密钥 - 以下行使用export格式确保python-dotenv能正确解析
+# WordPress???? - ?????export????python-dotenv?????
 export $(echo "$sanitized_keys" | sed 's/WORDPRESS_//g')
 EOF
         
-        # 添加说明关于换行符问题
-        print_yellow "注意: .env文件已生成，在Linux系统上可能需要转换换行符"
-        print_yellow "      可以使用命令 'dos2unix .env' 确保文件使用LF换行符"
+        # ???????????
+        print_yellow "??: .env???????Linux????????????"
+        print_yellow "      ?????? 'dos2unix .env' ??????LF???"
         
-        print_green "✓ .env 文件生成完成"
-        print_yellow "注意: 敏感信息已保存在 .env 文件中，请妥善保管"
+        print_green "? .env ??????"
+        print_yellow "??: ???????? .env ?????????"
     else
-        print_yellow "警告: .env 文件已存在，跳过生成"
+        print_yellow "??: .env ??????????"
         source .env 2>/dev/null || :
         CPU_LIMIT=${CPU_LIMIT:-$((CPU_CORES / 2))}
         MEM_LIMIT=${MEM_LIMIT:-${AVAILABLE_RAM/2}MB}
@@ -278,14 +278,14 @@ EOF
     fi
     
     if [ ! -f "docker-compose.yml" ]; then
-        print_blue "生成 Docker Compose 配置文件..."
+        print_blue "?? Docker Compose ????..."
         
-        # 确保CPU_LIMIT有合理的默认值
+        # ??CPU_LIMIT???????
         if [ -z "$CPU_LIMIT" ] || [ "$CPU_LIMIT" -eq 0 ]; then
             CPU_LIMIT=1
         fi
         
-        # 生成docker-compose.yml文件，使用项目主分支重构的镜像
+        # ??docker-compose.yml???????????????
         cat > docker-compose.yml << EOF
 version: '3.8'
 
@@ -356,25 +356,25 @@ services:
           memory: "256M"
 EOF
         
-        print_green "✓ docker-compose.yml 文件生成完成"
+        print_green "? docker-compose.yml ??????"
     else
-        print_yellow "警告: docker-compose.yml 文件已存在，跳过生成"
+        print_yellow "??: docker-compose.yml ??????????"
     fi
     
-    # 添加注释提醒用户关于换行符问题
-    print_yellow "注意: 如果在Linux系统上运行，请确保文件使用LF换行符而非CRLF"
-    print_yellow "      可以使用命令 'dos2unix auto_deploy.sh .env docker-compose.yml' 进行转换"
+    # ???????????????
+    print_yellow "??: ???Linux?????????????LF?????CRLF"
+    print_yellow "      ?????? 'dos2unix auto_deploy.sh .env docker-compose.yml' ????"
     
-    # 生成 nginx、php.ini 等配置同样省略，保持你原逻辑
+    # ?? nginx?php.ini ??????????????
 }
 
-# 部署 WordPress Docker 栈
+# ?? WordPress Docker ?
 deploy_wordpress_stack() {
-    print_blue "[阶段5] 部署 WordPress Docker 栈..."
+    print_blue "[??5] ?? WordPress Docker ?..."
     
     if [ ! -f "html/wp-config.php" ]; then
         if [ -z "$(ls -A html 2>/dev/null)" ]; then
-            print_blue "下载 WordPress 最新版本..."
+            print_blue "?? WordPress ????..."
             local temp_file="/tmp/wordpress-latest.tar.gz"
             if command -v wget >/dev/null; then
                 wget -q -O "$temp_file" https://wordpress.org/latest.tar.gz
@@ -385,56 +385,56 @@ deploy_wordpress_stack() {
                 tar -xzf "$temp_file" -C .
                 mv wordpress/* html/
                 rm -rf wordpress "$temp_file"
-                print_green "设置文件权限..."
-                # 尝试使用Docker设置权限，添加重试机制和国内镜像源支持
+                print_green "??????..."
+                # ????Docker???????????????????
                 local retry_count=3
                 local retry_delay=5
                 local docker_success=false
                 
-                # 尝试设置国内Docker镜像源（可根据实际环境取消注释）
+                # ??????Docker????????????????
                 # echo '{"registry-mirrors": ["https://registry.docker-cn.com", "https://docker.mirrors.ustc.edu.cn"]}' > /etc/docker/daemon.json 2>/dev/null || true
                 
                 for ((i=1; i<=retry_count; i++)); do
-                    print_blue "尝试拉取alpine镜像 (第$i次尝试)..."
+                    print_blue "????alpine?? (?$i???)..."
                     if docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R www-data:www-data /var/www/html 2>/dev/null; then
                         docker_success=true
-                        print_green "✓ Docker设置权限成功"
+                        print_green "? Docker??????"
                         break
                     else
-                        print_yellow "警告: Docker操作失败，$retry_delay秒后重试..."
+                        print_yellow "??: Docker?????$retry_delay????..."
                         sleep $retry_delay
                     fi
                 done
                 
-                # 如果Docker操作失败，尝试直接使用chown命令
+                # ??Docker???????????chown??
                 if [ "$docker_success" = false ]; then
-                    print_yellow "警告: Docker操作失败，尝试使用系统chown命令..."
+                    print_yellow "??: Docker???????????chown??..."
                     if command -v chown >/dev/null; then
-                        if chown -R 33:33 "$(pwd)/html" 2>/dev/null; then  # 33是www-data的通常UID
-                            print_green "✓ 系统chown命令设置权限成功"
+                        if chown -R 33:33 "$(pwd)/html" 2>/dev/null; then  # 33?www-data???UID
+                            print_green "? ??chown????????"
                         else
-                            print_yellow "警告: 无法设置文件权限，建议手动执行: chown -R www-data:www-data $(pwd)/html"
+                            print_yellow "??: ???????????????: chown -R www-data:www-data $(pwd)/html"
                         fi
                     else
-                        print_yellow "警告: 找不到chown命令，无法设置文件权限"
+                        print_yellow "??: ???chown???????????"
                     fi
                 fi
                 
-                print_green "✓ WordPress 下载并解压完成"
+                print_green "? WordPress ???????"
             else
-                print_yellow "警告: WordPress 下载失败，请手动下载并解压到 html 目录"
+                print_yellow "??: WordPress ?????????????? html ??"
             fi
         else
-            print_green "✓ html 目录已存在内容，跳过 WordPress 下载"
+            print_green "? html ?????????? WordPress ??"
         fi
     else
-        print_green "✓ WordPress 配置文件已存在，跳过下载"
+        print_green "? WordPress ????????????"
     fi
     
-    # ===== 插入：更新 WordPress 安全密钥 =====
-    print_blue "更新 WordPress 安全密钥..."
+    # ===== ????? WordPress ???? =====
+    print_blue "?? WordPress ????..."
     if [ ! -f "html/wp-config.php" ]; then
-        print_yellow "警告: html/wp-config.php 文件不存在，跳过密钥更新"
+        print_yellow "??: html/wp-config.php ????????????"
     else
         if sed --version >/dev/null 2>&1; then
             SED_INPLACE=(-i)
@@ -458,74 +458,74 @@ deploy_wordpress_stack() {
         update_wp_key "LOGGED_IN_SALT"     "${WORDPRESS_LOGGED_IN_SALT:-}"
         update_wp_key "NONCE_SALT"         "${WORDPRESS_NONCE_SALT:-}"
 
-        print_green "✓ WordPress 密钥更新完成"
+        print_green "? WordPress ??????"
     fi
-    # ===== 插入结束 =====
+    # ===== ???? =====
 
-    print_blue "构建Docker镜像..."
+    print_blue "??Docker??..."
     docker-compose build
 
-    print_blue "启动 Docker 服务..."
+    print_blue "?? Docker ??..."
     docker-compose up -d
 
-    print_blue "等待服务初始化..."
+    print_blue "???????..."
     sleep 10
 
-    print_blue "检查服务状态..."
+    print_blue "??????..."
     docker-compose ps
 
     if [ "$(docker-compose ps -q | wc -l)" -eq "4" ]; then
-        print_green "✓ WordPress Docker 栈部署成功"
+        print_green "? WordPress Docker ?????"
     else
-        print_red "✗ WordPress Docker 栈部署失败，请检查日志"
+        print_red "? WordPress Docker ???????????"
         docker-compose logs --tail=50
     fi
 }
 
-# 设置自动数据库备份
+# ?????????
 setup_auto_backup() {
-    print_blue "[阶段6] 设置自动数据库备份..."
-    # 保持你原脚本逻辑不变...
+    print_blue "[??6] ?????????..."
+    # ??????????...
 }
 
-# 配置磁盘空间管理
+# ????????
 setup_disk_space_management() {
-    print_blue "[阶段7] 配置磁盘空间管理..."
-    # 保持你原脚本逻辑不变...
+    print_blue "[??7] ????????..."
+    # ??????????...
 }
 
-# 显示部署信息
+# ??????
 display_deployment_info() {
     print_blue "=================================================="
-    print_green "部署完成！"
+    print_green "?????"
     print_blue "=================================================="
     local HOST_IP=$(hostname -I | awk '{print $1}')
-    print_green "访问地址: http://$HOST_IP"
+    print_green "????: http://$HOST_IP"
     print_green ""
-    print_green "部署详情:"
-    print_green "  - 操作系统: $OS_TYPE $OS_VERSION"
-    print_green "  - CPU 核心: $CPU_CORES 核（限制使用: $((CPU_CORES / 2)) 核）"
-    print_green "  - 可用内存: ${AVAILABLE_RAM}MB（限制使用: $((AVAILABLE_RAM / 2))MB）"
-    print_green "  - 部署目录: $DEPLOY_DIR"
-    print_green "  - 备份目录: $BACKUP_DIR"
-    print_green "  - 备份保留: $BACKUP_RETENTION_DAYS 天"
+    print_green "????:"
+    print_green "  - ????: $OS_TYPE $OS_VERSION"
+    print_green "  - CPU ??: $CPU_CORES ??????: $((CPU_CORES / 2)) ??"
+    print_green "  - ????: ${AVAILABLE_RAM}MB?????: $((AVAILABLE_RAM / 2))MB?"
+    print_green "  - ????: $DEPLOY_DIR"
+    print_green "  - ????: $BACKUP_DIR"
+    print_green "  - ????: $BACKUP_RETENTION_DAYS ?"
     print_green ""
-    print_green "数据库信息:"
-    print_green "  - 数据库名: wordpress"
-    print_green "  - 用户名: wordpress"
-    print_green "  - 密码: 请查看 .env 文件中的 MYSQL_PASSWORD"
-    print_green "  - 主机: mariadb"
+    print_green "?????:"
+    print_green "  - ????: wordpress"
+    print_green "  - ???: wordpress"
+    print_green "  - ??: ??? .env ???? MYSQL_PASSWORD"
+    print_green "  - ??: mariadb"
     print_green ""
-    print_green "自动化功能:"
-    print_green "  - ✅ 每日数据库自动备份（凌晨 3 点）"
-    print_green "  - ✅ 每小时磁盘空间监控（阈值: 80%）"
-    print_green "  - ✅ 每周 Docker 系统清理（周日凌晨 2 点）"
+    print_green "?????:"
+    print_green "  - ? ???????????? 3 ??"
+    print_green "  - ? ????????????: 80%?"
+    print_green "  - ? ?? Docker ????????? 2 ??"
     print_green ""
-    print_yellow "重要: 请备份 .env 文件，包含所有敏感信息"
+    print_yellow "??: ??? .env ???????????"
     print_blue "=================================================="
 }
 
-# 主函数
+# ???
 main() {
     mkdir -p "$DEPLOY_DIR/scripts" 2>/dev/null || :
     detect_host_environment
@@ -536,8 +536,8 @@ main() {
     setup_auto_backup
     setup_disk_space_management
     display_deployment_info
-    print_green "🎉 WordPress Docker 全栈部署完成！"
+    print_green "?? WordPress Docker ???????"
 }
 
-# 执行主函数
+# ?????
 main
