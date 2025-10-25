@@ -1,0 +1,15 @@
+﻿# 文本文件使用LF换行符
+* text=auto eol=lf
+
+# shell脚本确保使用LF换行符
+*.sh text eol=lf
+
+# 二进制文件保持原样
+*.png binary
+*.jpg binary
+*.gif binary
+*.zip binary
+*.tar binary
+*.gzip binary
+*.bmp binary
+*.ico binary
