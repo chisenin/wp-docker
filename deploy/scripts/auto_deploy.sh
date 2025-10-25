@@ -8,6 +8,10 @@ set -e
 
 # 全局变量
 DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Create logs directory first to ensure log file can be written
+mkdir -p "$DEPLOY_DIR/logs" 2>/dev/null
+
 OS_TYPE=""
 OS_VERSION=""
 CPU_CORES=0
@@ -34,8 +38,7 @@ log_message() {
 detect_host_environment() {
     log_message "[阶段1] 检测宿主机环境..."
     
-    # 创建日志目录
-    mkdir -p "$DEPLOY_DIR/logs" 2>/dev/null
+    # Logs directory already created at script start
     
     # 检测操作系统类型
     if [ -f /etc/os-release ]; then
