@@ -460,35 +460,27 @@ deploy_wordpress_stack() {
         print_green "✓ WordPress 配置文件已存在"
     fi
     
-# 定义 WordPress 密钥更新函数
-update_wp_key() {
-    local key_name="$1"
-    local key_value="$2"
-    local file_path="html/wp-config.php"
-    local sed_inplace=(-i)
-    
-    # 检测 sed 版本，适应不同系统
-    if ! sed --version >/dev/null 2>&1; then
-        sed_inplace=(-i '')
-    fi
-    
-    sed "${sed_inplace[@]}" -E "s@define\s*\(['\"]${key_name}[\"'],[^)]*\)@define( '${key_name}', '${key_value}' )@g" "$file_path"
-}
-
     # ===== 更新 WordPress 密钥 =====
     print_blue "更新 WordPress 密钥..."
     if [ ! -f "html/wp-config.php" ]; then
         print_yellow "警告: html/wp-config.php 文件不存在，跳过密钥更新"
     else
-        update_wp_key "AUTH_KEY"           "${WORDPRESS_AUTH_KEY:-}"
-        update_wp_key "SECURE_AUTH_KEY"    "${WORDPRESS_SECURE_AUTH_KEY:-}"
-        update_wp_key "LOGGED_IN_KEY"      "${WORDPRESS_LOGGED_IN_KEY:-}"
-        update_wp_key "NONCE_KEY"          "${WORDPRESS_NONCE_KEY:-}"
-        update_wp_key "AUTH_SALT"          "${WORDPRESS_AUTH_SALT:-}"
-        update_wp_key "SECURE_AUTH_SALT"   "${WORDPRESS_SECURE_AUTH_SALT:-}"
-        update_wp_key "LOGGED_IN_SALT"     "${WORDPRESS_LOGGED_IN_SALT:-}"
-        update_wp_key "NONCE_SALT"         "${WORDPRESS_NONCE_SALT:-}"
-
+        # 检测 sed 版本，适应不同系统
+        local sed_cmd="sed -i"
+        if ! sed --version >/dev/null 2>&1; then
+            sed_cmd="sed -i ''"
+        fi
+        
+        # 直接使用 sed 命令更新密钥，避免函数定义在条件块内
+        eval "$sed_cmd -E 's@define\s*\(["'\'"']AUTH_KEY["'\'"'],[^)]*\)@define( 'AUTH_KEY', '${WORDPRESS_AUTH_KEY:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\'"']SECURE_AUTH_KEY["'\'"'],[^)]*\)@define( 'SECURE_AUTH_KEY', '${WORDPRESS_SECURE_AUTH_KEY:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\'"']LOGGED_IN_KEY["'\'"'],[^)]*\)@define( 'LOGGED_IN_KEY', '${WORDPRESS_LOGGED_IN_KEY:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\'"']NONCE_KEY["'\'"'],[^)]*\)@define( 'NONCE_KEY', '${WORDPRESS_NONCE_KEY:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\'"']AUTH_SALT["'\'"'],[^)]*\)@define( 'AUTH_SALT', '${WORDPRESS_AUTH_SALT:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\'"']SECURE_AUTH_SALT["'\'"'],[^)]*\)@define( 'SECURE_AUTH_SALT', '${WORDPRESS_SECURE_AUTH_SALT:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\'"']LOGGED_IN_SALT["'\'"'],[^)]*\)@define( 'LOGGED_IN_SALT', '${WORDPRESS_LOGGED_IN_SALT:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\'"']NONCE_SALT["'\'"'],[^)]*\)@define( 'NONCE_SALT', '${WORDPRESS_NONCE_SALT:-}' )@g' html/wp-config.php"
+        
         print_green "✓ WordPress 密钥更新完成"
     fi
     # ===== 结束 =====
