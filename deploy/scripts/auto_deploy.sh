@@ -291,6 +291,25 @@ optimize_parameters() {
     
     log_message "PHP内存限制: $PHP_MEMORY_LIMIT"
     
+    # 设置默认值
+    PHP_VERSION="8.3"
+    NGINX_VERSION="1.27"
+    MARIADB_VERSION="11.3"
+    REDIS_VERSION="7.4"
+    
+    # 设置资源限制默认值
+    if [ -z "$MEMORY_LIMIT" ]; then
+        MEMORY_LIMIT="2048m"
+    fi
+    if [ -z "$CPU_LIMIT" ]; then
+        CPU_LIMIT="2"
+    fi
+    
+    # 生成密码
+    MYSQL_ROOT_PASSWORD="$(generate_password 20)"
+    MYSQL_PASSWORD="$(generate_password 20)"
+    REDIS_PASSWORD="$(generate_password 20)"
+    
     # 生成.env文件(删除并重新生成)
     if [ -f ".env" ]; then
         log_message "检测到.env文件已存在，删除并重新生成..."
@@ -299,51 +318,33 @@ optimize_parameters() {
     
     log_message "生成.env文件..."
     
-    # 生成密码
-    MYSQL_ROOT_PASSWORD="$(generate_password 20)"
-    MYSQL_PASSWORD="$(generate_password 20)"
-    REDIS_PASSWORD="$(generate_password 20)"
-    
-    # 生成WordPress密钥
-    wp_keys="$(generate_wordpress_keys)"
-    
-    # 定义版本
-    PHP_VERSION="8.1"
-    NGINX_VERSION="1.24"
-    MARIADB_VERSION="10.11"
-    REDIS_VERSION="7.0"
-    
-    # 创建.env文件，使用安全的格式确保Python-dotenv可以正确解析
-        # 首先将生成的WordPress密钥保存到临时变量
-        local wp_security_keys="$wp_keys"
-        
-        # 使用普通的Here Document，不使用单引号，确保变量能正确展开
-        cat > .env << EOF
+    # 使用临时文件先写入基本配置
+    cat > .env << 'EOF'
 # Docker Configuration
 COMPOSE_PROJECT_NAME=wp_docker
 
 # Database Configuration
-MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD"
+MYSQL_ROOT_PASSWORD="MYSQL_ROOT_PASSWORD_PLACEHOLDER"
 MYSQL_DATABASE="wordpress"
 MYSQL_USER="wordpress"
-MYSQL_PASSWORD="$MYSQL_PASSWORD"
+MYSQL_PASSWORD="MYSQL_PASSWORD_PLACEHOLDER"
 
 # WordPress Configuration
 WORDPRESS_DB_HOST="mariadb"
 WORDPRESS_DB_USER="wordpress"
-WORDPRESS_DB_PASSWORD="$MYSQL_PASSWORD"
+WORDPRESS_DB_PASSWORD="MYSQL_PASSWORD_PLACEHOLDER"
 WORDPRESS_DB_NAME="wordpress"
 WORDPRESS_TABLE_PREFIX="wp_"
 
 # Redis Configuration
 REDIS_HOST="redis"
-REDIS_PASSWORD="$REDIS_PASSWORD"
+REDIS_PASSWORD="REDIS_PASSWORD_PLACEHOLDER"
 REDIS_PORT=6379
 REDIS_MAXMEMORY=256mb
 
 # Resource Limits
-MEMORY_LIMIT="$MEMORY_LIMIT"
-CPU_LIMIT="$CPU_LIMIT"
+MEMORY_LIMIT="MEMORY_LIMIT_PLACEHOLDER"
+CPU_LIMIT="CPU_LIMIT_PLACEHOLDER"
 
 # Optional Configuration
 PHP_MEMORY_LIMIT=512M
@@ -351,20 +352,42 @@ UPLOAD_MAX_FILESIZE=64M
 USE_CN_MIRROR=false
 
 # Image Versions
-PHP_VERSION="$PHP_VERSION"
-NGINX_VERSION="$NGINX_VERSION"
-MARIADB_VERSION="$MARIADB_VERSION"
-REDIS_VERSION="$REDIS_VERSION"
+PHP_VERSION="PHP_VERSION_PLACEHOLDER"
+NGINX_VERSION="NGINX_VERSION_PLACEHOLDER"
+MARIADB_VERSION="MARIADB_VERSION_PLACEHOLDER"
+REDIS_VERSION="REDIS_VERSION_PLACEHOLDER"
 
 # Backup Retention
-BACKUP_RETENTION_DAYS="$BACKUP_RETENTION_DAYS"
+BACKUP_RETENTION_DAYS="BACKUP_RETENTION_DAYS_PLACEHOLDER"
 
-# WordPress Security Keys
-$wp_security_keys
+# WordPress Security Keys will be added below
 EOF
-        
-        # 确保文件权限正确
-        chmod 600 .env
+    
+    # 替换占位符为实际值
+    sed -i "s/MYSQL_ROOT_PASSWORD_PLACEHOLDER/$MYSQL_ROOT_PASSWORD/g" .env
+    sed -i "s/MYSQL_PASSWORD_PLACEHOLDER/$MYSQL_PASSWORD/g" .env
+    sed -i "s/REDIS_PASSWORD_PLACEHOLDER/$REDIS_PASSWORD/g" .env
+    sed -i "s/MEMORY_LIMIT_PLACEHOLDER/$MEMORY_LIMIT/g" .env
+    sed -i "s/CPU_LIMIT_PLACEHOLDER/$CPU_LIMIT/g" .env
+    sed -i "s/PHP_VERSION_PLACEHOLDER/$PHP_VERSION/g" .env
+    sed -i "s/NGINX_VERSION_PLACEHOLDER/$NGINX_VERSION/g" .env
+    sed -i "s/MARIADB_VERSION_PLACEHOLDER/$MARIADB_VERSION/g" .env
+    sed -i "s/REDIS_VERSION_PLACEHOLDER/$REDIS_VERSION/g" .env
+    sed -i "s/BACKUP_RETENTION_DAYS_PLACEHOLDER/$BACKUP_RETENTION_DAYS/g" .env
+    
+    # 生成WordPress密钥并追加到文件
+    echo "# WordPress Security Keys" >> .env
+    
+    # 使用openssl直接生成安全的随机密钥
+    for key in "AUTH_KEY" "SECURE_AUTH_KEY" "LOGGED_IN_KEY" "NONCE_KEY" "AUTH_SALT" "SECURE_AUTH_SALT" "LOGGED_IN_SALT" "NONCE_SALT"; do
+        # 生成64字符的随机密钥，避免特殊字符导致解析问题
+        value=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9!@#$%^&*()_+=-' | head -c 64)
+        # 将值用双引号包裹并写入文件
+        echo "WORDPRESS_${key}=\"${value}\"" >> .env
+    done
+    
+    # 确保文件权限正确
+    chmod 600 .env
     
     log_message "✓ .env文件生成完成"
     # 从新生成的.env文件加载环境变量
