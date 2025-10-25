@@ -184,20 +184,22 @@ collect_system_parameters() {
     fi
 }
 
-# 纭畾閮ㄧ讲鐩綍
+# 确定部署目录
 determine_deployment_directory() {
-    log_message "[闃舵4] 纭畾閮ㄧ讲鐩綍..."
+    log_message "[阶段4] 确定部署目录..."
     
-    # 妫€鏌ョ洰褰曟槸鍚﹀瓨鍦紝涓嶅瓨鍦ㄥ垯鍒涘缓
+    # 检查目录是否存在，不存在则创建
     if [ ! -d "$DEPLOY_DIR" ]; then
-        mkdir -p "$DEPLOY_DIR" || handle_error "鍒涘缓閮ㄧ讲鐩綍澶辫触"
+        mkdir -p "$DEPLOY_DIR" || handle_error "创建部署目录失败"
     fi
     
-    # 鍒囨崲鍒伴儴缃茬洰褰?    cd "$DEPLOY_DIR" || handle_error "鍒囨崲鍒伴儴缃茬洰褰曞け璐?
+    # 切换到部署目录
+    cd "$DEPLOY_DIR" || handle_error "切换到部署目录失败"
     
-    # 鍒涘缓蹇呰鐨勭洰褰曠粨鏋?    mkdir -p html configs backups scripts logs || handle_error "鍒涘缓鐩綍缁撴瀯澶辫触"
+    # 创建必要的目录结构
+    mkdir -p html configs backups scripts logs || handle_error "创建目录结构失败"
     
-    log_message "閮ㄧ讲鐩綍: $DEPLOY_DIR"
+    log_message "部署目录: $DEPLOY_DIR"
 }
 
 # 鐢熸垚瀵嗙爜
