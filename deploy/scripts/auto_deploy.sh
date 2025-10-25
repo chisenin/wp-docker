@@ -38,13 +38,14 @@ log_message() {
     echo "$1"
 }
 
-# 妫€娴嬪涓绘満鐜
+# 检测主机环境
 detect_host_environment() {
-    log_message "[闃舵1] 妫€娴嬪涓绘満鐜..."
+    log_message "[阶段1] 检测主机环境..."
     
     # Logs directory already created at script start
     
-    # 妫€娴嬫搷浣滅郴缁熺被鍨?    if [ -f /etc/os-release ]; then
+    # 检测操作系统类型
+    if [ -f /etc/os-release ]; then
         . /etc/os-release
         OS_TYPE="$ID"
         OS_VERSION="$VERSION_ID"
@@ -61,7 +62,7 @@ detect_host_environment() {
         handle_error "不支持的操作系统类型"
     fi
     
-    log_message "鎿嶄綔绯荤粺: $OS_TYPE $OS_VERSION"
+    log_message "操作系统: $OS_TYPE $OS_VERSION"
 }
 
 # 鐜鍑嗗锛氬垱寤簑ww-data鐢ㄦ埛/缁勩€佷慨澶?env鏂囦欢銆佹竻鐞咲ocker鍐茬獊
