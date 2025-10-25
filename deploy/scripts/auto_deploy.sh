@@ -552,26 +552,37 @@ start_services() {
         sed -i "s/username_here/$WORDPRESS_DB_USER/" html/wp-config.php
         sed -i "s/password_here/$WORDPRESS_DB_PASSWORD/" html/wp-config.php
         sed -i "s/localhost/$WORDPRESS_DB_HOST/" html/wp-config.php
-        # 使用双引号包裹sed命令，但对内部特殊字符进行转义
-        sed -i "s@define\\\\\\([ \\t]*[\\"\\']AUTH_KEY[\\"\\'],.*@define( \\"AUTH_KEY\\",         \\"$WORDPRESS_AUTH_KEY\\" );@g" html/wp-config.php
-        sed -i "s@define\\\\\\([ \\t]*[\\"\\']SECURE_AUTH_KEY[\\"\\'],.*@define( \\"SECURE_AUTH_KEY\\",  \\"$WORDPRESS_SECURE_AUTH_KEY\\" );@g" html/wp-config.php
-        sed -i "s@define\\\\\\([ \\t]*[\\"\\']LOGGED_IN_KEY[\\"\\'],.*@define( \\"LOGGED_IN_KEY\\",    \\"$WORDPRESS_LOGGED_IN_KEY\\" );@g" html/wp-config.php
-        sed -i "s@define\\\\\\([ \\t]*[\\"\\']NONCE_KEY[\\"\\'],.*@define( \\"NONCE_KEY\\",        \\"$WORDPRESS_NONCE_KEY\\" );@g" html/wp-config.php
-        sed -i "s@define\\\\\\([ \\t]*[\\"\\']AUTH_SALT[\\"\\'],.*@define( \\"AUTH_SALT\\",        \\"$WORDPRESS_AUTH_SALT\\" );@g" html/wp-config.php
-        sed -i "s@define\\\\\\([ \\t]*[\\"\\']SECURE_AUTH_SALT[\\"\\'],.*@define( \\"SECURE_AUTH_SALT\\", \\"$WORDPRESS_SECURE_AUTH_SALT\\" );@g" html/wp-config.php
-        sed -i "s@define\\\\\\([ \\t]*[\\"\\']LOGGED_IN_SALT[\\"\\'],.*@define( \\"LOGGED_IN_SALT\\",   \\"$WORDPRESS_LOGGED_IN_SALT\\" );@g" html/wp-config.php
-        sed -i "s@define\\\\\\([ \\t]*[\\"\\']NONCE_SALT[\\"\\'],.*@define( \\"NONCE_SALT\\",       \\"$WORDPRESS_NONCE_SALT\\" );@g" html/wp-config.php
+        # 检测 sed 是否支持 -i 无参数（GNU sed）
+        if sed --version >/dev/null 2>&1; then
+            SED_INPLACE=( -i )
+        else
+            # BusyBox sed (Alpine)
+            SED_INPLACE=( -i '' )
+        fi
+        
+        echo "正在更新 WordPress 安全密钥..."
+        
+        sed "${SED_INPLACE[@]}" "s@define\\s*(['\\"]AUTH_KEY['\\"].*@define( 'AUTH_KEY', '${WORDPRESS_AUTH_KEY}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\\s*(['\\"]SECURE_AUTH_KEY['\\"].*@define( 'SECURE_AUTH_KEY', '${WORDPRESS_SECURE_AUTH_KEY}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\\s*(['\\"]LOGGED_IN_KEY['\\"].*@define( 'LOGGED_IN_KEY', '${WORDPRESS_LOGGED_IN_KEY}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\\s*(['\\"]NONCE_KEY['\\"].*@define( 'NONCE_KEY', '${WORDPRESS_NONCE_KEY}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\\s*(['\\"]AUTH_SALT['\\"].*@define( 'AUTH_SALT', '${WORDPRESS_AUTH_SALT}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\\s*(['\\"]SECURE_AUTH_SALT['\\"].*@define( 'SECURE_AUTH_SALT', '${WORDPRESS_SECURE_AUTH_SALT}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\\s*(['\\"]LOGGED_IN_SALT['\\"].*@define( 'LOGGED_IN_SALT', '${WORDPRESS_LOGGED_IN_SALT}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\\s*(['\\"]NONCE_SALT['\\"].*@define( 'NONCE_SALT', '${WORDPRESS_NONCE_SALT}' );@g" html/wp-config.php
+        
+        echo "WordPress 密钥更新完成 ✅"
         # 使用cat和here-document写入配置，使用简单分隔符避免解析问题
         cat >> html/wp-config.php << 'EOF'
 
-/** Redis Configuration */
-define("WP_CACHE", true);
-define("WP_REDIS_HOST", "REDIS_HOST_PLACEHOLDER");
-define("WP_REDIS_PASSWORD", "REDIS_PASSWORD_PLACEHOLDER");
-define("WP_REDIS_PORT", 6379);
-define("WP_REDIS_TIMEOUT", 1);
-define("WP_REDIS_READ_TIMEOUT", 1);
-EOF
+        /** Redis Configuration */
+        define("WP_CACHE", true);
+        define("WP_REDIS_HOST", "REDIS_HOST_PLACEHOLDER");
+        define("WP_REDIS_PASSWORD", "REDIS_PASSWORD_PLACEHOLDER");
+        define("WP_REDIS_PORT", 6379);
+        define("WP_REDIS_TIMEOUT", 1);
+        define("WP_REDIS_READ_TIMEOUT", 1);
+        EOF
         # 替换占位符为实际值
         sed -i "s/REDIS_HOST_PLACEHOLDER/$REDIS_HOST/" html/wp-config.php
         sed -i "s/REDIS_PASSWORD_PLACEHOLDER/$REDIS_PASSWORD/" html/wp-config.php
@@ -698,3 +709,24 @@ main() {
 }
 
 main "$@"
+
+        # 检测 sed 是否支持 -i 无参数（GNU sed）
+        if sed --version >/dev/null 2>&1; then
+            SED_INPLACE=( -i )
+        else
+            # BusyBox sed (Alpine)
+            SED_INPLACE=( -i '' )
+        fi
+        
+        echo "正在更新 WordPress 安全密钥..."
+        
+        sed "${SED_INPLACE[@]}" "s@define\s*(['\"]AUTH_KEY['\"].*@define( 'AUTH_KEY', '${WORDPRESS_AUTH_KEY}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\s*(['\"]SECURE_AUTH_KEY['\"].*@define( 'SECURE_AUTH_KEY', '${WORDPRESS_SECURE_AUTH_KEY}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\s*(['\"]LOGGED_IN_KEY['\"].*@define( 'LOGGED_IN_KEY', '${WORDPRESS_LOGGED_IN_KEY}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\s*(['\"]NONCE_KEY['\"].*@define( 'NONCE_KEY', '${WORDPRESS_NONCE_KEY}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\s*(['\"]AUTH_SALT['\"].*@define( 'AUTH_SALT', '${WORDPRESS_AUTH_SALT}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\s*(['\"]SECURE_AUTH_SALT['\"].*@define( 'SECURE_AUTH_SALT', '${WORDPRESS_SECURE_AUTH_SALT}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\s*(['\"]LOGGED_IN_SALT['\"].*@define( 'LOGGED_IN_SALT', '${WORDPRESS_LOGGED_IN_SALT}' );@g" html/wp-config.php
+        sed "${SED_INPLACE[@]}" "s@define\s*(['\"]NONCE_SALT['\"].*@define( 'NONCE_SALT', '${WORDPRESS_NONCE_SALT}' );@g" html/wp-config.php
+        
+        echo "WordPress 密钥更新完成 ✅"
