@@ -369,8 +369,8 @@ services:
 
   # --- PHP-FPM 服务 ---
   php:
-    # 使用我们构建的PHP镜像，支持自动版本更新
-    image: \${DOCKERHUB_USERNAME:-library}/wordpress-php:\${PHP_VERSION:-8.3.26}
+    # 使用官方PHP镜像
+    image: php:\${PHP_VERSION:-8.3.26}-fpm
     container_name: wp_fpm
     restart: unless-stopped
     networks:
@@ -405,8 +405,8 @@ services:
 
   # --- Nginx 服务 ---
   nginx:
-    # 使用我们构建的Nginx镜像，支持自动版本更新
-    image: \${DOCKERHUB_USERNAME:-library}/wordpress-nginx:\${NGINX_VERSION:-1.27.2}
+    # 使用官方Nginx镜像
+    image: nginx:\${NGINX_VERSION:-1.27.2}
     container_name: wp_nginx
     restart: unless-stopped
     networks:
