@@ -27,6 +27,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1'  # 有效浮点数值
+          memory: 1G
 
   # --- Redis 缓存服务 ---
   redis:
