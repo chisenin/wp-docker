@@ -265,16 +265,17 @@ generate_wordpress_keys() {
     local keys=""
     
     # 生成所有需要的WordPress密钥
-    local key_names=("AUTH_KEY" "SECURE_AUTH_KEY" "LOGGED_IN_KEY" "NONCE_KEY" "AUTH_SALT" "SECURE_AUTH_SALT" "LOGGED_IN_SALT" "NONCE_SALT")
+    local key_names=("WORDPRESS_AUTH_KEY" "WORDPRESS_SECURE_AUTH_KEY" "WORDPRESS_LOGGED_IN_KEY" "WORDPRESS_NONCE_KEY" "WORDPRESS_AUTH_SALT" "WORDPRESS_SECURE_AUTH_SALT" "WORDPRESS_LOGGED_IN_SALT" "WORDPRESS_NONCE_SALT")
     
     for key in "${key_names[@]}"; do
-        # 为每个密钥生成64位随机字符
-        local value="$(generate_password 64)"
-        # 确保值能用双引号包裹
-        keys="${keys}${key}=\"${value}\"\n"
+        # 为每个密钥生成64位随机字符，并确保特殊字符被正确转义
+        local value=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9!@#$%^&*()_+=-' | head -c 64)
+        # 直接添加到keys字符串，不需要额外转义
+        keys="${keys}${key}="'"'"$value"'"'"\n"
     done
     
-    echo -e "$keys"
+    # 不使用echo -e，避免额外的转义问题
+    printf "%s" "$keys"
 }
 
 # 优化参数
@@ -313,32 +314,36 @@ optimize_parameters() {
     REDIS_VERSION="7.0"
     
     # 创建.env文件，使用安全的格式确保Python-dotenv可以正确解析
-    cat > .env << 'EOF'
+        # 首先将生成的WordPress密钥保存到临时变量
+        local wp_security_keys="$wp_keys"
+        
+        # 使用普通的Here Document，不使用单引号，确保变量能正确展开
+        cat > .env << EOF
 # Docker Configuration
 COMPOSE_PROJECT_NAME=wp_docker
 
 # Database Configuration
-MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD}"
+MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD"
 MYSQL_DATABASE="wordpress"
 MYSQL_USER="wordpress"
-MYSQL_PASSWORD="${MYSQL_PASSWORD}"
+MYSQL_PASSWORD="$MYSQL_PASSWORD"
 
 # WordPress Configuration
 WORDPRESS_DB_HOST="mariadb"
 WORDPRESS_DB_USER="wordpress"
-WORDPRESS_DB_PASSWORD="${MYSQL_PASSWORD}"
+WORDPRESS_DB_PASSWORD="$MYSQL_PASSWORD"
 WORDPRESS_DB_NAME="wordpress"
 WORDPRESS_TABLE_PREFIX="wp_"
 
 # Redis Configuration
 REDIS_HOST="redis"
-REDIS_PASSWORD="${REDIS_PASSWORD}"
+REDIS_PASSWORD="$REDIS_PASSWORD"
 REDIS_PORT=6379
 REDIS_MAXMEMORY=256mb
 
 # Resource Limits
-MEMORY_LIMIT="${MEMORY_LIMIT}"
-CPU_LIMIT="${CPU_LIMIT}"
+MEMORY_LIMIT="$MEMORY_LIMIT"
+CPU_LIMIT="$CPU_LIMIT"
 
 # Optional Configuration
 PHP_MEMORY_LIMIT=512M
@@ -346,17 +351,20 @@ UPLOAD_MAX_FILESIZE=64M
 USE_CN_MIRROR=false
 
 # Image Versions
-PHP_VERSION="${PHP_VERSION}"
-NGINX_VERSION="${NGINX_VERSION}"
-MARIADB_VERSION="${MARIADB_VERSION}"
-REDIS_VERSION="${REDIS_VERSION}"
+PHP_VERSION="$PHP_VERSION"
+NGINX_VERSION="$NGINX_VERSION"
+MARIADB_VERSION="$MARIADB_VERSION"
+REDIS_VERSION="$REDIS_VERSION"
 
 # Backup Retention
-BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS}"
+BACKUP_RETENTION_DAYS="$BACKUP_RETENTION_DAYS"
 
 # WordPress Security Keys
-${wp_keys}
+$wp_security_keys
 EOF
+        
+        # 确保文件权限正确
+        chmod 600 .env
     
     log_message "✓ .env文件生成完成"
     # 从新生成的.env文件加载环境变量
