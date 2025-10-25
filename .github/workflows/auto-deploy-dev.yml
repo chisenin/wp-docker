@@ -12,6 +12,9 @@ on:
         default: 'false'
         type: string
 
+permissions:
+  contents: write
+
 jobs:
   # 专注于auto_deploy功能的工作流
   prepare-and-release:
