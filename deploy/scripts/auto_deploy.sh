@@ -98,7 +98,7 @@ environment_preparation() {
                 value="${line#*=}"
                 
                 # 如果值没有被引号包裹，添加双引号
-                if [[ ! "$value" =~ ^['"].*['"]$ ]]; then
+                if [[ "$value" != \"* && "$value" != \'* ]]; then
                     echo "$key=\"$value\"" >> "$TEMP_FILE"
                 else
                     echo "$line" >> "$TEMP_FILE"
@@ -110,7 +110,7 @@ environment_preparation() {
         
         # 替换原文件
         mv "$TEMP_FILE" "$DEPLOY_DIR/.env"
-        log_message "✓ .env文件修复完成"
+        log_message "✓ .env file has been fixed"
     fi
     
     # 3. 清理Docker容器冲突
@@ -119,18 +119,18 @@ environment_preparation() {
     CONTAINERS=("wp_db" "wp_redis" "wp_php" "wp_nginx")
     for container in "${CONTAINERS[@]}"; do
         if docker ps -a | grep -q "$container"; then
-            log_message "检测到冲突容器: $container，尝试停止并移除..."
-            docker stop "$container" 2>/dev/null || :
-            docker rm "$container" 2>/dev/null || :
-            log_message "✓ 容器 $container 已移除"
+            log_message "Detected conflicting container: $container, attempting to stop and remove..."
+            docker stop "$container" 2>/dev/null || true
+            docker rm "$container" 2>/dev/null || true
+            log_message "✓ Container $container has been removed"
         fi
     done
     
     # 检查是否有重名网络
     if docker network ls | grep -q "wp_network"; then
-        log_message "检测到冲突网络: wp_network，尝试移除..."
-        docker network rm wp_network 2>/dev/null || :
-        log_message "✓ 网络 wp_network 已移除"
+        log_message "Detected conflicting network: wp_network, attempting to remove..."
+        docker network rm wp_network 2>/dev/null || true
+        log_message "✓ Network wp_network has been removed"
     fi
 }
 
