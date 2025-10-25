@@ -30,7 +30,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'  # 有效浮点数值
+          cpus: 1  # 确保cpus是有效的浮点数值
           memory: 1G
 
   # --- Redis 缓存服务 ---
