@@ -581,8 +581,12 @@ display_deployment_info() {
     print_green ""
     print_green "服务器信息:"
     print_green "  - 操作系统: $OS_TYPE $OS_VERSION"
-    print_green "  - CPU 核心数: $CPU_CORES (限制使用: $((CPU_CORES / 2)) 核)"
-    print_green "  - 内存总量: ${AVAILABLE_RAM}MB (限制使用: $((AVAILABLE_RAM / 2))MB)"
+    # 使用兼容sh的方式计算CPU限制
+    local cpu_limit=$((CPU_CORES / 2))
+    print_green "  - CPU 核心数: $CPU_CORES (限制使用: ${cpu_limit} 核)"
+    # 使用兼容sh的方式计算内存限制
+    local mem_limit=$((AVAILABLE_RAM / 2))
+    print_green "  - 内存总量: ${AVAILABLE_RAM}MB (限制使用: ${mem_limit}MB)"
     print_green "  - 部署目录: $DEPLOY_DIR"
     print_green "  - 备份目录: $BACKUP_DIR"
     print_green "  - 备份保留: $BACKUP_RETENTION_DAYS 天"
