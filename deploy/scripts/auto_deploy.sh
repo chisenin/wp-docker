@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 
 set -e
 
@@ -142,6 +142,10 @@ check_memory() {
 
 determine_deploy_directory() {
     log_message "[Stage 5] Determining deployment directory..."
+    # 确保DEPLOY_DIR是一个有效的目录，并且不是根目录
+    if [ "$DEPLOY_DIR" = "/" ]; then
+        handle_error "Invalid deployment directory: Cannot deploy to root directory"
+    fi
     cd "$DEPLOY_DIR"
     if [ ! -d "html" ]; then
         mkdir -p "html"
@@ -261,9 +265,10 @@ build_images() {
         NGINX_MEMORY_LIMIT="256m"
     fi
     export CPU_LIMIT MEMORY_LIMIT MARIADB_CPU_LIMIT MARIADB_MEMORY_LIMIT NGINX_CPU_LIMIT NGINX_MEMORY_LIMIT
-    if [ ! -f "docker-compose.yml" ] || [ "$FORCE_CONFIG" = true ]; then
-        log_message "Generating docker-compose.yml file..."
-        cat > docker-compose.yml << EOF
+    local docker_compose_file="$DEPLOY_DIR/docker-compose.yml"
+    if [ ! -f "$docker_compose_file" ] || [ "$FORCE_CONFIG" = true ]; then
+        log_message "Generating docker-compose.yml file at $docker_compose_file..."
+        cat > "$docker_compose_file" << EOF
 version: '3.8'
 
 services:
@@ -379,15 +384,14 @@ volumes:
   wordpress_data:
 EOF
     fi
-    if ! $DOCKER_COMPOSE_CMD config >/dev/null 2>&1; then
-        handle_error "docker-compose.yml configuration syntax error"
-    fi
     log_message "Current resource limits: CPU=$CPU_LIMIT, Memory=$MEMORY_LIMIT, MARIADB_CPU=$MARIADB_CPU_LIMIT, MARIADB_MEMORY=$MARIADB_MEMORY_LIMIT, NGINX_CPU=$NGINX_CPU_LIMIT, NGINX_MEMORY=$NGINX_MEMORY_LIMIT, REDIS_CPU=${REDIS_CPU_LIMIT:-0.5}, REDIS_MEMORY=${REDIS_MEMORY_LIMIT:-128m}"
-    # 添加临时文件保存docker-compose.yml以便调试
-    log_message "Saving docker-compose.yml for validation..."
-    if ! $DOCKER_COMPOSE_CMD config >/dev/null 2>&1; then
-        log_message "docker-compose.yml validation failed, printing generated file..."
-        cat docker-compose.yml
+    log_message "Validating docker-compose.yml..."
+    # 添加详细的错误输出和文件内容显示
+    if ! $DOCKER_COMPOSE_CMD -f "$docker_compose_file" config --quiet; then
+        log_message "Error: docker-compose.yml validation failed, printing file content and error details:"
+        cat "$docker_compose_file"
+        log_message "Validation error details:"
+        $DOCKER_COMPOSE_CMD -f "$docker_compose_file" config
         handle_error "docker-compose.yml configuration syntax error"
     fi
     log_message "Success: Image building completed"
