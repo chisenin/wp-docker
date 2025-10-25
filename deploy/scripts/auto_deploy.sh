@@ -12,6 +12,11 @@ DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Create logs directory first to ensure log file can be written
 mkdir -p "$DEPLOY_DIR/logs" 2>/dev/null
 
+# 颜色输出函数（修复语法错误）
+print_blue() {
+    echo -e "\033[34m$1\033[0m"
+}
+
 OS_TYPE=""
 OS_VERSION=""
 CPU_CORES=0
