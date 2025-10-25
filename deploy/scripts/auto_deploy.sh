@@ -320,7 +320,7 @@ version: '3.8'
 
 services:
   nginx:
-    image: chisenin/wp-docker-nginx:${NGINX_VERSION:-latest}
+    image: ${DOCKERHUB_USERNAME:-library}/wordpress-nginx:${NGINX_VERSION:-latest}
     container_name: nginx
     ports:
       - "80:80"
@@ -339,7 +339,7 @@ services:
           memory: "${MEM_LIMIT:-512M}"
 
   php:
-    image: chisenin/wp-docker-php:${PHP_VERSION:-latest}-fpm
+    image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-latest}
     container_name: php
     volumes:
       - ./html:/var/www/html
@@ -355,7 +355,7 @@ services:
           memory: "${MEM_LIMIT:-512M}"
 
   mariadb:
-    image: chisenin/wp-docker-mariadb:${MARIADB_VERSION:-latest}
+    image: ${DOCKERHUB_USERNAME:-library}/wordpress-mariadb:${MARIADB_VERSION:-latest}
     container_name: mariadb
     volumes:
       - ./mysql:/var/lib/mysql
@@ -372,7 +372,7 @@ services:
           memory: "1024M"
 
   redis:
-    image: chisenin/wp-docker-redis:${REDIS_VERSION:-latest}
+    image: ${DOCKERHUB_USERNAME:-library}/wordpress-redis:${REDIS_VERSION:-latest}
     container_name: redis
     volumes:
       - ./redis:/data
