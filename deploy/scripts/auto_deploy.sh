@@ -466,7 +466,51 @@ deploy_wordpress_stack() {
     # ===== 更新 WordPress 密钥 =====
     print_blue "更新 WordPress 密钥..."
     if [ ! -f "html/wp-config.php" ]; then
-        print_yellow "警告: html/wp-config.php 文件不存在，跳过密钥更新"
+        print_yellow "警告: html/wp-config.php 文件不存在，正在创建文件..."
+        
+        # 确保 html 目录存在
+        mkdir -p "html"
+        
+        # 生成 WordPress 密钥
+        local wp_keys=$(generate_wordpress_keys)
+        
+        # 从环境变量获取数据库配置
+        local db_name=${MYSQL_DATABASE:-wordpress}
+        local db_user=${MYSQL_USER:-wordpress}
+        local db_password=${MYSQL_PASSWORD:-wordpresspassword}
+        local db_host=${WORDPRESS_DB_HOST:-mariadb:3306}
+        local table_prefix=${WORDPRESS_TABLE_PREFIX:-wp_}
+        
+        # 创建基本的 wp-config.php 文件
+        cat > html/wp-config.php << EOF
+<?php
+/**
+ * WordPress 配置文件
+ * 由 WordPress Docker 自动部署脚本生成
+ */
+
+// 数据库设置
+define('DB_NAME', '$db_name');
+define('DB_USER', '$db_user');
+define('DB_PASSWORD', '$db_password');
+define('DB_HOST', '$db_host');
+define('DB_CHARSET', 'utf8mb4');
+define('DB_COLLATE', '');
+
+// $table_prefix
+$table_prefix = '$table_prefix';
+
+// 安全密钥
+$wp_keys
+
+// 其他设置
+define('WP_DEBUG', false);
+if ( !defined('ABSPATH') )
+    define('ABSPATH', dirname(__FILE__) . '/');
+require_once(ABSPATH . 'wp-settings.php');
+EOF
+        
+        print_green "✓ wp-config.php 文件创建成功"
     else
         # 检测 sed 版本，适应不同系统
         local sed_cmd="sed -i"
@@ -475,14 +519,14 @@ deploy_wordpress_stack() {
         fi
         
         # 直接使用 sed 命令更新密钥，避免函数定义在条件块内
-        eval "$sed_cmd -E 's@define\s*\(["'\'"']AUTH_KEY["'\'"'],[^)]*\)@define( 'AUTH_KEY', '${WORDPRESS_AUTH_KEY:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\'"']SECURE_AUTH_KEY["'\'"'],[^)]*\)@define( 'SECURE_AUTH_KEY', '${WORDPRESS_SECURE_AUTH_KEY:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\'"']LOGGED_IN_KEY["'\'"'],[^)]*\)@define( 'LOGGED_IN_KEY', '${WORDPRESS_LOGGED_IN_KEY:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\'"']NONCE_KEY["'\'"'],[^)]*\)@define( 'NONCE_KEY', '${WORDPRESS_NONCE_KEY:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\'"']AUTH_SALT["'\'"'],[^)]*\)@define( 'AUTH_SALT', '${WORDPRESS_AUTH_SALT:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\'"']SECURE_AUTH_SALT["'\'"'],[^)]*\)@define( 'SECURE_AUTH_SALT', '${WORDPRESS_SECURE_AUTH_SALT:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\'"']LOGGED_IN_SALT["'\'"'],[^)]*\)@define( 'LOGGED_IN_SALT', '${WORDPRESS_LOGGED_IN_SALT:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\'"']NONCE_SALT["'\'"'],[^)]*\)@define( 'NONCE_SALT', '${WORDPRESS_NONCE_SALT:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\''"']AUTH_KEY["'\''"'],[^)]*\)@define( 'AUTH_KEY', '${WORDPRESS_AUTH_KEY:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\''"']SECURE_AUTH_KEY["'\''"'],[^)]*\)@define( 'SECURE_AUTH_KEY', '${WORDPRESS_SECURE_AUTH_KEY:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\''"']LOGGED_IN_KEY["'\''"'],[^)]*\)@define( 'LOGGED_IN_KEY', '${WORDPRESS_LOGGED_IN_KEY:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\''"']NONCE_KEY["'\''"'],[^)]*\)@define( 'NONCE_KEY', '${WORDPRESS_NONCE_KEY:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\''"']AUTH_SALT["'\''"'],[^)]*\)@define( 'AUTH_SALT', '${WORDPRESS_AUTH_SALT:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\''"']SECURE_AUTH_SALT["'\''"'],[^)]*\)@define( 'SECURE_AUTH_SALT', '${WORDPRESS_SECURE_AUTH_SALT:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\''"']LOGGED_IN_SALT["'\''"'],[^)]*\)@define( 'LOGGED_IN_SALT', '${WORDPRESS_LOGGED_IN_SALT:-}' )@g' html/wp-config.php"
+        eval "$sed_cmd -E 's@define\s*\(["'\''"']NONCE_SALT["'\''"'],[^)]*\)@define( 'NONCE_SALT', '${WORDPRESS_NONCE_SALT:-}' )@g' html/wp-config.php"
         
         print_green "✓ WordPress 密钥更新完成"
     fi
