@@ -137,41 +137,46 @@ environment_preparation() {
     fi
 }
 
-# 鏀堕泦绯荤粺鍙傛暟
+# 收集系统参数
 collect_system_parameters() {
-    log_message "[闃舵3] 鏀堕泦绯荤粺鍙傛暟..."
+    log_message "[阶段3] 收集系统参数..."
     
-    # 鑾峰彇CPU鏍稿績鏁?    CPU_CORES=$(grep -c '^processor' /proc/cpuinfo)
-    log_message "CPU鏍稿績鏁? $CPU_CORES"
+    # 获取CPU核心数
+    CPU_CORES=$(grep -c '^processor' /proc/cpuinfo)
+    log_message "CPU核心数: $CPU_CORES"
     
-    # 鑾峰彇鍙敤鍐呭瓨锛圡B锛?    AVAILABLE_RAM=$(free -m | grep Mem | awk '{print $2}')
-    log_message "鍙敤鍐呭瓨: ${AVAILABLE_RAM}MB"
+    # 获取可用内存(MB)
+    AVAILABLE_RAM=$(free -m | grep Mem | awk '{print $2}')
+    log_message "可用内存: ${AVAILABLE_RAM}MB"
     
-    # 鑾峰彇鍙敤纾佺洏绌洪棿锛圙B锛?    AVAILABLE_DISK=$(df -h / | tail -1 | awk '{print $4}' | sed 's/G//')
-    log_message "鍙敤纾佺洏绌洪棿: ${AVAILABLE_DISK}GB"
+    # 获取可用磁盘空间(GB)
+    AVAILABLE_DISK=$(df -h / | tail -1 | awk '{print $4}' | sed 's/G//')
+    log_message "可用磁盘空间: ${AVAILABLE_DISK}GB"
     
-    # 妫€鏌ocker鏄惁瀹夎锛屼笉寮哄埗瀹夎浠ラ伩鍏嶆潈闄愰棶棰?    if ! command -v docker >/dev/null 2>&1; then
-        log_message "璀﹀憡: Docker鏈壘鍒般€傝纭繚Docker宸插畨瑁呭苟鍦≒ATH涓?
-        # 涓嶈嚜鍔ㄥ畨瑁咃紝鍥犱负闇€瑕乺oot鏉冮檺
+    # 检查Docker是否安装，不自动安装以避免权限问题
+    if ! command -v docker >/dev/null 2>&1; then
+        log_message "警告: Docker未找到。请确保Docker已安装并在PATH中"
+        # 不自动安装，因为需要root权限
     else
-        log_message "鉁?Docker 宸插畨瑁?
+        log_message "✓ Docker 已安装"
     fi
     
-    # 妫€鏌ocker Compose (鏀寔v1鍜寁2璇硶)
+    # 检查Docker Compose (支持v1和v2语法)
     if command -v docker-compose >/dev/null 2>&1; then
         DOCKER_COMPOSE_CMD="docker-compose"
-        log_message "鉁?Docker Compose v1 宸插畨瑁?
+        log_message "✓ Docker Compose v1 已安装"
     elif docker compose version >/dev/null 2>&1; then
         DOCKER_COMPOSE_CMD="docker compose"
-        log_message "鉁?Docker Compose v2 宸插畨瑁?
+        log_message "✓ Docker Compose v2 已安装"
     else
-        log_message "璀﹀憡: Docker Compose鏈壘鍒般€傝纭繚Docker Compose宸插畨瑁?
-        DOCKER_COMPOSE_CMD="docker compose"  # 榛樿浣跨敤v2璇硶
+        log_message "警告: Docker Compose未找到。请确保Docker Compose已安装"
+        DOCKER_COMPOSE_CMD="docker compose"  # 默认使用v2语法
     fi
     
-    # 妫€鏌ョ鐩樼┖闂?(浣跨敤绾痓ash鏂瑰紡锛岄伩鍏嶄緷璧朾c鍛戒护)
-    # AVAILABLE_DISK宸茬粡鏄暟瀛楀舰寮忥紙渚嬪"17"锛夛紝鏃犻渶鍐嶆彁鍙栨暟瀛楅儴鍒?    if (( $(echo "$AVAILABLE_DISK < 10" | awk '{print ($1 < 10) ? 1 : 0}') )); then
-        handle_error "纾佺洏绌洪棿涓嶈冻锛岄渶瑕佽嚦灏?0GB鍙敤绌洪棿"
+    # 检查磁盘空间(使用纯bash方式，避免依赖bc命令)
+    # AVAILABLE_DISK已经是数字形式(例如"17")，无需再提取数字部分
+    if (( $(echo "$AVAILABLE_DISK < 10" | awk '{print ($1 < 10) ? 1 : 0}') )); then
+        handle_error "磁盘空间不足，需要至少10GB可用空间"
     fi
     
     # 妫€鏌ュ唴瀛?    if [[ "$AVAILABLE_RAM" -lt 2048 ]]; then
