@@ -24,6 +24,9 @@ AVAILABLE_DISK=0
 PHP_MEMORY_LIMIT="512M"
 BACKUP_RETENTION_DAYS=7
 LOG_FILE="$DEPLOY_DIR/logs/deploy.log"
+# 资源限制默认值
+CPU_LIMIT="2"
+MEMORY_LIMIT="2048m"
 
 # 错误处理函数
 handle_error() {
@@ -38,11 +41,53 @@ log_message() {
     echo "$1"
 }
 
+# 从.env文件加载环境变量
+load_env_file() {
+    if [ -f ".env" ]; then
+        log_message "从.env文件加载环境变量..."
+        # 安全加载.env文件，避免语法错误导致脚本失败
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            # 跳过空行和注释行
+            [[ -z "$line" || "$line" =~ ^\s*# ]] && continue
+            
+            # 提取key和value（支持引号和不支持等号的情况）
+            if [[ "$line" =~ ^([A-Za-z0-9_]+)\s*=\s*(.*)$ ]]; then
+                key="${BASH_REMATCH[1]}"
+                value="${BASH_REMATCH[2]}"
+                
+                # 移除引号（如果有）
+                value="${value%\"}"
+                value="${value#\"}"
+                value="${value%\'}"
+                value="${value#\'}"
+                
+                # 设置环境变量
+                export "$key"="$value"
+            fi
+        done < .env
+        
+        # 确保资源限制变量有值
+        if [ -z "$CPU_LIMIT" ]; then
+            log_message "警告: CPU_LIMIT未设置，使用默认值"
+            CPU_LIMIT="2"
+        fi
+        if [ -z "$MEMORY_LIMIT" ]; then
+            log_message "警告: MEMORY_LIMIT未设置，使用默认值"
+            MEMORY_LIMIT="2048m"
+        fi
+    else
+        log_message "警告: .env文件不存在"
+    fi
+}
+
 # 检测主机环境
 detect_host_environment() {
     log_message "[阶段1] 检测主机环境..."
     
     # Logs directory already created at script start
+    
+    # 从.env文件加载环境变量
+    load_env_file
     
     # 检测操作系统类型
     if [ -f /etc/os-release ]; then
