@@ -549,16 +549,28 @@ EOF
     
     # 确保CPU_LIMIT和MEMORY_LIMIT有有效值
     if [ -z "$CPU_LIMIT" ] || ! [[ "$CPU_LIMIT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-        log_message "警告: CPU_LIMIT无效，设置为默认值2"
+        log_message "警告: CPU_LIMIT无效或未设置，设置为默认值2"
         CPU_LIMIT="2"
     fi
     if [ -z "$MEMORY_LIMIT" ]; then
-        log_message "警告: MEMORY_LIMIT无效，设置为默认值2048m"
+        log_message "警告: MEMORY_LIMIT无效或未设置，设置为默认值2048m"
         MEMORY_LIMIT="2048m"
     fi
     
-    # 导出变量，确保docker-compose能正确读取
-    export CPU_LIMIT MEMORY_LIMIT
+    # 确保NGINX资源限制有有效值
+    if [ -z "$NGINX_CPU_LIMIT" ] || ! [[ "$NGINX_CPU_LIMIT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        log_message "警告: NGINX_CPU_LIMIT无效或未设置，设置为默认值1"
+        NGINX_CPU_LIMIT="1"
+    fi
+    if [ -z "$NGINX_MEMORY_LIMIT" ]; then
+        log_message "警告: NGINX_MEMORY_LIMIT无效或未设置，设置为默认值256m"
+        NGINX_MEMORY_LIMIT="256m"
+    fi
+    
+    # 导出所有资源限制变量，确保docker-compose能正确读取
+    export CPU_LIMIT MEMORY_LIMIT NGINX_CPU_LIMIT NGINX_MEMORY_LIMIT
+    
+    log_message "当前资源限制设置: CPU=$CPU_LIMIT, Memory=$MEMORY_LIMIT, NGINX_CPU=$NGINX_CPU_LIMIT, NGINX_Memory=$NGINX_MEMORY_LIMIT"
     
     # 构建镜像
     log_message "构建Docker镜像..."
