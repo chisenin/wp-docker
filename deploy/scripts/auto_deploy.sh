@@ -460,24 +460,26 @@ deploy_wordpress_stack() {
         print_green "✓ WordPress 配置文件已存在"
     fi
     
+# 定义 WordPress 密钥更新函数
+update_wp_key() {
+    local key_name="$1"
+    local key_value="$2"
+    local file_path="html/wp-config.php"
+    local sed_inplace=(-i)
+    
+    # 检测 sed 版本，适应不同系统
+    if ! sed --version >/dev/null 2>&1; then
+        sed_inplace=(-i '')
+    fi
+    
+    sed "${sed_inplace[@]}" -E "s@define\s*\(['\"]${key_name}[\"'],[^)]*\)@define( '${key_name}', '${key_value}' )@g" "$file_path"
+}
+
     # ===== 更新 WordPress 密钥 =====
     print_blue "更新 WordPress 密钥..."
     if [ ! -f "html/wp-config.php" ]; then
         print_yellow "警告: html/wp-config.php 文件不存在，跳过密钥更新"
     else
-        if sed --version >/dev/null 2>&1; then
-            SED_INPLACE=(-i)
-        else
-            SED_INPLACE=(-i '')
-        fi
-
-        update_wp_key() {
-            local key_name="$1"
-            local key_value="$2"
-            local file_path="html/wp-config.php"
-            sed "${SED_INPLACE[@]}" -E "s@define\s*\(['\"]${key_name}[\"'],[^)]*\)@define( '${key_name}', '${key_value}' )@g" "$file_path"
-        }
-
         update_wp_key "AUTH_KEY"           "${WORDPRESS_AUTH_KEY:-}"
         update_wp_key "SECURE_AUTH_KEY"    "${WORDPRESS_SECURE_AUTH_KEY:-}"
         update_wp_key "LOGGED_IN_KEY"      "${WORDPRESS_LOGGED_IN_KEY:-}"
