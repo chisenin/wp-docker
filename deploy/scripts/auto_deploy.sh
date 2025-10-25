@@ -190,8 +190,8 @@ collect_system_parameters() {
         log_message "✓ Docker Compose 安装完成"
     fi
     
-    # 检查磁盘空间
-    if (( $(echo "$AVAILABLE_DISK < 10" | bc -l) )); then
+    # 检查磁盘空间 (使用bash内置算术，避免依赖bc命令)
+    if (( $(echo "$AVAILABLE_DISK" | tr -d '.' | cut -d'G' -f1) < 10000000 )); then
         handle_error "磁盘空间不足，需要至少10GB可用空间"
     fi
     
