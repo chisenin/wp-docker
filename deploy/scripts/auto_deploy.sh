@@ -363,28 +363,64 @@ BACKUP_RETENTION_DAYS="BACKUP_RETENTION_DAYS_PLACEHOLDER"
 # WordPress Security Keys will be added below
 EOF
     
-    # 替换占位符为实际值
-    sed -i "s/MYSQL_ROOT_PASSWORD_PLACEHOLDER/$MYSQL_ROOT_PASSWORD/g" .env
-    sed -i "s/MYSQL_PASSWORD_PLACEHOLDER/$MYSQL_PASSWORD/g" .env
-    sed -i "s/REDIS_PASSWORD_PLACEHOLDER/$REDIS_PASSWORD/g" .env
-    sed -i "s/MEMORY_LIMIT_PLACEHOLDER/$MEMORY_LIMIT/g" .env
-    sed -i "s/CPU_LIMIT_PLACEHOLDER/$CPU_LIMIT/g" .env
-    sed -i "s/PHP_VERSION_PLACEHOLDER/$PHP_VERSION/g" .env
-    sed -i "s/NGINX_VERSION_PLACEHOLDER/$NGINX_VERSION/g" .env
-    sed -i "s/MARIADB_VERSION_PLACEHOLDER/$MARIADB_VERSION/g" .env
-    sed -i "s/REDIS_VERSION_PLACEHOLDER/$REDIS_VERSION/g" .env
-    sed -i "s/BACKUP_RETENTION_DAYS_PLACEHOLDER/$BACKUP_RETENTION_DAYS/g" .env
+    # 使用更安全的方式生成密码，避免特殊字符
+    MYSQL_ROOT_PASSWORD=$(openssl rand -hex 16)
+    MYSQL_PASSWORD=$(openssl rand -hex 16)
+    REDIS_PASSWORD=$(openssl rand -hex 16)
     
-    # 生成WordPress密钥并追加到文件
-    echo "# WordPress Security Keys" >> .env
+    # 直接构建完整的.env文件内容，避免使用sed替换
+    cat > .env << EOF
+# Docker Configuration
+COMPOSE_PROJECT_NAME=wp_docker
+
+# Database Configuration
+MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD"
+MYSQL_DATABASE="wordpress"
+MYSQL_USER="wordpress"
+MYSQL_PASSWORD="$MYSQL_PASSWORD"
+
+# WordPress Configuration
+WORDPRESS_DB_HOST="mariadb"
+WORDPRESS_DB_USER="wordpress"
+WORDPRESS_DB_PASSWORD="$MYSQL_PASSWORD"
+WORDPRESS_DB_NAME="wordpress"
+WORDPRESS_TABLE_PREFIX="wp_"
+
+# Redis Configuration
+REDIS_HOST="redis"
+REDIS_PASSWORD="$REDIS_PASSWORD"
+REDIS_PORT=6379
+REDIS_MAXMEMORY=256mb
+
+# Resource Limits
+MEMORY_LIMIT="$MEMORY_LIMIT"
+CPU_LIMIT="$CPU_LIMIT"
+
+# Optional Configuration
+PHP_MEMORY_LIMIT=512M
+UPLOAD_MAX_FILESIZE=64M
+USE_CN_MIRROR=false
+
+# Image Versions
+PHP_VERSION="$PHP_VERSION"
+NGINX_VERSION="$NGINX_VERSION"
+MARIADB_VERSION="$MARIADB_VERSION"
+REDIS_VERSION="$REDIS_VERSION"
+
+# Backup Retention
+BACKUP_RETENTION_DAYS="$BACKUP_RETENTION_DAYS"
+
+# WordPress Security Keys
+EOF
     
-    # 使用openssl直接生成安全的随机密钥
+    # 直接生成WordPress密钥并追加到文件
     for key in "AUTH_KEY" "SECURE_AUTH_KEY" "LOGGED_IN_KEY" "NONCE_KEY" "AUTH_SALT" "SECURE_AUTH_SALT" "LOGGED_IN_SALT" "NONCE_SALT"; do
-        # 生成64字符的随机密钥，避免特殊字符导致解析问题
-        value=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9!@#$%^&*()_+=-' | head -c 64)
-        # 将值用双引号包裹并写入文件
+        # 使用hex格式避免特殊字符问题
+        value=$(openssl rand -hex 32)
         echo "WORDPRESS_${key}=\"${value}\"" >> .env
     done
+    
+    # WordPress密钥已在.env文件生成过程中处理
     
     # 确保文件权限正确
     chmod 600 .env
@@ -558,6 +594,19 @@ volumes:
   wordpress_data:
 EOF
     fi
+    
+    # 确保CPU_LIMIT和MEMORY_LIMIT有有效值
+    if [ -z "$CPU_LIMIT" ] || ! [[ "$CPU_LIMIT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        log_message "警告: CPU_LIMIT无效，设置为默认值2"
+        CPU_LIMIT="2"
+    fi
+    if [ -z "$MEMORY_LIMIT" ]; then
+        log_message "警告: MEMORY_LIMIT无效，设置为默认值2048m"
+        MEMORY_LIMIT="2048m"
+    fi
+    
+    # 导出变量，确保docker-compose能正确读取
+    export CPU_LIMIT MEMORY_LIMIT
     
     # 构建镜像
     log_message "构建Docker镜像..."
