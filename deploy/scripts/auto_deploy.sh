@@ -48,15 +48,17 @@ load_env_file() {
     
     if [ -f "$env_file" ]; then
         log_message "Loading environment variables from $env_file..."
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            [[ -z "$line" || "$line" =~ ^\s*# ]] && continue
-            if [[ "$line" =~ ^([A-Za-z0-9_]+)\s*=\s*(.*)$ ]]; then
-                key="${BASH_REMATCH[1]}"
-                value="${BASH_REMATCH[2]}"
-                value="${value%\"}"
-                value="${value#\"}"
-                value="${value%\'}"
-                value="${value#\'}"
+        while IFS= read -r line || [ -n "$line" ]; do
+            # 使用sh兼容的语法检查空行或注释行
+            if [ -z "$line" ] || echo "$line" | grep -q '^[[:space:]]*#'; then
+                continue
+            fi
+            # 使用grep和cut提取键值对（sh兼容方式）
+            if echo "$line" | grep -q '^[A-Za-z0-9_]\+[[:space:]]*=[[:space:]]*'; then
+                key=$(echo "$line" | cut -d= -f1 | tr -d ' ')
+                value=$(echo "$line" | cut -d= -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                # 移除引号
+                value=$(echo "$value" | sed 's/^["\']\(.*\)["\']$/\1/')
                 export "$key"="$value"
             fi
         done < "$env_file"
