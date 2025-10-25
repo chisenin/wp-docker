@@ -16,6 +16,9 @@ CPU_LIMIT=1
 AVAILABLE_RAM=512
 DISK_SPACE=0
 
+# 设置Docker Hub用户名，确保使用项目构建的镜像
+DOCKERHUB_USERNAME="chisenin"
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
