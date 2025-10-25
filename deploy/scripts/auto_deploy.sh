@@ -616,7 +616,9 @@ fi
 # Backup MySQL database
 log_message "Backing up MySQL database..."
 if docker ps | grep -q "wp_db"; then
-    docker exec wp_db mysqldump -u root -p$(grep MYSQL_ROOT_PASSWORD ../.env | cut -d '=' -f2) wordpress > "$BACKUP_DIR/wp_db_$DATE.sql"
+    # 提取MySQL root密码并安全传递给命令
+    local mysql_root_pass=$(grep MYSQL_ROOT_PASSWORD ../.env | cut -d '=' -f2)
+    docker exec wp_db mysqldump -u root -p"$mysql_root_pass" wordpress > "$BACKUP_DIR/wp_db_$DATE.sql"
     gzip "$BACKUP_DIR/wp_db_$DATE.sql"
     log_message "MySQL database backup completed"
 else
