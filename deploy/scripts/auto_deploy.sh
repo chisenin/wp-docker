@@ -1,56 +1,44 @@
-﻿### 修正说明
+﻿### 错误分析
 
-感谢您提供了原始的 `auto_deploy.sh` 脚本内容。基于您提供的日志中的错误信息：
+从您提供的错误日志来看，`auto_deploy.sh` 脚本在执行时出现了大量错误，提示类似 `command not found`，并且包含了乱码（如 `\357\273\277###`、`馃殌` 等）。这些错误表明脚本文件的编码或格式存在问题，导致 Bash 无法正确解析。以下是具体问题和原因：
 
-```
-ERROR: Error while attempting to convert service.mariadb.deploy.resources.limits.cpus to appropriate type: "" is not a valid float
-警告: NGINX_CPU_LIMIT无效或未设置，设置为默认值1
-警告: NGINX_MEMORY_LIMIT无效或未设置，设置为默认值256m
-```
+1. **文件编码问题**：
+   - 日志中的 `\357\273\277` 是 UTF-8 BOM（Byte Order Mark，字节顺序标记，`EF BB BF`），表明脚本文件可能以 UTF-8-BOM 编码保存，而 Bash 脚本需要纯 UTF-8 或 ASCII 编码。
+   - 中文字符（如 `馃殌`、`馃帀`）出现在错误输出中，可能是因为脚本在保存或传输过程中引入了不兼容的字符编码，或者复制粘贴时引入了不可见字符。
 
-主要问题出在 `docker-compose.yml` 文件中 MariaDB 服务的 `cpus` 配置值为 `""`（空字符串），这导致 Docker 无法将其转换为有效的浮点数。此外，`NGINX_CPU_LIMIT` 和 `NGINX_MEMORY_LIMIT` 环境变量可能未正确设置或无效，触发了警告。
+2. **脚本内容被错误解析**：
+   - 错误如 `auto_deploy.sh: line 1: $'\357\273\277###': command not found` 表明 Bash 将注释或文档说明（如 `### 修正说明`）误认为是命令，可能是因为 BOM 或换行符问题导致脚本开头被破坏。
+   - 后续错误（如 `docker-compose.yml: command not found`、`cpus: command not found`）表明脚本的每一行都被错误解析，可能是文件格式损坏或包含不可执行的字符。
 
-以下是修正后的 `auto_deploy.sh` 脚本，针对以下问题进行了优化：
+3. **换行符问题**：
+   - 如果脚本是在 Windows 环境下编辑的，可能包含 Windows 换行符（CRLF，`\r\n`），而 Linux/Unix 环境期望 Unix 换行符（LF，`\n`）。这会导致 Bash 解析失败，出现 `command not found` 错误。
 
-1. **修复 MariaDB CPU 限制错误**：
-   - 在 `build_images` 函数中，确保 `CPU_LIMIT` 和 `NGINX_CPU_LIMIT` 在生成 `docker-compose.yml` 前经过严格验证，防止空值或无效值。
-   - 为 MariaDB 服务显式设置默认 `cpus` 值（例如 `"0.5"`），避免空字符串。
-   - 添加环境变量 `MARIADB_CPU_LIMIT` 和 `MARIADB_MEMORY_LIMIT`，并在 `.env` 文件生成中包含这些变量。
+4. **文件传输或复制问题**：
+   - 脚本可能在从某个来源（如 GitHub 或其他编辑器）复制到服务器时，引入了额外的字符、BOM 或格式问题。
+   - 日志中的中文乱码（如 `警告:`、`修复后的`）可能是复制粘贴时从文档或其他来源带入了不兼容的字符。
 
-2. **处理 Nginx 资源警告**：
-   - 在 `build_images` 函数中，加强对 `NGINX_CPU_LIMIT` 和 `NGINX_MEMORY_LIMIT` 的验证，确保它们是有效的浮点数或内存格式。
-   - 如果 `.env` 文件中未定义这些变量，脚本会在生成 `.env` 时添加默认值。
+### 解决方案
 
-3. **配置文件生成跳过问题**：
-   - 保留原始逻辑，允许跳过已存在的 Nginx 和 PHP 配置文件。
-   - 添加 `--force` 选项，允许强制重新生成配置文件（通过命令行参数）。
+为了解决这些问题，我们需要：
+1. 移除 UTF-8 BOM 和不兼容字符，确保脚本使用纯 UTF-8 编码。
+2. 转换为 Unix 换行符（LF）。
+3. 确保脚本内容完整且可执行。
+4. 提供一个干净的、修正后的 `auto_deploy.sh` 文件，避免复制粘贴引入问题。
 
-4. **其他优化**：
-   - 增强日志输出，记录所有资源限制的最终值。
-   - 确保 `docker-compose.yml` 中的所有服务资源限制都引用环境变量，并有合理的默认值。
-   - 添加对 `docker-compose.yml` 语法的验证，防止配置错误。
-   - 修复潜在的编码问题，确保 `.env` 文件中的值正确转义。
-
-以下是修正后的完整 `auto_deploy.sh` 脚本，保留了原始脚本的结构和功能，同时修复了上述问题。
+以下是修正后的 `auto_deploy.sh` 脚本，已移除所有可能导致编码问题的注释，并确保使用纯 UTF-8 编码和 Unix 换行符。脚本内容基于您提供的原始脚本，并包含之前修复的 MariaDB CPU 限制错误和 Nginx 资源警告问题。
 
 ### 修正后的 `auto_deploy.sh`
 
 ```bash
 #!/bin/bash
 
-# WordPress Docker 自动部署脚本
-# 增强版功能：自动创建www-data用户/组、.env修复、Docker容器冲突清理
-# 避免GitHub Actions工作流误触
 set -e
 
-# 全局变量
 DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FORCE_CONFIG=${FORCE_CONFIG:-false}  # 新增：强制生成配置文件选项
+FORCE_CONFIG=${FORCE_CONFIG:-false}
 
-# Create logs directory first to ensure log file can be written
 mkdir -p "$DEPLOY_DIR/logs" 2>/dev/null
 
-# 彩色输出函数
 print_blue() {
     echo -e "\033[34m$1\033[0m"
 }
@@ -63,74 +51,53 @@ AVAILABLE_DISK=0
 PHP_MEMORY_LIMIT="512M"
 BACKUP_RETENTION_DAYS=7
 LOG_FILE="$DEPLOY_DIR/logs/deploy.log"
-# 资源限制默认值
 CPU_LIMIT="2"
 MEMORY_LIMIT="2048m"
-MARIADB_CPU_LIMIT="0.5"  # 新增：MariaDB 默认 CPU 限制
-MARIADB_MEMORY_LIMIT="512m"  # 新增：MariaDB 默认内存限制
-NGINX_CPU_LIMIT="1"  # 默认值
-NGINX_MEMORY_LIMIT="256m"  # 默认值
+MARIADB_CPU_LIMIT="0.5"
+MARIADB_MEMORY_LIMIT="512m"
+NGINX_CPU_LIMIT="1"
+NGINX_MEMORY_LIMIT="256m"
 
-# 错误处理函数
 handle_error() {
-    echo "错误: $1" >&2
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 错误: $1" >> "$LOG_FILE"
+    echo "Error: $1" >&2
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Error: $1" >> "$LOG_FILE"
     exit 1
 }
 
-# 记录日志
 log_message() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
     echo "$1"
 }
 
-# 从.env文件加载环境变量
 load_env_file() {
     if [ -f ".env" ]; then
-        log_message "从.env文件加载环境变量..."
-        # 安全加载.env文件，避免语法错误导致脚本失败
+        log_message "Loading environment variables from .env file..."
         while IFS= read -r line || [[ -n "$line" ]]; do
-            # 跳过空行和注释行
             [[ -z "$line" || "$line" =~ ^\s*# ]] && continue
-            
-            # 提取key和value（支持引号和不支持等号的情况）
             if [[ "$line" =~ ^([A-Za-z0-9_]+)\s*=\s*(.*)$ ]]; then
                 key="${BASH_REMATCH[1]}"
                 value="${BASH_REMATCH[2]}"
-                
-                # 移除引号（如果有）
                 value="${value%\"}"
                 value="${value#\"}"
                 value="${value%\'}"
                 value="${value#\'}"
-                
-                # 设置环境变量
                 export "$key"="$value"
             fi
         done < .env
-        
-        # 确保资源限制变量有值
         CPU_LIMIT="${CPU_LIMIT:-2}"
         MEMORY_LIMIT="${MEMORY_LIMIT:-2048m}"
-        MARIADB_CPU_LIMIT="${MARIADB_CPU_LIMIT:-0.5}"  # 新增
-        MARIADB_MEMORY_LIMIT="${MARIADB_MEMORY_LIMIT:-512m}"  # 新增
+        MARIADB_CPU_LIMIT="${MARIADB_CPU_LIMIT:-0.5}"
+        MARIADB_MEMORY_LIMIT="${MARIADB_MEMORY_LIMIT:-512m}"
         NGINX_CPU_LIMIT="${NGINX_CPU_LIMIT:-1}"
         NGINX_MEMORY_LIMIT="${NGINX_MEMORY_LIMIT:-256m}"
     else
-        log_message "警告: .env文件不存在"
+        log_message "Warning: .env file does not exist"
     fi
 }
 
-# 检测主机环境
 detect_host_environment() {
-    log_message "[阶段1] 检测主机环境..."
-    
-    # Logs directory already created at script start
-    
-    # 从.env文件加载环境变量
+    log_message "[Stage 1] Detecting host environment..."
     load_env_file
-    
-    # 检测操作系统类型
     if [ -f /etc/os-release ]; then
         . /etc/os-release
         OS_TYPE="$ID"
@@ -145,52 +112,38 @@ detect_host_environment() {
         OS_TYPE="alpine"
         OS_VERSION="$(cat /etc/alpine-release)"
     else
-        handle_error "不支持的操作系统类型"
+        handle_error "Unsupported operating system type"
     fi
-    
-    log_message "操作系统: $OS_TYPE $OS_VERSION"
+    log_message "Operating system: $OS_TYPE $OS_VERSION"
 }
 
-# 环境准备：创建www-data用户/组、修改.env文件、清理docker冲突
 environment_preparation() {
-    log_message "[阶段2] 环境准备..."
-    
-    # 1. 检查并创建www-data用户/组
-    log_message "检查并创建www-data用户/组.."
+    log_message "[Stage 2] Preparing environment..."
+    log_message "Checking and creating www-data user/group..."
     if ! id -u www-data >/dev/null 2>&1; then
-        log_message "创建www-data用户和组..."
-        # 根据不同系统创建用户
+        log_message "Creating www-data user and group..."
         if [[ "$OS_TYPE" == "alpine" ]]; then
-            addgroup -g 33 -S www-data || handle_error "创建www-data组失败"
-            adduser -u 33 -D -S -G www-data www-data || handle_error "创建www-data用户失败"
+            addgroup -g 33 -S www-data || handle_error "Failed to create www-data group"
+            adduser -u 33 -D -S -G www-data www-data || handle_error "Failed to create www-data user"
         else
             groupadd -g 33 www-data 2>/dev/null || :
             useradd -u 33 -g www-data -s /sbin/nologin -M www-data 2>/dev/null || :
         fi
-        log_message "✓ www-data用户/组创建成功"
+        log_message "Success: www-data user/group created"
     else
-        log_message "✓ www-data用户已存在"
+        log_message "Success: www-data user already exists"
     fi
-    
-    # 2. 修复.env文件
     if [ -f "$DEPLOY_DIR/.env" ]; then
-        log_message "修复.env文件中的特殊字符问题..."
-        # 创建临时文件
+        log_message "Fixing .env file for special characters..."
         TEMP_FILE="$DEPLOY_DIR/.env.tmp"
-        # 复制.env文件，确保所有值用双引号包裹
         while IFS= read -r line || [[ -n "$line" ]]; do
-            # 跳过注释和空行
             if [[ "$line" == \#* ]] || [[ -z "$line" ]]; then
                 echo "$line" >> "$TEMP_FILE"
                 continue
             fi
-            
-            # 检查是否已经有等号
             if [[ "$line" == *=* ]]; then
                 key="${line%%=*}"
                 value="${line#*=}"
-                
-                # 如果值没有被引号包裹，添加双引号
                 if [[ "$value" != \"* && "$value" != \'* ]]; then
                     echo "$key=\"$value\"" >> "$TEMP_FILE"
                 else
@@ -200,297 +153,201 @@ environment_preparation() {
                 echo "$line" >> "$TEMP_FILE"
             fi
         done < "$DEPLOY_DIR/.env"
-        
-        # 替换原文件
         mv "$TEMP_FILE" "$DEPLOY_DIR/.env"
-        log_message "✓ .env file has been fixed"
+        log_message "Success: .env file has been fixed"
     fi
-    
-    # 3. 清理Docker容器冲突
-    log_message "检查并清理Docker容器冲突..."
-    # 检查是否有重名容器在运行
+    log_message "Checking and cleaning up Docker container conflicts..."
     CONTAINERS=("wp_db" "wp_redis" "wp_php" "wp_nginx")
     for container in "${CONTAINERS[@]}"; do
         if docker ps -a | grep -q "$container"; then
             log_message "Detected conflicting container: $container, attempting to stop and remove..."
             docker stop "$container" 2>/dev/null || true
             docker rm "$container" 2>/dev/null || true
-            log_message "✓ Container $container has been removed"
+            log_message "Success: Container $container has been removed"
         fi
     done
-    
-    # 检查是否有重名网络
     if docker network ls | grep -q "wp_network"; then
         log_message "Detected conflicting network: wp_network, attempting to remove..."
         docker network rm wp_network 2>/dev/null || true
-        log_message "✓ Network wp_network has been removed"
+        log_message "Success: Network wp_network has been removed"
     fi
 }
 
-# 收集系统参数
 collect_system_parameters() {
-    log_message "[阶段3] 收集系统参数..."
-    
-    # 获取CPU核心数
+    log_message "[Stage 3] Collecting system parameters..."
     CPU_CORES=$(grep -c '^processor' /proc/cpuinfo)
-    log_message "CPU核心数: $CPU_CORES"
-    
-    # 获取可用内存(MB)
+    log_message "CPU cores: $CPU_CORES"
     AVAILABLE_RAM=$(free -m | grep Mem | awk '{print $2}')
-    log_message "可用内存: ${AVAILABLE_RAM}MB"
-    
-    # 获取可用磁盘空间(GB)
+    log_message "Available memory: ${AVAILABLE_RAM}MB"
     AVAILABLE_DISK=$(df -h / | tail -1 | awk '{print $4}' | sed 's/G//')
-    log_message "可用磁盘空间: ${AVAILABLE_DISK}GB"
-    
-    # 检查Docker是否安装，不自动安装以避免权限问题
+    log_message "Available disk space: ${AVAILABLE_DISK}GB"
     if ! command -v docker >/dev/null 2>&1; then
-        log_message "警告: Docker未找到。请确保Docker已安装并在PATH中"
+        log_message "Warning: Docker not found. Please ensure Docker is installed and in PATH"
     else
-        log_message "✓ Docker 已安装"
+        log_message "Success: Docker is installed"
     fi
-    
-    # 检查Docker Compose (支持v1和v2语法)
     if command -v docker-compose >/dev/null 2>&1; then
         DOCKER_COMPOSE_CMD="docker-compose"
-        log_message "✓ Docker Compose v1 已安装"
+        log_message "Success: Docker Compose v1 is installed"
     elif docker compose version >/dev/null 2>&1; then
         DOCKER_COMPOSE_CMD="docker compose"
-        log_message "✓ Docker Compose v2 已安装"
+        log_message "Success: Docker Compose v2 is installed"
     else
-        log_message "警告: Docker Compose未找到。请确保Docker Compose已安装"
-        DOCKER_COMPOSE_CMD="docker compose"  # 默认使用v2语法
+        log_message "Warning: Docker Compose not found. Please ensure Docker Compose is installed"
+        DOCKER_COMPOSE_CMD="docker compose"
     fi
-    
-    # 检查磁盘空间
     if (( $(echo "$AVAILABLE_DISK < 10" | awk '{print ($1 < 10) ? 1 : 0}') )); then
-        handle_error "磁盘空间不足，需要至少10GB可用空间"
+        handle_error "Insufficient disk space, at least 10GB required"
     fi
-    
-    # 检查内存
     if [[ "$AVAILABLE_RAM" -lt 2048 ]]; then
-        log_message "警告: 可用内存低于2GB，可能影响性能"
+        log_message "Warning: Available memory is below 2GB, may impact performance"
     fi
 }
 
-# 确定部署目录
 determine_deployment_directory() {
-    log_message "[阶段4] 确定部署目录..."
-    
-    # 检查目录是否存在，不存在则创建
+    log_message "[Stage 4] Determining deployment directory..."
     if [ ! -d "$DEPLOY_DIR" ]; then
-        mkdir -p "$DEPLOY_DIR" || handle_error "创建部署目录失败"
+        mkdir -p "$DEPLOY_DIR" || handle_error "Failed to create deployment directory"
     fi
-    
-    # 切换到部署目录
-    cd "$DEPLOY_DIR" || handle_error "切换到部署目录失败"
-    
-    # 创建必要的目录结构
-    mkdir -p html configs backups scripts logs || handle_error "创建目录结构失败"
-    
-    log_message "部署目录: $DEPLOY_DIR"
+    cd "$DEPLOY_DIR" || handle_error "Failed to switch to deployment directory"
+    mkdir -p html configs backups scripts logs || handle_error "Failed to create directory structure"
+    log_message "Deployment directory: $DEPLOY_DIR"
 }
 
-# 生成密码
 generate_password() {
     local length=${1:-16}
-    # 使用urandom生成随机密码
     local password=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9!@#$%^&*()_+-=[]{}|;:,.<>?~' | head -c "$length")
     echo "$password"
 }
 
-# 生成WordPress密钥
 generate_wordpress_keys() {
     local keys=""
-    
-    # 生成所有需要的WordPress密钥
     local key_names=("WORDPRESS_AUTH_KEY" "WORDPRESS_SECURE_AUTH_KEY" "WORDPRESS_LOGGED_IN_KEY" "WORDPRESS_NONCE_KEY" "WORDPRESS_AUTH_SALT" "WORDPRESS_SECURE_AUTH_SALT" "WORDPRESS_LOGGED_IN_SALT" "WORDPRESS_NONCE_SALT")
-    
     for key in "${key_names[@]}"; do
         local value=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9!@#$%^&*()_+=-' | head -c 64)
         keys="${keys}${key}=\"${value}\"\n"
     done
-    
     printf "%s" "$keys"
 }
 
-# 优化参数
 optimize_parameters() {
-    log_message "[阶段5] 优化参数..."
-    
-    # 根据系统资源优化PHP内存限制
+    log_message "[Stage 5] Optimizing parameters..."
     if [ "$AVAILABLE_RAM" -lt 2048 ]; then
         PHP_MEMORY_LIMIT="256M"
     elif [ "$AVAILABLE_RAM" -gt 4096 ]; then
         PHP_MEMORY_LIMIT="1024M"
     fi
-    
-    log_message "PHP内存限制: $PHP_MEMORY_LIMIT"
-    
-    # 设置默认值
+    log_message "PHP memory limit: $PHP_MEMORY_LIMIT"
     PHP_VERSION="8.3"
     NGINX_VERSION="1.27"
     MARIADB_VERSION="11.3"
     REDIS_VERSION="7.4"
-    
-    # 设置资源限制默认值
     CPU_LIMIT="${CPU_LIMIT:-2}"
     MEMORY_LIMIT="${MEMORY_LIMIT:-2048m}"
-    MARIADB_CPU_LIMIT="${MARIADB_CPU_LIMIT:-0.5}"  # 新增
-    MARIADB_MEMORY_LIMIT="${MARIADB_MEMORY_LIMIT:-512m}"  # 新增
+    MARIADB_CPU_LIMIT="${MARIADB_CPU_LIMIT:-0.5}"
+    MARIADB_MEMORY_LIMIT="${MARIADB_MEMORY_LIMIT:-512m}"
     NGINX_CPU_LIMIT="${NGINX_CPU_LIMIT:-1}"
     NGINX_MEMORY_LIMIT="${NGINX_MEMORY_LIMIT:-256m}"
-    
-    # 生成密码
     MYSQL_ROOT_PASSWORD="$(generate_password 20)"
     MYSQL_PASSWORD="$(generate_password 20)"
     REDIS_PASSWORD="$(generate_password 20)"
-    
-    # 生成.env文件(删除并重新生成)
     if [ -f ".env" ]; then
-        log_message "检测到.env文件已存在，删除并重新生成..."
+        log_message "Detected existing .env file, deleting and regenerating..."
         rm -f ".env"
     fi
-    
-    log_message "生成.env文件..."
-    
+    log_message "Generating .env file..."
     cat > .env << EOF
 # WordPress Docker Environment Configuration
 # Please modify according to your actual environment
 
-# Docker Configuration
 COMPOSE_PROJECT_NAME=wp_docker
-
-# Database Configuration
 MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD"
 MYSQL_DATABASE="wordpress"
 MYSQL_USER="wordpress"
 MYSQL_PASSWORD="$MYSQL_PASSWORD"
-
-# WordPress Configuration
 WORDPRESS_DB_HOST="mariadb"
 WORDPRESS_DB_USER="wordpress"
 WORDPRESS_DB_PASSWORD="$MYSQL_PASSWORD"
 WORDPRESS_DB_NAME="wordpress"
 WORDPRESS_TABLE_PREFIX="wp_"
-
-# Redis Configuration
 REDIS_HOST="redis"
 REDIS_PASSWORD="$REDIS_PASSWORD"
 REDIS_PORT=6379
 REDIS_MAXMEMORY=256mb
-
-# Resource Limits
 MEMORY_LIMIT="$MEMORY_LIMIT"
 CPU_LIMIT="$CPU_LIMIT"
-MARIADB_CPU_LIMIT="$MARIADB_CPU_LIMIT"  # 新增
-MARIADB_MEMORY_LIMIT="$MARIADB_MEMORY_LIMIT"  # 新增
+MARIADB_CPU_LIMIT="$MARIADB_CPU_LIMIT"
+MARIADB_MEMORY_LIMIT="$MARIADB_MEMORY_LIMIT"
 NGINX_CPU_LIMIT="$NGINX_CPU_LIMIT"
 NGINX_MEMORY_LIMIT="$NGINX_MEMORY_LIMIT"
-
-# Optional Configuration
 PHP_MEMORY_LIMIT="$PHP_MEMORY_LIMIT"
 UPLOAD_MAX_FILESIZE=64M
 USE_CN_MIRROR=false
-
-# Image Versions
 PHP_VERSION="$PHP_VERSION"
 NGINX_VERSION="$NGINX_VERSION"
 MARIADB_VERSION="$MARIADB_VERSION"
 REDIS_VERSION="$REDIS_VERSION"
-
-# Backup Retention
 BACKUP_RETENTION_DAYS="$BACKUP_RETENTION_DAYS"
-
-# WordPress Security Keys - Auto generated
 $(generate_wordpress_keys)
 EOF
-    
-    # 确保文件权限正确
     chmod 600 .env
-    
-    log_message "✓ .env文件生成完成"
-    # 从新生成的.env文件加载环境变量
+    log_message "Success: .env file generated"
     source .env
 }
 
-# 权限设置
 set_permissions() {
-    log_message "[阶段6] 设置权限..."
-    
-    # 设置目录权限
-    log_message "设置部署目录权限..."
+    log_message "[Stage 6] Setting permissions..."
+    log_message "Setting deployment directory permissions..."
     chown -R www-data:www-data "$DEPLOY_DIR/html" 2>/dev/null || :
     chmod -R 755 "$DEPLOY_DIR/html" 2>/dev/null || :
-    
-    # 设置备份目录权限
     chmod 700 "$DEPLOY_DIR/backups" 2>/dev/null || :
-    
-    # 设置脚本权限
     chmod +x "$DEPLOY_DIR/scripts"/* 2>/dev/null || :
-    
-    log_message "✓ 权限设置完成"
+    log_message "Success: Permissions set"
 }
 
-# 容器清理
 cleanup_old_containers() {
-    log_message "[阶段7] 清理容器.."
-    
-    # 停止并移除旧的Docker容器
-    log_message "检查旧的Docker容器..."
-    
-    # 检查并停止相关服务
+    log_message "[Stage 7] Cleaning containers..."
+    log_message "Checking old Docker containers..."
     if docker-compose ps | grep -q "Up"; then
-        log_message "停止现有服务..."
-        docker-compose down --remove-orphans || log_message "警告: 停止服务时出现问题"
+        log_message "Stopping existing services..."
+        docker-compose down --remove-orphans || log_message "Warning: Issue stopping services"
     fi
-    
-    # 清理悬空镜像
     if [ "$(docker images -f "dangling=true" -q)" != "" ]; then
-        log_message "清理悬空镜像..."
+        log_message "Cleaning dangling images..."
         docker rmi $(docker images -f "dangling=true" -q) 2>/dev/null || :
     fi
-    
-    log_message "✓ 容器清理完成"
+    log_message "Success: Container cleanup completed"
 }
 
-# 镜像构建
 build_images() {
-    log_message "[阶段8] 构建镜像..."
-    
-    # 验证资源限制
+    log_message "[Stage 8] Building images..."
     if [ -z "$CPU_LIMIT" ] || ! [[ "$CPU_LIMIT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-        log_message "警告: CPU_LIMIT无效或未设置，设置为默认值2"
+        log_message "Warning: CPU_LIMIT invalid or not set, using default value 2"
         CPU_LIMIT="2"
     fi
     if [ -z "$MEMORY_LIMIT" ] || ! [[ "$MEMORY_LIMIT" =~ ^[0-9]+[m|g]$ ]]; then
-        log_message "警告: MEMORY_LIMIT无效或未设置，设置为默认值2048m"
+        log_message "Warning: MEMORY_LIMIT invalid or not set, using default value 2048m"
         MEMORY_LIMIT="2048m"
     fi
     if [ -z "$MARIADB_CPU_LIMIT" ] || ! [[ "$MARIADB_CPU_LIMIT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-        log_message "警告: MARIADB_CPU_LIMIT无效或未设置，设置为默认值0.5"
+        log_message "Warning: MARIADB_CPU_LIMIT invalid or not set, using default value 0.5"
         MARIADB_CPU_LIMIT="0.5"
     fi
     if [ -z "$MARIADB_MEMORY_LIMIT" ] || ! [[ "$MARIADB_MEMORY_LIMIT" =~ ^[0-9]+[m|g]$ ]]; then
-        log_message "警告: MARIADB_MEMORY_LIMIT无效或未设置，设置为默认值512m"
+        log_message "Warning: MARIADB_MEMORY_LIMIT invalid or not set, using default value 512m"
         MARIADB_MEMORY_LIMIT="512m"
     fi
     if [ -z "$NGINX_CPU_LIMIT" ] || ! [[ "$NGINX_CPU_LIMIT" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-        log_message "警告: NGINX_CPU_LIMIT无效或未设置，设置为默认值1"
+        log_message "Warning: NGINX_CPU_LIMIT invalid or not set, using default value 1"
         NGINX_CPU_LIMIT="1"
     fi
     if [ -z "$NGINX_MEMORY_LIMIT" ] || ! [[ "$NGINX_MEMORY_LIMIT" =~ ^[0-9]+[m|g]$ ]]; then
-        log_message "警告: NGINX_MEMORY_LIMIT无效或未设置，设置为默认值256m"
+        log_message "Warning: NGINX_MEMORY_LIMIT invalid or not set, using default value 256m"
         NGINX_MEMORY_LIMIT="256m"
     fi
-    
-    # 导出资源限制变量
     export CPU_LIMIT MEMORY_LIMIT MARIADB_CPU_LIMIT MARIADB_MEMORY_LIMIT NGINX_CPU_LIMIT NGINX_MEMORY_LIMIT
-    
-    # 检查docker-compose.yml文件是否存在
     if [ ! -f "docker-compose.yml" ] || [ "$FORCE_CONFIG" = true ]; then
-        log_message "生成docker-compose.yml文件..."
-        
+        log_message "Generating docker-compose.yml file..."
         cat > docker-compose.yml << EOF
 version: '3.8'
 
@@ -517,7 +374,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "$MARIADB_CPU_LIMIT"  # 修正：使用明确的变量
+          cpus: "$MARIADB_CPU_LIMIT"
           memory: "$MARIADB_MEMORY_LIMIT"
 
   redis:
@@ -607,39 +464,24 @@ volumes:
   wordpress_data:
 EOF
     fi
-    
-    # 验证 docker-compose.yml 语法
     if ! $DOCKER_COMPOSE_CMD config >/dev/null 2>&1; then
-        handle_error "docker-compose.yml 配置文件语法错误"
+        handle_error "docker-compose.yml configuration syntax error"
     fi
-    
-    log_message "当前资源限制设置: CPU=$CPU_LIMIT, Memory=$MEMORY_LIMIT, MARIADB_CPU=$MARIADB_CPU_LIMIT, MARIADB_MEMORY=$MARIADB_MEMORY_LIMIT, NGINX_CPU=$NGINX_CPU_LIMIT, NGINX_MEMORY=$NGINX_MEMORY_LIMIT"
-    
-    # 构建镜像
-    log_message "构建Docker镜像..."
-    $DOCKER_COMPOSE_CMD build || handle_error "Docker镜像构建失败"
-    
-    log_message "✓ 镜像构建完成"
+    log_message "Current resource limits: CPU=$CPU_LIMIT, Memory=$MEMORY_LIMIT, MARIADB_CPU=$MARIADB_CPU_LIMIT, MARIADB_MEMORY=$MARIADB_MEMORY_LIMIT, NGINX_CPU=$NGINX_CPU_LIMIT, NGINX_MEMORY=$NGINX_MEMORY_LIMIT"
+    log_message "Building Docker images..."
+    $DOCKER_COMPOSE_CMD build || handle_error "Failed to build Docker images"
+    log_message "Success: Image building completed"
 }
 
-# 生成配置文件
 generate_configs() {
-    log_message "[阶段9] 生成配置文件..."
-    
-    # 生成Nginx配置
+    log_message "[Stage 9] Generating configuration files..."
     if [ ! -f "configs/nginx.conf" ] || [ "$FORCE_CONFIG" = true ]; then
-        log_message "生成Nginx配置文件..."
-        
-        # 根据CPU核心数优化worker_processes
+        log_message "Generating Nginx configuration files..."
         local worker_processes="auto"
         if [[ "$OS_TYPE" == "alpine" ]]; then
             worker_processes="$(nproc)"
         fi
-        
-        # 创建nginx配置目录
         mkdir -p configs/conf.d
-        
-        # 主配置文件
         cat > configs/nginx.conf << EOF
 user  nginx;
 worker_processes  $worker_processes;
@@ -662,17 +504,12 @@ http {
     access_log  /var/log/nginx/access.log  main;
 
     sendfile        on;
-    #tcp_nopush     on;
 
     keepalive_timeout  65;
-
-    #gzip  on;
 
     include /etc/nginx/conf.d/*.conf;
 }
 EOF
-        
-        # 站点配置文件
         cat > configs/conf.d/default.conf << EOF
 server {
     listen 80;
@@ -705,24 +542,18 @@ server {
     }
 }
 EOF
-        
-        log_message "✓ Nginx 配置文件生成完成"
+        log_message "Success: Nginx configuration files generated"
     else
-        log_message "警告: Nginx 配置文件已存在，跳过生成"
+        log_message "Warning: Nginx configuration files already exist, skipping generation"
     fi
-    
-    # 生成 PHP 配置文件
     if [ ! -f "configs/php.ini" ] || [ "$FORCE_CONFIG" = true ]; then
-        log_message "生成 PHP 配置文件..."
-        
-        # 根据内存大小调整 opcache 配置
+        log_message "Generating PHP configuration file..."
         local opcache_memory="128"
         if [ "$AVAILABLE_RAM" -lt 2048 ]; then
             opcache_memory="64"
         elif [ "$AVAILABLE_RAM" -gt 4096 ]; then
             opcache_memory="256"
         fi
-        
         cat > configs/php.ini << EOF
 [PHP]
 memory_limit = $PHP_MEMORY_LIMIT
@@ -746,179 +577,126 @@ opcache.max_accelerated_files = 4000
 opcache.revalidate_freq = 60
 opcache.fast_shutdown = 1
 EOF
-        
-        log_message "✓ PHP 配置文件生成完成"
+        log_message "Success: PHP configuration file generated"
     else
-        log_message "警告: PHP 配置文件已存在，跳过生成"
+        log_message "Warning: PHP configuration file already exists, skipping generation"
     fi
 }
 
-# 服务启动
 start_services() {
-    log_message "[阶段10] 启动服务..."
-    
-    # 下载 WordPress(如果需要)
+    log_message "[Stage 10] Starting services..."
     if [ ! -f "html/wp-config.php" ]; then
         if [ -z "$(ls -A html 2>/dev/null)" ]; then
-            log_message "下载 WordPress 最新版本.."
-            
-            # 下载并解压 WordPress
+            log_message "Downloading latest WordPress version..."
             local temp_file="/tmp/wordpress-latest.tar.gz"
-            
             if command -v wget >/dev/null; then
                 wget -q -O "$temp_file" https://wordpress.org/latest.tar.gz
             else
                 curl -s -o "$temp_file" https://wordpress.org/latest.tar.gz
             fi
-            
             if [ -f "$temp_file" ]; then
-                # 解压到 html 目录
                 tar -xzf "$temp_file" -C .
                 mv wordpress/* html/
                 rm -rf wordpress "$temp_file"
-                
-                # 设置权限
-                log_message "设置文件权限..."
+                log_message "Setting file permissions..."
                 chown -R www-data:www-data html
-                
-                log_message "✓ WordPress 下载并解压完成"
+                log_message "Success: WordPress downloaded and extracted"
             else
-                log_message "警告: WordPress 下载失败，请手动下载并解压到 html 目录"
+                log_message "Warning: WordPress download failed, please manually download and extract to html directory"
             fi
         else
-            log_message "✓ html 目录已存在内容，跳过 WordPress 下载"
+            log_message "Success: html directory already contains content, skipping WordPress download"
         fi
     else
-        log_message "✓ WordPress 配置文件已存在，跳过下载"
+        log_message "Success: WordPress configuration file already exists, skipping download"
     fi
-    
-    # 启动服务
-    log_message "启动 Docker 服务..."
-    $DOCKER_COMPOSE_CMD up -d || handle_error "Docker 服务启动失败"
-    
-    # 等待服务启动
-    log_message "等待服务初始化..."
+    log_message "Starting Docker services..."
+    $DOCKER_COMPOSE_CMD up -d || handle_error "Failed to start Docker services"
+    log_message "Waiting for service initialization..."
     sleep 10
-    
-    # 检查服务状态
-    log_message "检查服务状态.."
+    log_message "Checking service status..."
     $DOCKER_COMPOSE_CMD ps
-    
-    # 验证部署是否成功
     if [ "$(docker-compose ps -q | wc -l)" -eq "4" ]; then
-        log_message "✓ WordPress Docker 版部署成功"
+        log_message "Success: WordPress Docker deployment successful"
     else
-        log_message "✓ WordPress Docker 版部署失败，请检查日志"
+        log_message "Warning: WordPress Docker deployment failed, please check logs"
         $DOCKER_COMPOSE_CMD logs --tail=50
     fi
 }
 
-# 备份配置
 setup_backup_config() {
-    log_message "[阶段11] 设置备份配置..."
-    
-    # 创建备份脚本
+    log_message "[Stage 11] Setting up backup configuration..."
     cat > "$DEPLOY_DIR/scripts/backup_db.sh" << 'EOF'
 #!/bin/bash
-
-# 获取脚本所在目录的父目录
 DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKUP_DIR="$DEPLOY_DIR/backups"
-
-# 从 .env 文件加载环境变量
 if [ -f "$DEPLOY_DIR/.env" ]; then
-    # 只导出需要的数据库相关环境变量
     export $(grep -E '^MYSQL_|^BACKUP_RETENTION_DAYS' "$DEPLOY_DIR/.env" | xargs)
 fi
-
-# 设置默认值
 MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-default_password}
 MYSQL_DATABASE=${MYSQL_DATABASE:-wordpress}
 BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
-
-# 创建备份文件
 BACKUP_FILE="$BACKUP_DIR/db-$(date +%Y%m%d_%H%M%S).sql.gz"
-
-echo "开始备份数据库: $MYSQL_DATABASE"
-
-# 执行备份
+echo "Starting database backup: $MYSQL_DATABASE"
 docker exec -t wp_db mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" | gzip > "$BACKUP_FILE"
-
 if [ $? -eq 0 ]; then
-    echo "✓ 数据库备份成功: $BACKUP_FILE"
-    
-    # 删除旧备份
-    echo "清理 $BACKUP_RETENTION_DAYS 天前的备份.."
+    echo "Success: Database backup completed: $BACKUP_FILE"
+    echo "Cleaning backups older than $BACKUP_RETENTION_DAYS days..."
     find "$BACKUP_DIR" -name "db-*.sql.gz" -mtime +"$BACKUP_RETENTION_DAYS" -delete
-    echo "✓ 旧备份清理完成"
+    echo "Success: Old backups cleaned"
 else
-    echo "✓ 数据库备份失败"
+    echo "Warning: Database backup failed"
 fi
 EOF
-    
-    # 设置执行权限
     chmod +x "$DEPLOY_DIR/scripts/backup_db.sh"
-    
-    # 创建 cron 任务
     CRON_JOB="0 3 * * * $DEPLOY_DIR/scripts/backup_db.sh >> $DEPLOY_DIR/logs/backup.log 2>&1"
-    
-    # 检查是否已存在相同的 cron 任务
     if ! crontab -l 2>/dev/null | grep -q "backup_db.sh"; then
-        # 添加到 cron
         (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
-        log_message "✓ 数据库备份 cron 任务已创建(每天凌晨 3 点执行)"
+        log_message "Success: Database backup cron job created (runs daily at 3 AM)"
     else
-        log_message "警告: 数据库备份 cron 任务已存在"
+        log_message "Warning: Database backup cron job already exists"
     fi
-    
-    # 立即执行一次备份测试
-    log_message "执行备份测试..."
+    log_message "Running backup test..."
     "$DEPLOY_DIR/scripts/backup_db.sh"
 }
 
-# 显示部署信息
 display_deployment_info() {
     log_message "=================================================="
-    log_message "部署完成!"
+    log_message "Deployment completed!"
     log_message "=================================================="
-    
-    # 获取主机 IP
     local HOST_IP=$(hostname -I | awk '{print $1}')
-    
-    log_message "访问地址: http://$HOST_IP"
+    log_message "Access URL: http://$HOST_IP"
     log_message ""
-    log_message "部署详情:"
-    log_message "  - 操作系统: $OS_TYPE $OS_VERSION"
-    log_message "  - CPU 核心: $CPU_CORES 核(限制使用: $((CPU_CORES / 2)) 核)"
-    log_message "  - 可用内存: ${AVAILABLE_RAM}MB(限制使用: $((AVAILABLE_RAM / 2))MB)"
-    log_message "  - 部署目录: $DEPLOY_DIR"
-    log_message "  - 备份目录: $DEPLOY_DIR/backups"
-    log_message "  - 备份保留: $BACKUP_RETENTION_DAYS 天"
+    log_message "Deployment details:"
+    log_message "  - Operating system: $OS_TYPE $OS_VERSION"
+    log_message "  - CPU cores: $CPU_CORES (limited to: $((CPU_CORES / 2)) cores)"
+    log_message "  - Available memory: ${AVAILABLE_RAM}MB (limited to: $((AVAILABLE_RAM / 2))MB)"
+    log_message "  - Deployment directory: $DEPLOY_DIR"
+    log_message "  - Backup directory: $DEPLOY_DIR/backups"
+    log_message "  - Backup retention: $BACKUP_RETENTION_DAYS days"
     log_message ""
-    log_message "数据库信息"
-    log_message "  - 数据库名: wordpress"
-    log_message "  - 用户名: wordpress"
-    log_message "  - 密码: 请查看 .env 文件中的 MYSQL_PASSWORD"
-    log_message "  - 主机: mariadb"
+    log_message "Database information:"
+    log_message "  - Database name: wordpress"
+    log_message "  - Username: wordpress"
+    log_message "  - Password: Check .env file for MYSQL_PASSWORD"
+    log_message "  - Host: mariadb"
     log_message ""
-    log_message "自动化功能"
-    log_message "  - ✓ 每天数据库自动备份(凌晨 3 点)"
-    log_message "  - ✓ 权限自动设置"
-    log_message "  - ✓ 环境自动修复"
-    log_message "  - ✓ 容器冲突自动清理"
+    log_message "Automation features:"
+    log_message "  - Success: Daily database backup (3 AM)"
+    log_message "  - Success: Automatic permission setting"
+    log_message "  - Success: Environment auto-repair"
+    log_message "  - Success: Container conflict cleanup"
     log_message ""
-    log_message "后续步骤:"
-    log_message "1. 打开浏览器访问上述地址"
-    log_message "2. 完成 WordPress 安装向导"
-    log_message "3. 建议安装 Redis Object Cache 插件启用缓存"
+    log_message "Next steps:"
+    log_message "1. Open browser and visit the above URL"
+    log_message "2. Complete the WordPress installation wizard"
+    log_message "3. Recommended: Install Redis Object Cache plugin to enable caching"
     log_message ""
-    log_message "重要: 请备份 .env 文件，包含所有敏感信息"
+    log_message "Important: Back up the .env file, it contains sensitive information"
     log_message "=================================================="
 }
 
-# 主函数
 main() {
-    # 解析命令行参数
     while [[ $# -gt 0 ]]; do
         case $1 in
             --force)
@@ -926,88 +704,94 @@ main() {
                 shift
                 ;;
             *)
-                log_message "警告: 未知选项: $1"
+                log_message "Warning: Unknown option: $1"
                 shift
                 ;;
         esac
     done
-    
-    log_message "🚀 开始 WordPress Docker 自动部署..."
-    
-    # 执行各阶段
-    detect_host_environment       # 检测主机环境
-    environment_preparation       # 环境准备
-    collect_system_parameters     # 收集系统参数
-    determine_deployment_directory # 确定部署目录
-    optimize_parameters           # 优化参数
-    set_permissions               # 权限设置
-    cleanup_old_containers        # 容器清理
-    generate_configs              # 生成配置文件
-    build_images                  # 镜像构建
-    start_services                # 服务启动
-    setup_backup_config           # 备份配置
-    display_deployment_info       # 显示部署信息
-    
-    log_message "🎉 WordPress Docker 全栈部署完成!"
+    log_message "Starting WordPress Docker deployment..."
+    detect_host_environment
+    environment_preparation
+    collect_system_parameters
+    determine_deployment_directory
+    optimize_parameters
+    set_permissions
+    cleanup_old_containers
+    generate_configs
+    build_images
+    start_services
+    setup_backup_config
+    display_deployment_info
+    log_message "Success: WordPress Docker full-stack deployment completed!"
 }
 
-# 执行主函数
 main "$@"
 ```
 
-### 修正详情
-
-1. **MariaDB CPU 限制修复**：
-   - 在 `optimize_parameters` 函数中，新增 `MARIADB_CPU_LIMIT="0.5"` 和 `MARIADB_MEMORY_LIMIT="512m"` 默认值，并将其写入 `.env` 文件。
-   - 在 `build_images` 函数中，修改 MariaDB 服务的 `docker-compose.yml` 配置，使用 `${MARIADB_CPU_LIMIT}` 和 `${MARIADB_MEMORY_LIMIT}`，确保值非空且有效。
-   - 添加验证逻辑，确保 `MARIADB_CPU_LIMIT` 是有效的浮点数。
-
-2. **Nginx 资源警告修复**：
-   - 在 `load_env_file` 和 `build_images` 函数中，确保 `NGINX_CPU_LIMIT` 和 `NGINX_MEMORY_LIMIT` 有默认值（`1` 和 `256m`）。
-   - 验证这些变量的格式，防止无效值传入 `docker-compose.yml`。
-
-3. **强制生成配置文件**：
-   - 新增 `FORCE_CONFIG` 变量，默认值为 `false`。
-   - 在 `generate_configs` 函数中，检查 `FORCE_CONFIG`，如果为 `true`，则强制重新生成 Nginx 和 PHP 配置文件。
-   - 支持命令行参数 `--force`：`./auto_deploy.sh --force`。
-
-4. **其他改进**：
-   - 在 `build_images` 函数中添加 `$DOCKER_COMPOSE_CMD config` 验证 `docker-compose.yml` 语法。
-   - 确保所有资源限制变量在生成 `docker-compose.yml` 前导出（`export`）。
-   - 在日志中记录所有资源限制的最终值，便于调试。
-
-### 测试与使用
+### 修复步骤
 
 1. **保存脚本**：
-   - 将上述内容保存为 `auto_deploy.sh`。
-   - 设置执行权限：`chmod +x auto_deploy.sh`。
+   - 将上述内容保存为 `/opt/auto_deploy.sh`。
+   - **确保使用纯文本编辑器**（如 `vim`、`nano`）保存，避免引入 BOM 或其他不可见字符：
+     ```bash
+     nano /opt/auto_deploy.sh
+     ```
+     粘贴内容，保存并退出（`Ctrl+O`, `Enter`, `Ctrl+X`）。
+   - 设置执行权限：
+     ```bash
+     chmod +x /opt/auto_deploy.sh
+     ```
 
-2. **运行脚本**：
+2. **检查文件编码**：
+   - 验证文件没有 BOM：
+     ```bash
+     file /opt/auto_deploy.sh
+     ```
+     期望输出：` Bourne-Again shell script, ASCII text executable` 或类似。
+     如果显示 `with BOM`，移除 BOM：
+     ```bash
+     sed -i '1s/^\xEF\xBB\xBF//' /opt/auto_deploy.sh
+     ```
+
+3. **转换为 Unix 换行符**：
+   - 如果脚本包含 Windows 换行符（CRLF），转换为 Unix 换行符（LF）：
+     ```bash
+     dos2unix /opt/auto_deploy.sh
+     ```
+     如果 `dos2unix` 未安装，安装：
+     ```bash
+     apt-get update && apt-get install -y dos2unix
+     ```
+
+4. **运行脚本**：
    ```bash
-   # 正常运行
+   cd /opt
    ./auto_deploy.sh
-
-   # 强制重新生成配置文件
-   ./auto_deploy.sh --force
-
-   # 自定义资源限制
-   MARIADB_CPU_LIMIT=0.75 NGINX_CPU_LIMIT=0.5 ./auto_deploy.sh
    ```
-
-3. **验证**：
-   - 检查日志文件（`$DEPLOY_DIR/logs/deploy.log`）是否包含错误。
-   - 运行 `docker-compose ps` 确认所有服务（mariadb、redis、php、nginx）正常启动。
-   - 访问 `http://<主机IP>`，完成 WordPress 安装向导。
-
-4. **检查 `.env` 文件**：
-   - 确认 `.env` 文件包含 `MARIADB_CPU_LIMIT` 和 `MARIADB_MEMORY_LIMIT`，例如：
-     ```
-     MARIADB_CPU_LIMIT="0.5"
-     MARIADB_MEMORY_LIMIT="512m"
+   - 使用 `--force` 强制重新生成配置文件：
+     ```bash
+     ./auto_deploy.sh --force
      ```
 
-5. **调试**：
-   - 如果仍出现错误，查看 `docker-compose logs`：
+5. **验证**：
+   - 检查日志文件：`/opt/logs/deploy.log`。
+   - 确认 `docker-compose.yml` 生成且包含有效 `cpus` 值：
+     ```bash
+     cat /opt/docker-compose.yml | grep cpus
+     ```
+     期望输出类似：
+     ```
+     cpus: "0.5"  # mariadb
+     cpus: "2"    # php
+     cpus: "1"    # nginx
+     ```
+   - 检查服务状态：
+     ```bash
+     docker-compose ps
+     ```
+
+6. **调试**：
+   - 如果仍有错误，查看 Docker Compose 日志：
      ```bash
      docker-compose logs --tail=50
      ```
@@ -1016,11 +800,26 @@ main "$@"
      docker-compose config
      ```
 
-### 注意事项
+### 预防措施
 
-- **环境变量覆盖**：如果您有现有的 `.env` 文件，脚本会重新生成它。建议备份原始 `.env` 文件。
-- **Docker Compose 版本**：脚本支持 v1 和 v2 语法，确保 Docker Compose 已安装。
-- **PHP 和 Nginx 构建**：脚本假设 `../build/Dockerfiles/php` 和 `../build/Dockerfiles/nginx` 存在。如果不存在，请提供这些 Dockerfile 或修改 `build` 部分为 `image`。
-- **权限**：确保运行脚本的用户有 Docker 权限（例如，属于 `docker` 组）。
+- **避免复制粘贴问题**：直接在服务器上使用 `nano` 或 `vim` 编辑脚本，避免从网页或其他编辑器复制引入不可见字符。
+- **备份**：在运行脚本前备份现有配置文件（`.env`、`docker-compose.yml`、 `configs/*`）。
+- **依赖检查**：确保 Docker 和 Docker Compose 已安装：
+  ```bash
+  docker --version
+  docker-compose --version || docker compose version
+  ```
+  如果未安装，安装 Docker 和 Docker Compose：
+  ```bash
+  apt-get update && apt-get install -y docker.io docker-compose
+  ```
 
-如果您有其他问题或需要进一步调试（例如，提供 `docker-compose.yml` 或日志），请告诉我，我可以提供更具体的帮助！
+### 如果问题仍未解决
+
+如果执行仍失败，请提供以下信息：
+- 当前 `/opt/auto_deploy.sh` 的开头几行：`head -n 20 /opt/auto_deploy.sh`
+- 文件编码信息：`file /opt/auto_deploy.sh`
+- 完整错误日志：`./auto_deploy.sh > deploy_error.log 2>&1 && cat deploy_error.log`
+- 是否存在 `../build/Dockerfiles/php` 和 `../build/Dockerfiles/nginx`（脚本中 PHP 和 Nginx 服务使用自定义构建）。
+
+这些信息将帮助我进一步诊断问题！
