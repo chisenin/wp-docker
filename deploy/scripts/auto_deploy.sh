@@ -220,6 +220,10 @@ optimize_parameters() {
         local mariadb_version="11.3.2"
         local redis_version="7.4.0"
         
+        # 确保生成的环境变量格式正确，不含特殊字符问题
+        # 清理wp_keys中的特殊字符，确保格式正确
+        sanitized_keys=$(echo "$wp_keys" | sed 's/\r//g' | sed 's/"/\\"/g')
+        
         cat > .env << EOF
 # WordPress Docker环境变量配置
 # 生成时间: $(date)
@@ -254,8 +258,12 @@ PHP_MEMORY_LIMIT=$PHP_MEMORY_LIMIT
 UPLOAD_MAX_FILESIZE=64M
 
 # WordPress安全密钥
-$wp_keys
+$sanitized_keys
 EOF
+        
+        # 添加说明关于换行符问题
+        print_yellow "注意: .env文件已生成，在Linux系统上可能需要转换换行符"
+        print_yellow "      可以使用命令 'dos2unix .env' 确保文件使用LF换行符"
         
         print_green "✓ .env 文件生成完成"
         print_yellow "注意: 敏感信息已保存在 .env 文件中，请妥善保管"
@@ -269,12 +277,91 @@ EOF
     
     if [ ! -f "docker-compose.yml" ]; then
         print_blue "生成 Docker Compose 配置文件..."
-        # （此处省略 docker-compose.yml 生成内容，为节省篇幅）
-        # 可保持你原脚本中内容不变
+        
+        # 确保CPU_LIMIT有合理的默认值
+        if [ -z "$CPU_LIMIT" ] || [ "$CPU_LIMIT" -eq 0 ]; then
+            CPU_LIMIT=1
+        fi
+        
+        # 生成docker-compose.yml文件，确保CPU限制设置正确
+        cat > docker-compose.yml << EOF
+version: '3.8'
+
+services:
+  nginx:
+    image: ${DOCKERHUB_USERNAME:-library}/nginx:${NGINX_VERSION:-latest}
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./html:/var/www/html
+      - ./configs/nginx/conf.d:/etc/nginx/conf.d
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - php
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-1}.0"
+          memory: "${MEM_LIMIT:-512M}"
+
+  php:
+    image: ${DOCKERHUB_USERNAME:-library}/php:${PHP_VERSION:-latest}-fpm
+    container_name: php
+    volumes:
+      - ./html:/var/www/html
+      - ./configs/php.ini:/usr/local/etc/php/php.ini
+    depends_on:
+      - mariadb
+      - redis
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-1}.0"
+          memory: "${MEM_LIMIT:-512M}"
+
+  mariadb:
+    image: ${DOCKERHUB_USERNAME:-library}/mariadb:${MARIADB_VERSION:-latest}
+    container_name: mariadb
+    volumes:
+      - ./mysql:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
+      MYSQL_USER: ${MYSQL_USER:-wordpress}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-wordpresspassword}
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-1}.0"
+          memory: "1024M"
+
+  redis:
+    image: ${DOCKERHUB_USERNAME:-library}/redis:${REDIS_VERSION:-latest}
+    container_name: redis
+    volumes:
+      - ./redis:/data
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redispassword} --maxmemory ${REDIS_MAXMEMORY:-256mb}
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "256M"
+EOF
+        
         print_green "✓ docker-compose.yml 文件生成完成"
     else
         print_yellow "警告: docker-compose.yml 文件已存在，跳过生成"
     fi
+    
+    # 添加注释提醒用户关于换行符问题
+    print_yellow "注意: 如果在Linux系统上运行，请确保文件使用LF换行符而非CRLF"
+    print_yellow "      可以使用命令 'dos2unix auto_deploy.sh .env docker-compose.yml' 进行转换"
     
     # 生成 nginx、php.ini 等配置同样省略，保持你原逻辑
 }
