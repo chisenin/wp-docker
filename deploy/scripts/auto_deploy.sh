@@ -302,7 +302,7 @@ EOF
     
     # 生成 docker-compose.yml 文件（如果不存在）
     if [ ! -f "docker-compose.yml" ]; then
-        print_blue "生成 Docker Compose 配置文件..."
+        echo "生成 Docker Compose 配置文件..."
         
         cat > docker-compose.yml << EOF
 version: '3.8'
@@ -310,8 +310,8 @@ version: '3.8'
 services:
   # --- MariaDB 数据库服务 ---
   mariadb:
-    # 使用我们构建的MariaDB镜像，支持自动版本更新
-    image: \${DOCKERHUB_USERNAME:-library}/wordpress-mariadb:\${MARIADB_VERSION:-11.3.2}
+    # 使用官方MariaDB镜像
+    image: mariadb:\${MARIADB_VERSION:-11.3.2}
     container_name: wp_db
     restart: unless-stopped
     networks:
@@ -335,8 +335,8 @@ services:
 
   # --- Redis 缓存服务 ---
   redis:
-    # 使用我们构建的Redis镜像，支持自动版本更新
-    image: \${DOCKERHUB_USERNAME:-library}/wordpress-redis:\${REDIS_VERSION:-7.4.0}
+    # 使用官方Redis镜像
+    image: redis:\${REDIS_VERSION:-7.4.0}
     container_name: wp_redis
     restart: unless-stopped
     networks:
@@ -515,7 +515,7 @@ EOF
     
     # 生成 PHP 配置文件
     if [ ! -f "configs/php.ini" ]; then
-        print_blue "生成 PHP 配置文件..."
+        echo "生成 PHP 配置文件..."
         
         # 根据内存大小调整 opcache 配置
         local opcache_memory="128"
@@ -636,8 +636,8 @@ BACKUP_DIR="$DEPLOY_DIR/backups"
 
 # 从 .env 文件加载环境变量
 if [ -f "$DEPLOY_DIR/.env" ]; then
-    # 只导出有效的环境变量，忽略注释和空行
-    export $(grep -v '^#' "$DEPLOY_DIR/.env" | sed 's/[[:space:]]*#.*$//' | grep -v '^$' | xargs)
+    # 只导出需要的数据库相关环境变量，避免导出包含特殊字符的WordPress密钥
+    source "$DEPLOY_DIR/.env"
 fi
 
 # 设置默认值
