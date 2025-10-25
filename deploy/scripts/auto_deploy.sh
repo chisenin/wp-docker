@@ -18,21 +18,17 @@ DEPLOY_DIR=""
 BACKUP_DIR=""
 BACKUP_RETENTION_DAYS=7
 
-# 输出函数（简化版本，兼容Windows环境）
-print_green() { echo "$1"; }
-print_yellow() { echo "$1"; }
-print_red() { echo "$1"; }
-print_blue() { echo "$1"; }
+# 输出函数已直接替换为echo语句
 
 # 错误处理函数
 handle_error() {
-    print_red "错误: $1"
+    echo "错误: $1"
     exit 1
 }
 
 # 检查宿主机环境
 detect_host_environment() {
-    print_blue "[阶段1] 检测宿主机环境..."
+    echo "[阶段1] 检测宿主机环境..."
     
     # 检测操作系统类型
     if [ -f /etc/os-release ]; then
@@ -49,12 +45,12 @@ detect_host_environment() {
         handle_error "无法识别操作系统类型，请使用 CentOS、Debian、Ubuntu 或 Alpine"
     fi
     
-    print_green "操作系统: $OS_TYPE $OS_VERSION"
+    echo "操作系统: $OS_TYPE $OS_VERSION"
     
     # 验证是否支持的操作系统
     case "$OS_TYPE" in
         centos|debian|ubuntu|alpine)
-            print_green "✓ 操作系统受支持"
+            echo "✓ 操作系统受支持"
             ;;
         *)
             handle_error "不支持的操作系统: $OS_TYPE，请使用 CentOS、Debian、Ubuntu 或 Alpine"
@@ -64,11 +60,11 @@ detect_host_environment() {
 
 # 收集系统参数
 collect_system_parameters() {
-    print_blue "[阶段2] 收集系统参数..."
+    echo "[阶段2] 收集系统参数..."
     
     # 收集 CPU 核心数
     CPU_CORES=$(nproc)
-    print_green "CPU 核心数: $CPU_CORES"
+    echo "CPU 核心数: $CPU_CORES"
     
     # 收集内存信息（MB）
     if [ "$OS_TYPE" == "alpine" ]; then
@@ -76,7 +72,7 @@ collect_system_parameters() {
     else
         AVAILABLE_RAM=$(free -m | grep Mem | awk '{print $2}')
     fi
-    print_green "可用内存: ${AVAILABLE_RAM}MB"
+    echo "可用内存: ${AVAILABLE_RAM}MB"
     
     # 收集磁盘空间信息
     if [ "$OS_TYPE" == "alpine" ]; then
@@ -86,37 +82,37 @@ collect_system_parameters() {
         DISK_SPACE=$(df -h / | tail -1 | awk '{print $4}')
         DISK_USAGE=$(df -h / | tail -1 | awk '{print $5}' | sed 's/%//')
     fi
-    print_green "可用磁盘空间: $DISK_SPACE"
-    print_green "磁盘使用率: ${DISK_USAGE}%"
+    echo "可用磁盘空间: $DISK_SPACE"
+    echo "磁盘使用率: ${DISK_USAGE}%"
     
     # 检查 Docker 安装状态
     if ! command -v docker >/dev/null 2>&1; then
-        print_red "Docker 未安装，正在尝试安装..."
+        echo "Docker 未安装，正在尝试安装..."
         install_docker
     else
         DOCKER_VERSION=$(docker --version | awk '{print $3}' | sed 's/,//')
-        print_green "Docker 版本: $DOCKER_VERSION"
+        echo "Docker 版本: $DOCKER_VERSION"
     fi
     
     # 检查 docker-compose 安装状态
     if ! command -v docker-compose >/dev/null 2>&1; then
-        print_red "Docker Compose 未安装，正在尝试安装..."
+        echo "Docker Compose 未安装，正在尝试安装..."
         install_docker_compose
     else
         COMPOSE_VERSION=$(docker-compose --version | awk '{print $3}' | sed 's/,//')
-        print_green "Docker Compose 版本: $COMPOSE_VERSION"
+        echo "Docker Compose 版本: $COMPOSE_VERSION"
     fi
     
     # 检查磁盘空间是否充足
     if [ "$DISK_USAGE" -gt 80 ]; then
-        print_yellow "警告: 磁盘使用率超过 80%，建议清理磁盘空间"
+        echo "警告: 磁盘使用率超过 80%，建议清理磁盘空间"
         BACKUP_RETENTION_DAYS=3
-        print_yellow "自动将备份保留天数调整为: $BACKUP_RETENTION_DAYS 天"
+        echo "自动将备份保留天数调整为: $BACKUP_RETENTION_DAYS 天"
     fi
     
     # 检查内存是否充足
     if [ "$AVAILABLE_RAM" -lt 2048 ]; then
-        print_yellow "警告: 内存小于 2GB，可能影响性能"
+        echo "警告: 内存小于 2GB，可能影响性能"
     fi
 }
 
@@ -151,19 +147,19 @@ install_docker_compose() {
 
 # 确定部署目录
 determine_deployment_directory() {
-    print_blue "[阶段3] 确定部署目录..."
+    echo "[阶段3] 确定部署目录..."
     
     # 优先检查 /opt/wp-docker
     if [ -d "/opt/wp-docker" ]; then
         DEPLOY_DIR="/opt/wp-docker"
-        print_green "使用现有目录: $DEPLOY_DIR"
+        echo "使用现有目录: $DEPLOY_DIR"
     # 其次检查 /var/wp-docker
     elif [ -d "/var/wp-docker" ]; then
         DEPLOY_DIR="/var/wp-docker"
-        print_green "使用现有目录: $DEPLOY_DIR"
+        echo "使用现有目录: $DEPLOY_DIR"
     # 都不存在则创建 /opt/wp-docker
     else
-        print_green "创建部署目录: /opt/wp-docker"
+        echo "创建部署目录: /opt/wp-docker"
         mkdir -p /opt/wp-docker || handle_error "无法创建部署目录"
         DEPLOY_DIR="/opt/wp-docker"
     fi
@@ -177,13 +173,13 @@ determine_deployment_directory() {
     mkdir -p "$SCRIPTS_DIR" || handle_error "无法创建脚本目录"
     mkdir -p "$LOGS_DIR" || handle_error "无法创建日志目录"
     
-    print_green "备份目录: $BACKUP_DIR"
-    print_green "脚本目录: $SCRIPTS_DIR"
-    print_green "日志目录: $LOGS_DIR"
+    echo "备份目录: $BACKUP_DIR"
+    echo "脚本目录: $SCRIPTS_DIR"
+    echo "日志目录: $LOGS_DIR"
     
     # 切换到部署目录
     cd "$DEPLOY_DIR" || handle_error "无法切换到部署目录"
-    print_green "当前工作目录: $(pwd)"
+    echo "当前工作目录: $(pwd)"
 }
 
 # 生成随机密码
@@ -194,20 +190,20 @@ generate_password() {
 
 # 生成 WordPress 安全密钥（格式化为环境变量格式）
 generate_wordpress_keys() {
-    print_blue "生成 WordPress 安全密钥..."
+    echo "生成 WordPress 安全密钥..."
     local keys_url="https://api.wordpress.org/secret-key/1.1/salt/"
     # 获取密钥并转换为环境变量格式
     local keys=$(curl -s "$keys_url" || wget -qO- "$keys_url" || echo "# 安全密钥生成失败，请手动替换")
     # 将PHP define格式转换为环境变量格式
     keys=$(echo "$keys" | \
         sed "s/define('\([^']*\)', '\([^']*\)');/WORDPRESS_\1=\2/" | \
-        sed "s/define(\"\([^\"]*\)", \"\([^\"]*\)\");/WORDPRESS_\1=\2/")
+        sed "s/define(\"\([^\"]*\)\", \"\([^\"]*\)\");/WORDPRESS_\1=\2/")
     echo "$keys"
 }
 
 # 根据系统参数优化配置
 optimize_parameters() {
-    print_blue "[阶段4] 根据系统参数优化配置..."
+    echo "[阶段4] 根据系统参数优化配置..."
     
     # 创建必要的目录结构
     mkdir -p configs/nginx/conf.d
@@ -231,13 +227,13 @@ optimize_parameters() {
         PHP_MEMORY_LIMIT="512M"
     fi
     
-    print_green "CPU 限制: $CPU_LIMIT 核"
-    print_green "内存限制: ${MEM_LIMIT}MB"
-    print_green "PHP 内存限制: $PHP_MEMORY_LIMIT"
+    echo "CPU 限制: $CPU_LIMIT 核"
+    echo "内存限制: ${MEM_LIMIT}MB"
+    echo "PHP 内存限制: $PHP_MEMORY_LIMIT"
     
     # 生成 .env 文件（如果不存在）
     if [ ! -f ".env" ]; then
-        print_blue "生成环境配置文件 (.env)..."
+        echo "生成环境配置文件 (.env)..."
         
         # 生成随机密码
         local root_password=$(generate_password)
@@ -293,10 +289,10 @@ UPLOAD_MAX_FILESIZE=64M  # 最大上传文件大小
 $wp_keys
 EOF
         
-        print_green "✓ .env 文件生成完成"
-        print_yellow "注意: 敏感信息已保存在 .env 文件中，请妥善保管"
+        echo "✓ .env 文件生成完成"
+        echo "注意: 敏感信息已保存在 .env 文件中，请妥善保管"
     else
-        print_yellow "警告: .env 文件已存在，跳过生成"
+        echo "警告: .env 文件已存在，跳过生成"
         # 读取现有配置或设置默认值
         source .env 2>/dev/null || :
         CPU_LIMIT=${CPU_LIMIT:-$((CPU_CORES / 2))}
@@ -436,14 +432,14 @@ volumes:
     driver: local
 EOF
         
-        print_green "✓ docker-compose.yml 文件生成完成"
+        echo "✓ docker-compose.yml 文件生成完成"
     else
-        print_yellow "警告: docker-compose.yml 文件已存在，跳过生成"
+        echo "警告: docker-compose.yml 文件已存在，跳过生成"
     fi
     
     # 生成 Nginx 配置文件
     if [ ! -f "configs/nginx/nginx.conf" ]; then
-        print_blue "生成 Nginx 配置文件..."
+        echo "生成 Nginx 配置文件..."
         
         # 根据 CPU 核心数优化 worker_processes
         local worker_processes="auto"
@@ -512,9 +508,9 @@ server {
 }
 EOF
         
-        print_green "✓ Nginx 配置文件生成完成"
+        echo "✓ Nginx 配置文件生成完成"
     else
-        print_yellow "警告: Nginx 配置文件已存在，跳过生成"
+        echo "警告: Nginx 配置文件已存在，跳过生成"
     fi
     
     # 生成 PHP 配置文件
@@ -553,20 +549,20 @@ opcache.revalidate_freq = 60
 opcache.fast_shutdown = 1
 EOF
         
-        print_green "✓ PHP 配置文件生成完成"
+        echo "✓ PHP 配置文件生成完成"
     else
-        print_yellow "警告: PHP 配置文件已存在，跳过生成"
+        echo "警告: PHP 配置文件已存在，跳过生成"
     fi
 }
 
 # 部署 WordPress Docker 栈
 deploy_wordpress_stack() {
-    print_blue "[阶段5] 部署 WordPress Docker 栈..."
+    echo "[阶段5] 部署 WordPress Docker 栈..."
     
     # 下载 WordPress（如果需要）
     if [ ! -f "html/wp-config.php" ]; then
         if [ -z "$(ls -A html 2>/dev/null)" ]; then
-            print_blue "下载 WordPress 最新版本..."
+            echo "下载 WordPress 最新版本..."
             
             # 下载并解压 WordPress
             local temp_file="/tmp/wordpress-latest.tar.gz"
@@ -584,51 +580,51 @@ deploy_wordpress_stack() {
                 rm -rf wordpress "$temp_file"
                 
                 # 设置权限
-                print_green "设置文件权限..."
+                echo "设置文件权限..."
                 docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R www-data:www-data /var/www/html
                 
-                print_green "✓ WordPress 下载并解压完成"
+                echo "✓ WordPress 下载并解压完成"
             else
-                print_yellow "警告: WordPress 下载失败，请手动下载并解压到 html 目录"
+                echo "警告: WordPress 下载失败，请手动下载并解压到 html 目录"
             fi
         else
-            print_green "✓ html 目录已存在内容，跳过 WordPress 下载"
+            echo "✓ html 目录已存在内容，跳过 WordPress 下载"
         fi
     else
-        print_green "✓ WordPress 配置文件已存在，跳过下载"
+        echo "✓ WordPress 配置文件已存在，跳过下载"
     fi
     
     # 构建镜像（优先）
-    print_blue "构建Docker镜像..."
+    echo "构建Docker镜像..."
     docker-compose build
     
     # 可选：如果需要从Docker Hub拉取，可以在这里添加条件拉取逻辑
     # 但默认情况下使用本地构建的镜像
     
     # 启动服务
-    print_blue "启动 Docker 服务..."
+    echo "启动 Docker 服务..."
     docker-compose up -d
     
     # 等待服务启动
-    print_blue "等待服务初始化..."
+    echo "等待服务初始化..."
     sleep 10
     
     # 检查服务状态
-    print_blue "检查服务状态..."
+    echo "检查服务状态..."
     docker-compose ps
     
     # 验证部署是否成功
     if [ "$(docker-compose ps -q | wc -l)" -eq "4" ]; then
-        print_green "✓ WordPress Docker 栈部署成功"
+        echo "✓ WordPress Docker 栈部署成功"
     else
-        print_red "✗ WordPress Docker 栈部署失败，请检查日志"
+        echo "✗ WordPress Docker 栈部署失败，请检查日志"
         docker-compose logs --tail=50
     fi
 }
 
 # 设置自动数据库备份
 setup_auto_backup() {
-    print_blue "[阶段6] 设置自动数据库备份..."
+    echo "[阶段6] 设置自动数据库备份..."
     
     # 创建备份脚本
     cat > "$DEPLOY_DIR/scripts/backup_db.sh" << 'EOF'
@@ -679,19 +675,19 @@ EOF
     if ! crontab -l 2>/dev/null | grep -q "backup_db.sh"; then
         # 添加到 cron
         (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
-        print_green "✓ 数据库备份 cron 任务已创建（每天凌晨 3 点执行）"
+        echo "✓ 数据库备份 cron 任务已创建（每天凌晨 3 点执行）"
     else
-        print_yellow "警告: 数据库备份 cron 任务已存在"
+        echo "警告: 数据库备份 cron 任务已存在"
     fi
     
     # 立即执行一次备份测试
-    print_blue "执行备份测试..."
+    echo "执行备份测试..."
     "$DEPLOY_DIR/scripts/backup_db.sh"
 }
 
 # 配置磁盘空间管理
 setup_disk_space_management() {
-    print_blue "[阶段7] 配置磁盘空间管理..."
+    echo "[阶段7] 配置磁盘空间管理..."
     
     # 创建磁盘监控脚本
     cat > "$DEPLOY_DIR/scripts/disk_monitor.sh" << 'EOF'
@@ -763,62 +759,62 @@ EOF
     MONITOR_CRON="0 * * * * $DEPLOY_DIR/scripts/disk_monitor.sh"
     if ! crontab -l 2>/dev/null | grep -q "disk_monitor.sh"; then
         (crontab -l 2>/dev/null; echo "$MONITOR_CRON") | crontab -
-        print_green "✓ 磁盘监控 cron 任务已创建（每小时执行一次）"
+        echo "✓ 磁盘监控 cron 任务已创建（每小时执行一次）"
     else
-        print_yellow "警告: 磁盘监控 cron 任务已存在"
+        echo "警告: 磁盘监控 cron 任务已存在"
     fi
     
     # 创建 Docker 清理 cron 任务（每周日凌晨 2 点执行）
     CLEANUP_CRON="0 2 * * 0 $DEPLOY_DIR/scripts/docker_cleanup.sh"
     if ! crontab -l 2>/dev/null | grep -q "docker_cleanup.sh"; then
         (crontab -l 2>/dev/null; echo "$CLEANUP_CRON") | crontab -
-        print_green "✓ Docker 清理 cron 任务已创建（每周日凌晨 2 点执行）"
+        echo "✓ Docker 清理 cron 任务已创建（每周日凌晨 2 点执行）"
     else
-        print_yellow "警告: Docker 清理 cron 任务已存在"
+        echo "警告: Docker 清理 cron 任务已存在"
     fi
     
     # 立即执行一次磁盘监控测试
-    print_blue "执行磁盘监控测试..."
+    echo "执行磁盘监控测试..."
     "$DEPLOY_DIR/scripts/disk_monitor.sh"
 }
 
 # 显示部署信息
 display_deployment_info() {
-    print_blue "=================================================="
-    print_green "部署完成！"
-    print_blue "=================================================="
+    echo "=================================================="
+    echo "部署完成！"
+    echo "=================================================="
     
     # 获取主机 IP
     local HOST_IP=$(hostname -I | awk '{print $1}')
     
-    print_green "访问地址: http://$HOST_IP"
-    print_green ""
-    print_green "部署详情:"
-    print_green "  - 操作系统: $OS_TYPE $OS_VERSION"
-    print_green "  - CPU 核心: $CPU_CORES 核（限制使用: $((CPU_CORES / 2)) 核）"
-    print_green "  - 可用内存: ${AVAILABLE_RAM}MB（限制使用: $((AVAILABLE_RAM / 2))MB）"
-    print_green "  - 部署目录: $DEPLOY_DIR"
-    print_green "  - 备份目录: $BACKUP_DIR"
-    print_green "  - 备份保留: $BACKUP_RETENTION_DAYS 天"
-    print_green ""
-    print_green "数据库信息:"
-    print_green "  - 数据库名: wordpress"
-    print_green "  - 用户名: wordpress"
-    print_green "  - 密码: 请查看 .env 文件中的 MYSQL_PASSWORD"
-    print_green "  - 主机: mariadb"
-    print_green ""
-    print_green "自动化功能:"
-    print_green "  - ✅ 每日数据库自动备份（凌晨 3 点）"
-    print_green "  - ✅ 每小时磁盘空间监控（阈值: 80%）"
-    print_green "  - ✅ 每周 Docker 系统清理（周日凌晨 2 点）"
-    print_green ""
-    print_green "后续步骤:"
-    print_green "1. 打开浏览器访问上述地址"
-    print_green "2. 完成 WordPress 安装向导"
-    print_green "3. 推荐安装 Redis Object Cache 插件启用缓存"
-    print_green ""
-    print_yellow "重要: 请备份 .env 文件，包含所有敏感信息"
-    print_blue "=================================================="
+    echo "访问地址: http://$HOST_IP"
+    echo ""
+    echo "部署详情:"
+    echo "  - 操作系统: $OS_TYPE $OS_VERSION"
+    echo "  - CPU 核心: $CPU_CORES 核（限制使用: $((CPU_CORES / 2)) 核）"
+    echo "  - 可用内存: ${AVAILABLE_RAM}MB（限制使用: $((AVAILABLE_RAM / 2))MB）"
+    echo "  - 部署目录: $DEPLOY_DIR"
+    echo "  - 备份目录: $BACKUP_DIR"
+    echo "  - 备份保留: $BACKUP_RETENTION_DAYS 天"
+    echo ""
+    echo "数据库信息:"
+    echo "  - 数据库名: wordpress"
+    echo "  - 用户名: wordpress"
+    echo "  - 密码: 请查看 .env 文件中的 MYSQL_PASSWORD"
+    echo "  - 主机: mariadb"
+    echo ""
+    echo "自动化功能:"
+    echo "  - ✅ 每日数据库自动备份（凌晨 3 点）"
+    echo "  - ✅ 每小时磁盘空间监控（阈值: 80%）"
+    echo "  - ✅ 每周 Docker 系统清理（周日凌晨 2 点）"
+    echo ""
+    echo "后续步骤:"
+    echo "1. 打开浏览器访问上述地址"
+    echo "2. 完成 WordPress 安装向导"
+    echo "3. 推荐安装 Redis Object Cache 插件启用缓存"
+    echo ""
+    echo "重要: 请备份 .env 文件，包含所有敏感信息"
+    echo "=================================================="
 }
 
 # 主函数
@@ -836,7 +832,7 @@ main() {
     setup_disk_space_management    # 配置磁盘空间管理
     display_deployment_info        # 显示部署信息
     
-    print_green "🎉 WordPress Docker 全栈部署完成！"
+    echo "🎉 WordPress Docker 全栈部署完成！"
 }
 
 # 执行主函数
