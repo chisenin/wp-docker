@@ -1,17 +1,17 @@
 ﻿#!/bin/bash
 
-# WordPress Docker 鑷姩閮ㄧ讲鑴氭湰
-# 鏀硅繘鐗堝姛鑳斤細鑷姩鍒涘缓www-data鐢ㄦ埛/缁勩€?env淇銆丏ocker瀹瑰櫒鍐茬獊娓呯悊
-# 瑙﹀彂GitHub Actions宸ヤ綔娴佹祴璇?
+# WordPress Docker 自动部署脚本
+# 增强版功能：自动创建www-data用户/组、.env修复、Docker容器冲突清理
+# 避免GitHub Actions工作流误触
 set -e
 
-# 鍏ㄥ眬鍙橀噺
+# 全局变量
 DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Create logs directory first to ensure log file can be written
 mkdir -p "$DEPLOY_DIR/logs" 2>/dev/null
 
-# 棰滆壊杈撳嚭鍑芥暟锛堜慨澶嶈娉曢敊璇級
+# 彩色输出函数
 print_blue() {
     echo -e "\033[34m$1\033[0m"
 }
@@ -25,14 +25,14 @@ PHP_MEMORY_LIMIT="512M"
 BACKUP_RETENTION_DAYS=7
 LOG_FILE="$DEPLOY_DIR/logs/deploy.log"
 
-# 閿欒澶勭悊鍑芥暟
+# 错误处理函数
 handle_error() {
-    echo "閿欒: $1" >&2
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 閿欒: $1" >> "$LOG_FILE"
+    echo "错误: $1" >&2
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 错误: $1" >> "$LOG_FILE"
     exit 1
 }
 
-# 璁板綍鏃ュ織
+# 记录日志
 log_message() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
     echo "$1"
@@ -65,44 +65,46 @@ detect_host_environment() {
     log_message "操作系统: $OS_TYPE $OS_VERSION"
 }
 
-# 鐜鍑嗗锛氬垱寤簑ww-data鐢ㄦ埛/缁勩€佷慨澶?env鏂囦欢銆佹竻鐞咲ocker鍐茬獊
+# 环境准备：创建www-data用户/组、修改.env文件、清理docker冲突
 environment_preparation() {
-    log_message "[闃舵2] 鐜鍑嗗..."
+    log_message "[阶段2] 环境准备..."
     
-    # 1. 妫€娴嬪苟鍒涘缓www-data鐢ㄦ埛/缁?    log_message "妫€鏌ュ苟鍒涘缓www-data鐢ㄦ埛/缁?.."
+    # 1. 检查并创建www-data用户/组
+    log_message "检查并创建www-data用户/组.."
     if ! id -u www-data >/dev/null 2>&1; then
-        log_message "鍒涘缓www-data鐢ㄦ埛鍜岀粍..."
-        # 鏍规嵁涓嶅悓绯荤粺鍒涘缓鐢ㄦ埛
+        log_message "创建www-data用户和组..."
+        # 根据不同系统创建用户
         if [[ "$OS_TYPE" == "alpine" ]]; then
-            addgroup -g 33 -S www-data || handle_error "鍒涘缓www-data缁勫け璐?
-            adduser -u 33 -D -S -G www-data www-data || handle_error "鍒涘缓www-data鐢ㄦ埛澶辫触"
+            addgroup -g 33 -S www-data || handle_error "创建www-data组失败"
+            adduser -u 33 -D -S -G www-data www-data || handle_error "创建www-data用户失败"
         else
             groupadd -g 33 www-data 2>/dev/null || :
             useradd -u 33 -g www-data -s /sbin/nologin -M www-data 2>/dev/null || :
         fi
-        log_message "鉁?www-data鐢ㄦ埛/缁勫垱寤烘垚鍔?
+        log_message "✓ www-data用户/组创建成功"
     else
-        log_message "鉁?www-data鐢ㄦ埛宸插瓨鍦?
+        log_message "✓ www-data用户已存在"
     fi
     
-    # 2. 淇.env鏂囦欢
+    # 2. 修复.env文件
     if [ -f "$DEPLOY_DIR/.env" ]; then
-        log_message "淇.env鏂囦欢涓殑鐗规畩瀛楃闂..."
-        # 鍒涘缓涓存椂鏂囦欢
+        log_message "修复.env文件中的特殊字符问题..."
+        # 创建临时文件
         TEMP_FILE="$DEPLOY_DIR/.env.tmp"
-        # 澶嶅埗.env鏂囦欢锛岀‘淇濇墍鏈夊€奸兘鐢ㄥ弻寮曞彿鍖呰９
+        # 复制.env文件，确保所有值用双引号包裹
         while IFS= read -r line || [[ -n "$line" ]]; do
-            # 璺宠繃娉ㄩ噴鍜岀┖琛?            if [[ "$line" == \#* ]] || [[ -z "$line" ]]; then
+            # 跳过注释和空行
+            if [[ "$line" == \#* ]] || [[ -z "$line" ]]; then
                 echo "$line" >> "$TEMP_FILE"
                 continue
             fi
             
-            # 妫€鏌ユ槸鍚﹀凡缁忔湁寮曞彿
+            # 检查是否已经有等号
             if [[ "$line" == *=* ]]; then
                 key="${line%%=*}"
                 value="${line#*=}"
                 
-                # 濡傛灉鍊兼病鏈夎寮曞彿鍖呰９锛屾坊鍔犲弻寮曞彿
+                # 如果值没有被引号包裹，添加双引号
                 if [[ "$value" != \"* && "$value" != \'* ]]; then
                     echo "$key=\"$value\"" >> "$TEMP_FILE"
                 else
@@ -113,27 +115,29 @@ environment_preparation() {
             fi
         done < "$DEPLOY_DIR/.env"
         
-        # 鏇挎崲鍘熸枃浠?        mv "$TEMP_FILE" "$DEPLOY_DIR/.env"
-        log_message "鉁?.env file has been fixed"
+        # 替换原文件
+        mv "$TEMP_FILE" "$DEPLOY_DIR/.env"
+        log_message "✓ .env file has been fixed"
     fi
     
-    # 3. 娓呯悊Docker瀹瑰櫒鍐茬獊
-    log_message "妫€鏌ュ苟娓呯悊Docker瀹瑰櫒鍐茬獊..."
-    # 妫€鏌ユ槸鍚︽湁閲嶅悕瀹瑰櫒鍦ㄨ繍琛?    CONTAINERS=("wp_db" "wp_redis" "wp_php" "wp_nginx")
+    # 3. 清理Docker容器冲突
+    log_message "检查并清理Docker容器冲突..."
+    # 检查是否有重名容器在运行
+    CONTAINERS=("wp_db" "wp_redis" "wp_php" "wp_nginx")
     for container in "${CONTAINERS[@]}"; do
         if docker ps -a | grep -q "$container"; then
             log_message "Detected conflicting container: $container, attempting to stop and remove..."
             docker stop "$container" 2>/dev/null || true
             docker rm "$container" 2>/dev/null || true
-            log_message "鉁?Container $container has been removed"
+            log_message "✓ Container $container has been removed"
         fi
     done
     
-    # 妫€鏌ユ槸鍚︽湁閲嶅悕缃戠粶
+    # 检查是否有重名网络
     if docker network ls | grep -q "wp_network"; then
         log_message "Detected conflicting network: wp_network, attempting to remove..."
         docker network rm wp_network 2>/dev/null || true
-        log_message "鉁?Network wp_network has been removed"
+        log_message "✓ Network wp_network has been removed"
     fi
 }
 
@@ -179,8 +183,9 @@ collect_system_parameters() {
         handle_error "磁盘空间不足，需要至少10GB可用空间"
     fi
     
-    # 妫€鏌ュ唴瀛?    if [[ "$AVAILABLE_RAM" -lt 2048 ]]; then
-        log_message "璀﹀憡: 鍙敤鍐呭瓨浣庝簬2GB锛屽彲鑳藉奖鍝嶆€ц兘"
+    # 检查内存
+    if [[ "$AVAILABLE_RAM" -lt 2048 ]]; then
+        log_message "警告: 可用内存低于2GB，可能影响性能"
     fi
 }
 
@@ -202,152 +207,156 @@ determine_deployment_directory() {
     log_message "部署目录: $DEPLOY_DIR"
 }
 
-# 鐢熸垚瀵嗙爜
+# 生成密码
 generate_password() {
     local length=${1:-16}
-    # 浣跨敤urandom鐢熸垚闅忔満瀵嗙爜
+    # 使用urandom生成随机密码
     local password=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9!@#$%^&*()_+-=[]{}|;:,.<>?~' | head -c "$length")
     echo "$password"
 }
 
-# 鐢熸垚WordPress瀵嗛挜
+# 生成WordPress密钥
 generate_wordpress_keys() {
     local keys=""
     
-    # 鐢熸垚鎵€鏈夐渶瑕佺殑WordPress瀵嗛挜
+    # 生成所有需要的WordPress密钥
     local key_names=("AUTH_KEY" "SECURE_AUTH_KEY" "LOGGED_IN_KEY" "NONCE_KEY" "AUTH_SALT" "SECURE_AUTH_SALT" "LOGGED_IN_SALT" "NONCE_SALT")
     
     for key in "${key_names[@]}"; do
-        # 涓烘瘡涓瘑閽ョ敓鎴?4浣嶉殢鏈哄瓧绗?        local value="$(generate_password 64)"
-        # 纭繚鍊奸兘鐢ㄥ弻寮曞彿鍖呰９
+        # 为每个密钥生成64位随机字符
+        local value="$(generate_password 64)"
+        # 确保值能用双引号包裹
         keys="${keys}${key}=\"${value}\"\n"
     done
     
-    echo "$keys"
+    echo -e "$keys"
 }
 
-# 浼樺寲鍙傛暟
+# 优化参数
 optimize_parameters() {
-    log_message "[闃舵5] 浼樺寲鍙傛暟..."
+    log_message "[阶段5] 优化参数..."
     
-    # 鏍规嵁绯荤粺璧勬簮浼樺寲PHP鍐呭瓨闄愬埗
+    # 根据系统资源优化PHP内存限制
     if [ "$AVAILABLE_RAM" -lt 2048 ]; then
         PHP_MEMORY_LIMIT="256M"
     elif [ "$AVAILABLE_RAM" -gt 4096 ]; then
         PHP_MEMORY_LIMIT="1024M"
     fi
     
-    log_message "PHP鍐呭瓨闄愬埗: $PHP_MEMORY_LIMIT"
+    log_message "PHP内存限制: $PHP_MEMORY_LIMIT"
     
-    # 鐢熸垚.env鏂囦欢锛堝鏋滀笉瀛樺湪锛?    if [ ! -f ".env" ]; then
-        log_message "鐢熸垚.env鏂囦欢..."
+    # 生成.env文件(如果不存在)
+    if [ ! -f ".env" ]; then
+        log_message "生成.env文件..."
         
-        # 鐢熸垚瀵嗙爜
+        # 生成密码
         MYSQL_ROOT_PASSWORD="$(generate_password 20)"
         MYSQL_PASSWORD="$(generate_password 20)"
         REDIS_PASSWORD="$(generate_password 20)"
         
-        # 鐢熸垚WordPress瀵嗛挜
+        # 生成WordPress密钥
         wp_keys="$(generate_wordpress_keys)"
         
-        # 瀹氫箟鐗堟湰
+        # 定义版本
         PHP_VERSION="8.1"
         NGINX_VERSION="1.24"
         MARIADB_VERSION="10.11"
         REDIS_VERSION="7.0"
         
-        # 鍒涘缓.env鏂囦欢
+        # 创建.env文件
         cat > .env << EOF
-# Docker閰嶇疆
+# Docker配置
 COMPOSE_PROJECT_NAME=wp_docker
 
-# 鏁版嵁搴撻厤缃?MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD"
+# 数据库配置
+MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD"
 MYSQL_DATABASE="wordpress"
 MYSQL_USER="wordpress"
 MYSQL_PASSWORD="$MYSQL_PASSWORD"
 
-# WordPress閰嶇疆
+# WordPress配置
 WORDPRESS_DB_HOST="mariadb"
 WORDPRESS_DB_USER="wordpress"
 WORDPRESS_DB_PASSWORD="$MYSQL_PASSWORD"
 WORDPRESS_DB_NAME="wordpress"
 WORDPRESS_TABLE_PREFIX="wp_"
 
-# Redis閰嶇疆
+# Redis配置
 REDIS_HOST="redis"
 REDIS_PASSWORD="$REDIS_PASSWORD"
 
-# 璧勬簮闄愬埗
+# 资源限制
 MEMORY_LIMIT="$((AVAILABLE_RAM / 2))m"
 CPU_LIMIT="$((CPU_CORES / 2))"
 
-# 闀滃儚鐗堟湰
+# 镜像版本
 PHP_VERSION="$PHP_VERSION"
 NGINX_VERSION="$NGINX_VERSION"
 MARIADB_VERSION="$MARIADB_VERSION"
 REDIS_VERSION="$REDIS_VERSION"
 
-# 澶囦唤淇濈暀澶╂暟
+# 备份保留天数
 BACKUP_RETENTION_DAYS="$BACKUP_RETENTION_DAYS"
 
-# WordPress瀹夊叏瀵嗛挜
+# WordPress安全密钥
 $wp_keys
 EOF
         
-        log_message "鉁?.env鏂囦欢鐢熸垚瀹屾垚"
+        log_message "✓ .env文件生成完成"
     else
-        log_message "璀﹀憡: .env鏂囦欢宸插瓨鍦紝浣跨敤鐜版湁閰嶇疆"
-        # 浠?env鏂囦欢鍔犺浇鐜鍙橀噺
+        log_message "警告: .env文件已存在，使用现有配置"
+        # 从.env文件加载环境变量
         source .env
     fi
 }
 
-# 鏉冮檺璁剧疆
+# 权限设置
 set_permissions() {
-    log_message "[闃舵6] 璁剧疆鏉冮檺..."
+    log_message "[阶段6] 设置权限..."
     
-    # 璁剧疆鐩綍鏉冮檺
-    log_message "璁剧疆閮ㄧ讲鐩綍鏉冮檺..."
+    # 设置目录权限
+    log_message "设置部署目录权限..."
     chown -R www-data:www-data "$DEPLOY_DIR/html" 2>/dev/null || :
     chmod -R 755 "$DEPLOY_DIR/html" 2>/dev/null || :
     
-    # 璁剧疆澶囦唤鐩綍鏉冮檺
+    # 设置备份目录权限
     chmod 700 "$DEPLOY_DIR/backups" 2>/dev/null || :
     
-    # 璁剧疆鑴氭湰鏉冮檺
+    # 设置脚本权限
     chmod +x "$DEPLOY_DIR/scripts"/* 2>/dev/null || :
     
-    log_message "鉁?鏉冮檺璁剧疆瀹屾垚"
+    log_message "✓ 权限设置完成"
 }
 
-# 鏃у鍣ㄦ竻鐞?cleanup_old_containers() {
-    log_message "[闃舵7] 娓呯悊鏃у鍣?.."
+# 容器清理
+cleanup_old_containers() {
+    log_message "[阶段7] 清理容器.."
     
-    # 鍋滄骞剁Щ闄ゆ棫鐨凞ocker瀹瑰櫒
-    log_message "妫€鏌ユ棫鐨凞ocker瀹瑰櫒..."
+    # 停止并移除旧的Docker容器
+    log_message "检查旧的Docker容器..."
     
-    # 妫€鏌ュ苟鍋滄鐩稿叧鏈嶅姟
+    # 检查并停止相关服务
     if docker-compose ps | grep -q "Up"; then
-        log_message "鍋滄鐜版湁鏈嶅姟..."
-        docker-compose down --remove-orphans || log_message "璀﹀憡: 鍋滄鏈嶅姟鏃跺嚭鐜伴棶棰?
+        log_message "停止现有服务..."
+        docker-compose down --remove-orphans || log_message "警告: 停止服务时出现问题"
     fi
     
-    # 娓呯悊鎮┖闀滃儚
+    # 清理悬空镜像
     if [ "$(docker images -f "dangling=true" -q)" != "" ]; then
-        log_message "娓呯悊鎮┖闀滃儚..."
+        log_message "清理悬空镜像..."
         docker rmi $(docker images -f "dangling=true" -q) 2>/dev/null || :
     fi
     
-    log_message "鉁?鏃у鍣ㄦ竻鐞嗗畬鎴?
+    log_message "✓ 容器清理完成"
 }
 
-# 闀滃儚鏋勫缓
+# 镜像构建
 build_images() {
-    log_message "[闃舵8] 鏋勫缓闀滃儚..."
+    log_message "[阶段8] 构建镜像..."
     
-    # 妫€鏌ocker-compose.yml鏂囦欢鏄惁瀛樺湪
+    # 检查docker-compose.yml文件是否存在
     if [ ! -f "docker-compose.yml" ]; then
-        log_message "鐢熸垚docker-compose.yml鏂囦欢..."
+        log_message "生成docker-compose.yml文件..."
         
         cat > docker-compose.yml << EOF
 version: '3.8'
@@ -466,31 +475,32 @@ volumes:
 EOF
     fi
     
-    # 鏋勫缓闀滃儚
-    log_message "鏋勫缓Docker闀滃儚..."
+    # 构建镜像
+    log_message "构建Docker镜像..."
     docker-compose build
     
-    log_message "鉁?闀滃儚鏋勫缓瀹屾垚"
+    log_message "✓ 镜像构建完成"
 }
 
-# 鐢熸垚閰嶇疆鏂囦欢
+# 生成配置文件
 generate_configs() {
-    log_message "[闃舵9] 鐢熸垚閰嶇疆鏂囦欢..."
+    log_message "[阶段9] 生成配置文件..."
     
-    # 鐢熸垚Nginx閰嶇疆
+    # 生成Nginx配置
     if [ ! -f "configs/nginx.conf" ]; then
-        log_message "鐢熸垚Nginx閰嶇疆鏂囦欢..."
+        log_message "生成Nginx配置文件..."
         
-        # 鏍规嵁CPU鏍稿績鏁颁紭鍖杦orker_processes
+        # 根据CPU核心数优化worker_processes
         local worker_processes="auto"
         if [[ "$OS_TYPE" == "alpine" ]]; then
             worker_processes="$(nproc)"
         fi
         
-        # 鍒涘缓nginx閰嶇疆鐩綍
+        # 创建nginx配置目录
         mkdir -p configs/conf.d
         
-        # 涓婚厤缃枃浠?        cat > configs/nginx.conf << EOF
+        # 主配置文件
+        cat > configs/nginx.conf << EOF
 user  nginx;
 worker_processes  $worker_processes;
 
@@ -522,7 +532,7 @@ http {
 }
 EOF
         
-        # 绔欑偣閰嶇疆鏂囦欢
+        # 站点配置文件
         cat > configs/conf.d/default.conf << EOF
 server {
     listen 80;
@@ -556,16 +566,16 @@ server {
 }
 EOF
         
-        log_message "鉁?Nginx 閰嶇疆鏂囦欢鐢熸垚瀹屾垚"
+        log_message "✓ Nginx 配置文件生成完成"
     else
-        log_message "璀﹀憡: Nginx 閰嶇疆鏂囦欢宸插瓨鍦紝璺宠繃鐢熸垚"
+        log_message "警告: Nginx 配置文件已存在，跳过生成"
     fi
     
-    # 鐢熸垚 PHP 閰嶇疆鏂囦欢
+    # 生成 PHP 配置文件
     if [ ! -f "configs/php.ini" ]; then
-        log_message "鐢熸垚 PHP 閰嶇疆鏂囦欢..."
+        log_message "生成 PHP 配置文件..."
         
-        # 鏍规嵁鍐呭瓨澶у皬璋冩暣 opcache 閰嶇疆
+        # 根据内存大小调整 opcache 配置
         local opcache_memory="128"
         if [ "$AVAILABLE_RAM" -lt 2048 ]; then
             opcache_memory="64"
@@ -597,22 +607,22 @@ opcache.revalidate_freq = 60
 opcache.fast_shutdown = 1
 EOF
         
-        log_message "鉁?PHP 閰嶇疆鏂囦欢鐢熸垚瀹屾垚"
+        log_message "✓ PHP 配置文件生成完成"
     else
-        log_message "璀﹀憡: PHP 閰嶇疆鏂囦欢宸插瓨鍦紝璺宠繃鐢熸垚"
+        log_message "警告: PHP 配置文件已存在，跳过生成"
     fi
 }
 
-# 鏈嶅姟鍚姩
+# 服务启动
 start_services() {
-    log_message "[闃舵10] 鍚姩鏈嶅姟..."
+    log_message "[阶段10] 启动服务..."
     
-    # 涓嬭浇 WordPress锛堝鏋滈渶瑕侊級
+    # 下载 WordPress(如果需要)
     if [ ! -f "html/wp-config.php" ]; then
         if [ -z "$(ls -A html 2>/dev/null)" ]; then
-            log_message "涓嬭浇 WordPress 鏈€鏂扮増鏈?.."
+            log_message "下载 WordPress 最新版本.."
             
-            # 涓嬭浇骞惰В鍘?WordPress
+            # 下载并解压 WordPress
             local temp_file="/tmp/wordpress-latest.tar.gz"
             
             if command -v wget >/dev/null; then
@@ -622,160 +632,170 @@ start_services() {
             fi
             
             if [ -f "$temp_file" ]; then
-                # 瑙ｅ帇鍒?html 鐩綍
+                # 解压到 html 目录
                 tar -xzf "$temp_file" -C .
                 mv wordpress/* html/
                 rm -rf wordpress "$temp_file"
                 
-                # 璁剧疆鏉冮檺
-                log_message "璁剧疆鏂囦欢鏉冮檺..."
+                # 设置权限
+                log_message "设置文件权限..."
                 chown -R www-data:www-data html
                 
-                log_message "鉁?WordPress 涓嬭浇骞惰В鍘嬪畬鎴?
+                log_message "✓ WordPress 下载并解压完成"
             else
-                log_message "璀﹀憡: WordPress 涓嬭浇澶辫触锛岃鎵嬪姩涓嬭浇骞惰В鍘嬪埌 html 鐩綍"
+                log_message "警告: WordPress 下载失败，请手动下载并解压到 html 目录"
             fi
         else
-            log_message "鉁?html 鐩綍宸插瓨鍦ㄥ唴瀹癸紝璺宠繃 WordPress 涓嬭浇"
+            log_message "✓ html 目录已存在内容，跳过 WordPress 下载"
         fi
     else
-        log_message "鉁?WordPress 閰嶇疆鏂囦欢宸插瓨鍦紝璺宠繃涓嬭浇"
+        log_message "✓ WordPress 配置文件已存在，跳过下载"
     fi
     
-    # 鍚姩鏈嶅姟
-    log_message "鍚姩 Docker 鏈嶅姟..."
+    # 启动服务
+    log_message "启动 Docker 服务..."
     docker-compose up -d
     
-    # 绛夊緟鏈嶅姟鍚姩
-    log_message "绛夊緟鏈嶅姟鍒濆鍖?.."
+    # 等待服务启动
+    log_message "等待服务初始化..."
     sleep 10
     
-    # 妫€鏌ユ湇鍔＄姸鎬?    log_message "妫€鏌ユ湇鍔＄姸鎬?.."
+    # 检查服务状态
+    log_message "检查服务状态.."
     docker-compose ps
     
-    # 楠岃瘉閮ㄧ讲鏄惁鎴愬姛
+    # 验证部署是否成功
     if [ "$(docker-compose ps -q | wc -l)" -eq "4" ]; then
-        log_message "鉁?WordPress Docker 鏍堥儴缃叉垚鍔?
+        log_message "✓ WordPress Docker 版部署成功"
     else
-        log_message "鉁?WordPress Docker 鏍堥儴缃插け璐ワ紝璇锋鏌ユ棩蹇?
+        log_message "✓ WordPress Docker 版部署失败，请检查日志"
         docker-compose logs --tail=50
     fi
 }
 
-# 澶囦唤閰嶇疆
+# 备份配置
 setup_backup_config() {
-    log_message "[闃舵11] 璁剧疆澶囦唤閰嶇疆..."
+    log_message "[阶段11] 设置备份配置..."
     
-    # 鍒涘缓澶囦唤鑴氭湰
+    # 创建备份脚本
     cat > "$DEPLOY_DIR/scripts/backup_db.sh" << 'EOF'
 #!/bin/bash
 
-# 鑾峰彇鑴氭湰鎵€鍦ㄧ洰褰曠殑鐖剁洰褰?DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 获取脚本所在目录的父目录
+DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKUP_DIR="$DEPLOY_DIR/backups"
 
-# 浠?.env 鏂囦欢鍔犺浇鐜鍙橀噺
+# 从 .env 文件加载环境变量
 if [ -f "$DEPLOY_DIR/.env" ]; then
-    # 鍙鍑洪渶瑕佺殑鏁版嵁搴撶浉鍏崇幆澧冨彉閲?    export $(grep -E '^MYSQL_|^BACKUP_RETENTION_DAYS' "$DEPLOY_DIR/.env" | xargs)
+    # 只导出需要的数据库相关环境变量
+    export $(grep -E '^MYSQL_|^BACKUP_RETENTION_DAYS' "$DEPLOY_DIR/.env" | xargs)
 fi
 
-# 璁剧疆榛樿鍊?MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-default_password}
+# 设置默认值
+MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-default_password}
 MYSQL_DATABASE=${MYSQL_DATABASE:-wordpress}
 BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
 
-# 鍒涘缓澶囦唤鏂囦欢
+# 创建备份文件
 BACKUP_FILE="$BACKUP_DIR/db-$(date +%Y%m%d_%H%M%S).sql.gz"
 
-echo "寮€濮嬪浠芥暟鎹簱: $MYSQL_DATABASE"
+echo "开始备份数据库: $MYSQL_DATABASE"
 
-# 鎵ц澶囦唤
+# 执行备份
 docker exec -t wp_db mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" | gzip > "$BACKUP_FILE"
 
 if [ $? -eq 0 ]; then
-    echo "鉁?鏁版嵁搴撳浠芥垚鍔? $BACKUP_FILE"
+    echo "✓ 数据库备份成功: $BACKUP_FILE"
     
-    # 鍒犻櫎鏃у浠?    echo "娓呯悊 $BACKUP_RETENTION_DAYS 澶╁墠鐨勫浠?.."
+    # 删除旧备份
+    echo "清理 $BACKUP_RETENTION_DAYS 天前的备份.."
     find "$BACKUP_DIR" -name "db-*.sql.gz" -mtime +"$BACKUP_RETENTION_DAYS" -delete
-    echo "鉁?鏃у浠芥竻鐞嗗畬鎴?
+    echo "✓ 旧备份清理完成"
 else
-    echo "鉁?鏁版嵁搴撳浠藉け璐?
+    echo "✓ 数据库备份失败"
 fi
 EOF
     
-    # 璁剧疆鎵ц鏉冮檺
+    # 设置执行权限
     chmod +x "$DEPLOY_DIR/scripts/backup_db.sh"
     
-    # 鍒涘缓 cron 浠诲姟
+    # 创建 cron 任务
     CRON_JOB="0 3 * * * $DEPLOY_DIR/scripts/backup_db.sh >> $DEPLOY_DIR/logs/backup.log 2>&1"
     
-    # 妫€鏌ユ槸鍚﹀凡瀛樺湪鐩稿悓鐨?cron 浠诲姟
+    # 检查是否已存在相同的 cron 任务
     if ! crontab -l 2>/dev/null | grep -q "backup_db.sh"; then
-        # 娣诲姞鍒?cron
+        # 添加到 cron
         (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
-        log_message "鉁?鏁版嵁搴撳浠?cron 浠诲姟宸插垱寤猴紙姣忓ぉ鍑屾櫒 3 鐐规墽琛岋級"
+        log_message "✓ 数据库备份 cron 任务已创建(每天凌晨 3 点执行)"
     else
-        log_message "璀﹀憡: 鏁版嵁搴撳浠?cron 浠诲姟宸插瓨鍦?
+        log_message "警告: 数据库备份 cron 任务已存在"
     fi
     
-    # 绔嬪嵆鎵ц涓€娆″浠芥祴璇?    log_message "鎵ц澶囦唤娴嬭瘯..."
+    # 立即执行一次备份测试
+    log_message "执行备份测试..."
     "$DEPLOY_DIR/scripts/backup_db.sh"
 }
 
-# 鏄剧ず閮ㄧ讲淇℃伅
+# 显示部署信息
 display_deployment_info() {
     log_message "=================================================="
-    log_message "閮ㄧ讲瀹屾垚锛?
+    log_message "部署完成!"
     log_message "=================================================="
     
-    # 鑾峰彇涓绘満 IP
+    # 获取主机 IP
     local HOST_IP=$(hostname -I | awk '{print $1}')
     
-    log_message "璁块棶鍦板潃: http://$HOST_IP"
+    log_message "访问地址: http://$HOST_IP"
     log_message ""
-    log_message "閮ㄧ讲璇︽儏:"
-    log_message "  - 鎿嶄綔绯荤粺: $OS_TYPE $OS_VERSION"
-    log_message "  - CPU 鏍稿績: $CPU_CORES 鏍革紙闄愬埗浣跨敤: $((CPU_CORES / 2)) 鏍革級"
-    log_message "  - 鍙敤鍐呭瓨: ${AVAILABLE_RAM}MB锛堥檺鍒朵娇鐢? $((AVAILABLE_RAM / 2))MB锛?
-    log_message "  - 閮ㄧ讲鐩綍: $DEPLOY_DIR"
-    log_message "  - 澶囦唤鐩綍: $DEPLOY_DIR/backups"
-    log_message "  - 澶囦唤淇濈暀: $BACKUP_RETENTION_DAYS 澶?
+    log_message "部署详情:"
+    log_message "  - 操作系统: $OS_TYPE $OS_VERSION"
+    log_message "  - CPU 核心: $CPU_CORES 核(限制使用: $((CPU_CORES / 2)) 核)"
+    log_message "  - 可用内存: ${AVAILABLE_RAM}MB(限制使用: $((AVAILABLE_RAM / 2))MB)"
+    log_message "  - 部署目录: $DEPLOY_DIR"
+    log_message "  - 备份目录: $DEPLOY_DIR/backups"
+    log_message "  - 备份保留: $BACKUP_RETENTION_DAYS 天"
     log_message ""
-    log_message "鏁版嵁搴撲俊鎭?"
-    log_message "  - 鏁版嵁搴撳悕: wordpress"
-    log_message "  - 鐢ㄦ埛鍚? wordpress"
-    log_message "  - 瀵嗙爜: 璇锋煡鐪?.env 鏂囦欢涓殑 MYSQL_PASSWORD"
-    log_message "  - 涓绘満: mariadb"
+    log_message "数据库信息"
+    log_message "  - 数据库名: wordpress"
+    log_message "  - 用户名: wordpress"
+    log_message "  - 密码: 请查看 .env 文件中的 MYSQL_PASSWORD"
+    log_message "  - 主机: mariadb"
     log_message ""
-    log_message "鑷姩鍖栧姛鑳?"
-    log_message "  - 鉁?姣忔棩鏁版嵁搴撹嚜鍔ㄥ浠斤紙鍑屾櫒 3 鐐癸級"
-    log_message "  - 鉁?鏉冮檺鑷姩璁剧疆"
-    log_message "  - 鉁?鐜鑷姩淇"
-    log_message "  - 鉁?瀹瑰櫒鍐茬獊鑷姩娓呯悊"
+    log_message "自动化功能"
+    log_message "  - ✓ 每天数据库自动备份(凌晨 3 点)"
+    log_message "  - ✓ 权限自动设置"
+    log_message "  - ✓ 环境自动修复"
+    log_message "  - ✓ 容器冲突自动清理"
     log_message ""
-    log_message "鍚庣画姝ラ:"
-    log_message "1. 鎵撳紑娴忚鍣ㄨ闂笂杩板湴鍧€"
-    log_message "2. 瀹屾垚 WordPress 瀹夎鍚戝"
-    log_message "3. 鎺ㄨ崘瀹夎 Redis Object Cache 鎻掍欢鍚敤缂撳瓨"
+    log_message "后续步骤:"
+    log_message "1. 打开浏览器访问上述地址"
+    log_message "2. 完成 WordPress 安装向导"
+    log_message "3. 建议安装 Redis Object Cache 插件启用缓存"
     log_message ""
-    log_message "閲嶈: 璇峰浠?.env 鏂囦欢锛屽寘鍚墍鏈夋晱鎰熶俊鎭?
+    log_message "重要: 请备份 .env 文件，包含所有敏感信息"
     log_message "=================================================="
 }
 
-# 涓诲嚱鏁?main() {
-    log_message "馃殌 寮€濮?WordPress Docker 鑷姩閮ㄧ讲..."
+# 主函数
+main() {
+    log_message "馃殌 开始 WordPress Docker 自动部署..."
     
-    # 鎵ц鍚勯樁娈?    detect_host_environment       # 妫€娴嬪涓绘満鐜
-    environment_preparation       # 鐜鍑嗗
-    collect_system_parameters     # 鏀堕泦绯荤粺鍙傛暟
-    determine_deployment_directory # 纭畾閮ㄧ讲鐩綍
-    optimize_parameters           # 浼樺寲鍙傛暟
-    set_permissions              # 鏉冮檺璁剧疆
-    cleanup_old_containers       # 鏃у鍣ㄦ竻鐞?    generate_configs             # 鐢熸垚閰嶇疆鏂囦欢
-    build_images                 # 闀滃儚鏋勫缓
-    start_services               # 鏈嶅姟鍚姩
-    setup_backup_config          # 澶囦唤閰嶇疆
-    display_deployment_info      # 鏄剧ず閮ㄧ讲淇℃伅
+    # 执行各阶段
+    detect_host_environment       # 检测主机环境
+    environment_preparation       # 环境准备
+    collect_system_parameters     # 收集系统参数
+    determine_deployment_directory # 确定部署目录
+    optimize_parameters           # 优化参数
+    set_permissions               # 权限设置
+    cleanup_old_containers        # 容器清理
+    generate_configs              # 生成配置文件
+    build_images                  # 镜像构建
+    start_services                # 服务启动
+    setup_backup_config           # 备份配置
+    display_deployment_info       # 显示部署信息
     
-    log_message "馃帀 WordPress Docker 鍏ㄦ爤閮ㄧ讲瀹屾垚锛?
+    log_message "馃帀 WordPress Docker 全栈部署完成!"
 }
 
-# 鎵ц涓诲嚱鏁?main
+# 执行主函数
+main
