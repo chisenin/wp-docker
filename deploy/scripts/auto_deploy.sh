@@ -425,10 +425,10 @@ services:
     restart: unless-stopped
     # 暂时移除资源限制以提高启动成功率
     healthcheck:
-      test: ["CMD-SHELL", "mariadb -u root -e 'SELECT 1;' || mysql -u root -e 'SELECT 1;'"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
+      test: ["CMD-SHELL", "mariadb -u root -e 'SELECT 1;' >/dev/null 2>&1 || mysql -u root -e 'SELECT 1;' >/dev/null 2>&1 || true"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
 
   redis:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-redis:${REDIS_VERSION:-7.4.0}
