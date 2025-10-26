@@ -433,7 +433,7 @@ services:
     container_name: redis
     volumes:
       - ./redis:/data
-    command: redis-server --requirepass ${REDIS_PASSWORD:-redispassword} --maxmemory ${MEMORY_PER_SERVICE:-256}mb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redispassword} --maxmemory ${MEMORY_PER_SERVICE:-256}mb --maxmemory-policy allkeys-lru --delayed-fsync 0 --replica-read-only yes
     restart: always
     deploy:
       resources:
