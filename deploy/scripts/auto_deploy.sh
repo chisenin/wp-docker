@@ -296,6 +296,7 @@ CPU_LIMIT=$CPU_LIMIT
 MEM_LIMIT=${MEM_LIMIT}MB
 PHP_MEMORY_LIMIT=$PHP_MEMORY_LIMIT
 UPLOAD_MAX_FILESIZE=64M
+PHP_INI_PATH=./deploy/configs/php.ini
 
 # WordPress 密钥 - 以键值对格式存储，确保 python-dotenv 能够正确读取
 $wp_keys_lines
@@ -322,6 +323,19 @@ EOF
         # 确保 CPU_LIMIT 有效
         if [ -z "$CPU_LIMIT" ] || [ "$CPU_LIMIT" -eq 0 ]; then
             CPU_LIMIT=1
+        fi
+        
+        # 验证PHP配置文件是否存在且为文件类型
+        PHP_INI_PATH=${PHP_INI_PATH:-./deploy/configs/php.ini}
+        if [ ! -f "$PHP_INI_PATH" ]; then
+            print_yellow "警告: PHP配置文件 $PHP_INI_PATH 不存在或不是文件"
+            # 确保目录存在
+            mkdir -p "$(dirname "$PHP_INI_PATH")"
+            # 创建默认的php.ini文件
+            echo "[PHP]" > "$PHP_INI_PATH"
+            echo "memory_limit = ${PHP_MEMORY_LIMIT:-512M}" >> "$PHP_INI_PATH"
+            echo "upload_max_filesize = ${UPLOAD_MAX_FILESIZE:-64M}" >> "$PHP_INI_PATH"
+            print_green "已创建默认的php.ini配置文件"
         fi
         
         # 生成 docker-compose.yml 文件
@@ -353,7 +367,7 @@ services:
     container_name: php
     volumes:
       - ./html:/var/www/html
-      - ./configs/php.ini:/usr/local/etc/php/php.ini
+      - ${PHP_INI_PATH:-./deploy/configs/php.ini}:/usr/local/etc/php/php.ini:ro
     depends_on:
       - mariadb
       - redis
