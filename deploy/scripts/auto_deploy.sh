@@ -12,9 +12,10 @@ prepare_host_environment() {
     echo "------------------------------------------------"
     echo "检查并准备宿主机环境..."
     echo "------------------------------------------------"
-    # 1. 检查 vm.overcommit_memory 设置 (仅影响宿主机，对容器是额外保障)
-    echo -n "检查宿主机 vm.overcommit_memory 设置... "
-    CURRENT_OVERCOMMIT=$(sysctl -n vm.overcommit_memory 2>/dev/null || echo "0")
+    echo "注意: 当前运行在 LXC 容器中，修改内核参数需要特殊处理..."
+    # 1. 修复 vm.overcommit_memory (使用 /proc/sys)
+    echo -n "检查 vm.overcommit_memory 设置... "
+    CURRENT_OVERCOMMIT=$(cat /proc/sys/vm/overcommit_memory 2>/dev/null || echo "0")
     
     # 检查 sudo 是否可用
     SUDO_AVAILABLE=true
@@ -22,40 +23,35 @@ prepare_host_environment() {
         SUDO_AVAILABLE=false
     fi
     
-    if [ "$CURRENT_OVERCOMMIT" -ne 1 ]; then
-        echo "当前值为 $CURRENT_OVERCOMMIT，建议设置为 1 以优化 Redis 性能并避免错误。"
-        
-        # 尝试临时生效（如果有 sudo 权限）
-        if [ "$SUDO_AVAILABLE" = true ] && sudo sysctl -w vm.overcommit_memory=1 > /dev/null 2>&1; then
-            echo "✓ 已临时在当前会话中设置为 1。"
+    if [ "$CURRENT_OVERCOMMIT" -ne "1" ]; then
+        echo "当前值为 $CURRENT_OVERCOMMIT，必须设置为 1。"
+        # 尝试通过写入 /proc/sys 来实时修改
+        if [ "$SUDO_AVAILABLE" = true ] && echo 1 | sudo tee /proc/sys/vm/overcommit_memory > /dev/null 2>&1; then
+            echo "✓ 已通过 /proc/sys 临时设置为 1。"
         else
-            echo "⚠️  提示: 未设置 vm.overcommit_memory=1，这可能影响 Redis 性能。"
-        fi
-        
-        # 针对不同系统确定配置文件位置
-        SYSCTL_CONF="/etc/sysctl.conf"
-        if [ "$OS_TYPE" = "alpine" ]; then
-            # Alpine 使用 /etc/sysctl.d/ 目录
-            mkdir -p /etc/sysctl.d 2>/dev/null || true
-            SYSCTL_CONF="/etc/sysctl.d/99-redis.conf"
-        fi
-        
-        # 尝试永久生效（如果有 sudo 权限）
-        if ! grep -q "^vm.overcommit_memory" "$SYSCTL_CONF" 2>/dev/null; then
-            if [ "$SUDO_AVAILABLE" = true ] && echo "vm.overcommit_memory = 1" | sudo tee -a "$SYSCTL_CONF" > /dev/null 2>&1; then
-                echo "✓ 已写入配置到 $SYSCTL_CONF。"
-                echo "⚠️  重要提示: 为了让修改永久生效，请手动在宿主机上运行以下命令，然后重新运行此脚本:"
-                if [ "$OS_TYPE" = "alpine" ]; then
-                    echo "    sudo sysctl --system"
-                else
-                    echo "    sudo sysctl -p"
-                fi
-                echo ""
+            # 如果 sudo 不可用或失败，尝试直接写入（需要特权）
+            if echo 1 > /proc/sys/vm/overcommit_memory 2>/dev/null; then
+                 echo "✓ 已直接写入 /proc/sys 设置为 1。"
             else
-                echo "⚠️  提示: 无法写入配置文件。建议手动设置 vm.overcommit_memory=1 以优化 Redis 性能。"
+                echo "✗ 失败。当前用户无权限修改内核参数。"
+                echo "⚠️  CRITICAL: Redis 服务可能会失败。请联系宿主机管理员设置 vm.overcommit_memory=1。"
             fi
-        else
-            echo "✓ $SYSCTL_CONF 中已存在该配置。"
+        fi
+        
+        # 尝试永久生效（如果可以访问宿主机文件系统）
+        if [ "$SUDO_AVAILABLE" = true ]; then
+            echo "尝试写入 /etc/sysctl.conf 永久生效..."
+            if ! grep -q "^vm.overcommit_memory" /etc/sysctl.conf 2>/dev/null; then
+                if echo "vm.overcommit_memory = 1" | sudo tee -a /etc/sysctl.conf > /dev/null 2>&1; then
+                    echo "✓ 已写入 /etc/sysctl.conf。"
+                else
+                    echo "✗ 无法写入 /etc/sysctl.conf。"
+                fi
+            else
+                echo "✓ /etc/sysctl.conf 中已存在该配置。"
+            fi
+            # 尝试加载 sysctl 配置
+            sudo sysctl -p > /dev/null 2>&1 || echo "⚠️  无法执行 'sudo sysctl -p'。"
         fi
     else
         echo "✓ 正确 (值为 $CURRENT_OVERCOMMIT)。"
@@ -493,8 +489,8 @@ services:
       mariadb:
         condition: service_started
     restart: unless-stopped
-    # === 修复：使用命令数组格式，兼容 Alpine ===
-    command: ["/docker-entrypoint.sh", "nginx", "-g", "daemon off;"]
+    # === 最终修复：使用 sh -c 包装包含空格的命令，完美兼容 busybox ===
+    command: ["/bin/sh", "-c", "/docker-entrypoint.sh nginx -g 'daemon off;'"]
     # === 关键修复：使用 curl 检查 HTTP 服务是否真正可用 ===
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/"] # 访问根路径，检查 Nginx 是否能返回 HTTP 200
@@ -510,15 +506,13 @@ services:
       - ${PHP_INI_PATH:-./deploy/configs/php.ini}:/usr/local/etc/php/php.ini:ro
     restart: unless-stopped
     command: ["php-fpm"]
-    # === 关键修复：通过检查 PHP-FPM 的 status 页面来验证其与 Nginx 的通信 ===
+    # === 最终修复：检查 php-fpm 主进程是否存在，这是最可靠的检查方式 ===
     healthcheck:
-      # 我们创建一个临时配置来开启 status 页面，或者假设镜像已经包含它
-      # 这是一个更健壮的检查方式，比 `php -v` 更有效
-      test: ["CMD-SHELL", "curl -s --fail http://localhost:9000/status | grep 'Processes active' || exit 1"]
+      test: ["CMD-SHELL", "pgrep -f 'php-fpm: master process' > /dev/null"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s # PHP-FPM 可能需要时间来解析配置
+      start_period: 40s
   mariadb:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-mariadb:${MARIADB_VERSION:-11.3.2}
     container_name: mariadb
@@ -533,9 +527,9 @@ services:
       - ./mysql:/var/lib/mysql
       - ./logs/mariadb:/var/log/mysql
     restart: unless-stopped
-    # 保持原有的健康检查，但延长启动等待时间
+    # === 最终修复：使用 mariadb-admin 进行健康检查，这是更现代和推荐的方式 ===
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost --user=\$MYSQL_USER --password=\$MYSQL_PASSWORD"]
+      test: ["CMD-SHELL", "command -v mariadb-admin >/dev/null && mariadb-admin ping -h localhost --user=\$MYSQL_USER --password=\$MYSQL_PASSWORD || mysqladmin ping -h localhost --user=\$MYSQL_USER --password=\$MYSQL_PASSWORD"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -547,6 +541,9 @@ services:
       - ./redis:/data
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redispassword}", "--maxmemory", "${MEMORY_PER_SERVICE:-256}mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "yes"]
     restart: unless-stopped
+    # === 关键修复：在容器级别再次强制应用 sysctl，作为双重保险 ===
+    sysctls:
+      - vm.overcommit_memory=1
     # 健康检查本身是正确的，但延长启动等待时间
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redispassword}", "ping"]
@@ -729,6 +726,25 @@ EOF
         fi
     fi
 
+    # 配置文件权限和用户...
+    print_blue "配置文件权限和用户..."
+    # 1. 设置 html 目录权限，www-data (UID 33) 是 Nginx 和 PHP 的用户
+    # 在Alpine容器中直接使用UID，避免用户名查找问题
+    docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R 33:33 /var/www/html
+    # 2. 设置日志目录权限，mysql (UID 99) 是 MariaDB 的用户
+    docker run --rm -v "$(pwd)/logs/mariadb:/var/log/mysql" alpine:latest chown -R 99:99 /var/log/mysql
+    docker run --rm -v "$(pwd)/logs/nginx:/var/log/nginx" alpine:latest chown -R 33:33 /var/log/nginx
+    # 3. 确保 .env 文件能被正确 source
+    set -a
+    # .env 文件可能不在脚本所在目录，使用绝对路径或相对路径确保能找到
+    if [ -f ".env" ]; then
+        source .env
+    else
+        print_red "错误: .env 文件不存在!"
+        exit 1
+    fi
+    set +a
+    
     # 启动 Docker 容器
     print_blue "启动 Docker 容器..."
     docker-compose up -d
