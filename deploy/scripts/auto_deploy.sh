@@ -132,20 +132,21 @@ collect_system_parameters() {
     
     # 安装必要的工�?    if [ "$OS_TYPE" = "ubuntu" ] || [ "$OS_TYPE" = "debian" ]; then
         if command -v apt-get >/dev/null; then
-            print_yellow "更新软件包列�?.."
+            print_yellow "更新软件包列表.."
             apt-get update -qq
             
-            print_yellow "安装必要的工�?.."
+            print_yellow "安装必要的工具.."
             apt-get install -y -qq curl wget tar gzip sed grep
         fi
     elif [ "$OS_TYPE" = "centos" ] || [ "$OS_TYPE" = "rhel" ] || [ "$OS_TYPE" = "fedora" ]; then
         if command -v yum >/dev/null; then
-            print_yellow "安装必要的工�?.."
+            print_yellow "安装必要的工具.."
             yum install -y -q curl wget tar gzip sed grep
         fi
     fi
     
-    # 检�?Docker �?Docker Compose 是否已安�?    if ! command -v docker >/dev/null; then
+    # 检查Docker和Docker Compose是否已安装
+    if ! command -v docker >/dev/null; then
         print_yellow "警告: Docker 未安装，正在安装..."
         
         # 安装 Docker
