@@ -383,7 +383,7 @@ services:
       php:
         condition: service_started
     restart: unless-stopped
-    command: ["nginx", "-g", "daemon off;"]
+    command: nginx -g 'daemon off;'
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
       interval: 30s
@@ -438,10 +438,10 @@ services:
     command: redis-server --requirepass '${REDIS_PASSWORD:-redispassword}' --maxmemory ${MEMORY_PER_SERVICE:-256}mb --maxmemory-policy allkeys-lru --replica-read-only yes --appendonly yes
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD:-redispassword}' ping 2>/dev/null || redis-cli ping 2>/dev/null || true" ]
-      interval: 15s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD:-redispassword}' ping 2>/dev/null || redis-cli ping 2>/dev/null || true"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     # 暂时移除资源限制以提高启动成功率
 EOF
         
