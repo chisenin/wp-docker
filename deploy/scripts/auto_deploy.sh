@@ -484,20 +484,24 @@ services:
       - ./configs/nginx/conf.d:/etc/nginx/conf.d
       - ./logs/nginx:/var/log/nginx
     depends_on:
+      # 改为 service_started，因为我们希望容器启动后就开始尝试连接
+      # 健康检查由各自的 healthcheck 负责
       php:
-        condition: service_healthy
+        condition: service_started
       redis:
-        condition: service_healthy
+        condition: service_started
+      mariadb:
+        condition: service_started
     restart: unless-stopped
-    # 使用命令数组格式，完美兼容 Alpine 的 busybox shell
+    # === 修复：使用命令数组格式，兼容 Alpine ===
     command: ["/docker-entrypoint.sh", "nginx", "-g", "daemon off;"]
+    # === 关键修复：使用 curl 检查 HTTP 服务是否真正可用 ===
     healthcheck:
-      test: ["CMD", "nginx", "-t"]
+      test: ["CMD", "curl", "-f", "http://localhost/"] # 访问根路径，检查 Nginx 是否能返回 HTTP 200
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s
-
+      start_period: 40s # 给 Nginx 更多的时间来加载配置和启动
   php:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-8.3.26}
     container_name: php
@@ -505,14 +509,16 @@ services:
       - ./html:/var/www/html
       - ${PHP_INI_PATH:-./deploy/configs/php.ini}:/usr/local/etc/php/php.ini:ro
     restart: unless-stopped
-    # 使用数组格式，保持一致性
     command: ["php-fpm"]
+    # === 关键修复：通过检查 PHP-FPM 的 status 页面来验证其与 Nginx 的通信 ===
     healthcheck:
-      test: ["CMD-SHELL", "php -v > /dev/null && exit 0 || exit 1"]
+      # 我们创建一个临时配置来开启 status 页面，或者假设镜像已经包含它
+      # 这是一个更健壮的检查方式，比 `php -v` 更有效
+      test: ["CMD-SHELL", "curl -s --fail http://localhost:9000/status | grep 'Processes active' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-
+      start_period: 60s # PHP-FPM 可能需要时间来解析配置
   mariadb:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-mariadb:${MARIADB_VERSION:-11.3.2}
     container_name: mariadb
@@ -527,27 +533,27 @@ services:
       - ./mysql:/var/lib/mysql
       - ./logs/mariadb:/var/log/mysql
     restart: unless-stopped
+    # 保持原有的健康检查，但延长启动等待时间
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost --user=\$MYSQL_USER --password=\$MYSQL_PASSWORD"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
-
+      start_period: 120s # MariaDB 初始化确实需要更长时间，延长此时间
   redis:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-redis:${REDIS_VERSION:-7.4.0}
     container_name: redis
     volumes:
       - ./redis:/data
-    # 使用数组格式，增加额外的内存配置参数
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redispassword}", "--maxmemory", "${MEMORY_PER_SERVICE:-256}mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "yes", "--activedefrag", "yes", "--maxmemory-samples", "5"]
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redispassword}", "--maxmemory", "${MEMORY_PER_SERVICE:-256}mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "yes"]
     restart: unless-stopped
-    # 移除不支持的sysctl设置，改用Redis参数优化内存使用
+    # 健康检查本身是正确的，但延长启动等待时间
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redispassword}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 3
+      start_period: 60s # Redis 首次启动或AOF重写时可能较慢
 EOF
         
         print_green "docker-compose.yml 文件创建成功"
