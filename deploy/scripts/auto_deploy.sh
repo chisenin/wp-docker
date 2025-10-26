@@ -419,20 +419,20 @@ services:
       resources:
         limits:
           cpus: "${CPU_LIMIT:-1}.0"
-          memory: "1024M"
+          memory: "${MEMORY_PER_SERVICE:-256}M"
 
   redis:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-redis:${REDIS_VERSION:-7.4.0}
     container_name: redis
     volumes:
       - ./redis:/data
-    command: redis-server --requirepass ${REDIS_PASSWORD:-redispassword} --maxmemory ${REDIS_MAXMEMORY:-256mb}
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redispassword} --maxmemory ${MEMORY_PER_SERVICE:-256}mb --maxmemory-policy allkeys-lru
     restart: always
     deploy:
       resources:
         limits:
           cpus: "0.5"
-          memory: "256M"
+          memory: "${MEMORY_PER_SERVICE:-256}M"
 EOF
         
         print_green "docker-compose.yml 文件创建成功"
