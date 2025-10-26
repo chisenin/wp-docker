@@ -131,7 +131,8 @@ collect_system_parameters() {
     # 检查必要的系统工具
     print_blue "检查必要的系统工具..."
     
-    # 安装必要的工具    if [ "$OS_TYPE" = "ubuntu" ] || [ "$OS_TYPE" = "debian" ]; then
+    # 安装必要的工具
+    if [ "$OS_TYPE" = "ubuntu" ] || [ "$OS_TYPE" = "debian" ]; then
         if command -v apt-get >/dev/null; then
             print_yellow "更新软件包列表.."
             apt-get update -qq
