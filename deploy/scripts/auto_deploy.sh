@@ -437,6 +437,8 @@ services:
       - ./redis:/data
     command: redis-server --requirepass '${REDIS_PASSWORD:-redispassword}' --maxmemory ${MEMORY_PER_SERVICE:-256}mb --maxmemory-policy allkeys-lru --replica-read-only yes --appendonly yes
     restart: unless-stopped
+    sysctls:
+      vm.overcommit_memory: "1"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD:-redispassword}' ping 2>/dev/null || redis-cli ping 2>/dev/null || true"]
       interval: 10s
