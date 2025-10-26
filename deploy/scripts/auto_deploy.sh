@@ -646,7 +646,7 @@ main() {
     display_deployment_info
     
     # 使用更简单的echo命令以确保标准sh兼容性
-    echo "${GREEN}✓ WordPress Docker 自动部署完成${NC}"
+    echo "WordPress Docker 自动部署完成"
 }
 
 # 执行主函数
