@@ -12,20 +12,27 @@ prepare_host_environment() {
     echo "------------------------------------------------"
     echo "检查并准备宿主机环境..."
     echo "------------------------------------------------"
-    # 1. 修复 vm.overcommit_memory 问题 (仅影响宿主机，对容器是额外保障)
+    # 1. 检查 vm.overcommit_memory 设置 (仅影响宿主机，对容器是额外保障)
     echo -n "检查宿主机 vm.overcommit_memory 设置... "
     CURRENT_OVERCOMMIT=$(sysctl -n vm.overcommit_memory 2>/dev/null || echo "0")
     
+    # 检查 sudo 是否可用
+    SUDO_AVAILABLE=true
+    if ! command -v sudo > /dev/null 2>&1; then
+        SUDO_AVAILABLE=false
+    fi
+    
     if [ "$CURRENT_OVERCOMMIT" -ne 1 ]; then
         echo "当前值为 $CURRENT_OVERCOMMIT，建议设置为 1 以优化 Redis 性能并避免错误。"
-        # 尝试临时生效
-        if sudo sysctl -w vm.overcommit_memory=1 > /dev/null 2>&1; then
+        
+        # 尝试临时生效（如果有 sudo 权限）
+        if [ "$SUDO_AVAILABLE" = true ] && sudo sysctl -w vm.overcommit_memory=1 > /dev/null 2>&1; then
             echo "✓ 已临时在当前会话中设置为 1。"
         else
-            echo "✗ 无法设置，请检查 sudo 权限。"
+            echo "⚠️  提示: 未设置 vm.overcommit_memory=1，这可能影响 Redis 性能。"
         fi
         
-        # 针对不同系统写入不同位置
+        # 针对不同系统确定配置文件位置
         SYSCTL_CONF="/etc/sysctl.conf"
         if [ "$OS_TYPE" = "alpine" ]; then
             # Alpine 使用 /etc/sysctl.d/ 目录
@@ -33,32 +40,40 @@ prepare_host_environment() {
             SYSCTL_CONF="/etc/sysctl.d/99-redis.conf"
         fi
         
-        # 尝试永久生效
+        # 尝试永久生效（如果有 sudo 权限）
         if ! grep -q "^vm.overcommit_memory" "$SYSCTL_CONF" 2>/dev/null; then
-            echo "正在将 vm.overcommit_memory=1 写入 $SYSCTL_CONF..."
-            echo "vm.overcommit_memory = 1" | sudo tee -a "$SYSCTL_CONF" > /dev/null
-            echo "✓ 已写入配置文件。"
+            if [ "$SUDO_AVAILABLE" = true ] && echo "vm.overcommit_memory = 1" | sudo tee -a "$SYSCTL_CONF" > /dev/null 2>&1; then
+                echo "✓ 已写入配置到 $SYSCTL_CONF。"
+                echo "⚠️  重要提示: 为了让修改永久生效，请手动在宿主机上运行以下命令，然后重新运行此脚本:"
+                if [ "$OS_TYPE" = "alpine" ]; then
+                    echo "    sudo sysctl --system"
+                else
+                    echo "    sudo sysctl -p"
+                fi
+                echo ""
+            else
+                echo "⚠️  提示: 无法写入配置文件。建议手动设置 vm.overcommit_memory=1 以优化 Redis 性能。"
+            fi
         else
             echo "✓ $SYSCTL_CONF 中已存在该配置。"
         fi
-        
-        echo "⚠️  重要提示: 为了让修改永久生效，请手动在宿主机上运行以下命令，然后重新运行此脚本:"
-        if [ "$OS_TYPE" = "alpine" ]; then
-            echo "    sudo sysctl --system"
-        else
-            echo "    sudo sysctl -p"
-        fi
-        echo ""
     else
         echo "✓ 正确 (值为 $CURRENT_OVERCOMMIT)。"
     fi
     # 2. 检查 Docker 和 Docker Compose
     echo -n "检查 Docker 服务状态... "
-    if ! sudo docker info > /dev/null 2>&1; then
+    # 尝试使用 sudo 或直接运行 docker
+    if [ "$SUDO_AVAILABLE" = true ] && sudo docker info > /dev/null 2>&1; then
+        echo "✓ 正常 (使用 sudo)。"
+        DOCKER_CMD="sudo docker"
+        DOCKER_COMPOSE_CMD="sudo docker-compose"
+    elif docker info > /dev/null 2>&1; then
+        echo "✓ 正常 (无需 sudo)。"
+        DOCKER_CMD="docker"
+        DOCKER_COMPOSE_CMD="docker-compose"
+    else
         echo "✗ 失败。Docker 服务未运行或无权限。请启动 Docker 服务。"
         exit 1
-    else
-        echo "✓ 正常。"
     fi
     
     echo -n "检查 Docker Compose... "
