@@ -3,113 +3,72 @@
 services:
   # --- MariaDB 数据库服务 ---
   mariadb:
-    # 使用我们构建的MariaDB镜像，支持自动更新
+    # 构建配置（用于GitHub Actions）
     build:
       context: .
       dockerfile: build/Dockerfiles/mariadb/Dockerfile
     image: chisenin/wordpress-mariadb:11.3.2
-    container_name: wp_db
-    restart: unless-stopped
+    # 注意：此配置仅用于构建参考，生产环境配置由auto_deploy.sh脚本生成
     networks:
       - app-network
     volumes:
-      - db_data:/var/lib/mysql
       - ./build/deploy_configs/mariadb/my.cnf:/etc/my.cnf:ro
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    expose:
-      - "3306"
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: ${CPU_LIMIT:-1}
-          memory: ${MEMORY_LIMIT:-1G}
+      # 构建参考环境变量，生产环境将使用随机生成的值
+      MYSQL_ROOT_PASSWORD: build_reference_only
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: build_reference_only
 
   # --- Redis 缓存服务 ---
   redis:
-    # 使用我们构建的Redis镜像，支持自动更新
+    # 构建配置（用于GitHub Actions）
     build:
       context: .
       dockerfile: build/Dockerfiles/redis/Dockerfile
     image: chisenin/wordpress-redis:7.4.0
-    container_name: wp_redis
-    restart: unless-stopped
+    # 注意：此配置仅用于构建参考，生产环境配置由auto_deploy.sh脚本生成
     networks:
       - app-network
     volumes:
-      - redis_data:/data
       - ./build/deploy_configs/redis/redis.conf:/etc/redis/redis.conf:ro
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      REDIS_MAXMEMORY: ${REDIS_MAXMEMORY:-256mb}
-    expose:
-      - "6379"
-    healthcheck:
-      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:-}', 'ping']
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      # 构建参考环境变量，生产环境将使用随机生成的值
+      REDIS_PASSWORD: build_reference_only
+      REDIS_MAXMEMORY: 256mb
 
   # --- PHP-FPM 服务 ---
   php:
-    # 使用我们构建的PHP镜像，支持自动更新
+    # 构建配置（用于GitHub Actions）
     build:
       context: .
       dockerfile: build/Dockerfiles/php/Dockerfile
     image: chisenin/wordpress-php:8.3.26
-    container_name: wp_fpm
-    restart: unless-stopped
+    # 注意：此配置仅用于构建参考，生产环境配置由auto_deploy.sh脚本生成
     networks:
       - app-network
     volumes:
-      # 注意：主机html目录映射到容器内/var/www/html
       - ./html:/var/www/html
-      # 使用deploy目录中的PHP配置
       - ./build/deploy_configs/php/php.ini:/usr/local/etc/php/php.ini:ro
-    expose:
-      - "9000"
-    depends_on:
-      mariadb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     environment:
+      # 构建参考环境变量，生产环境将使用随机生成的值
       WORDPRESS_DB_HOST: mariadb:3306
-      WORDPRESS_DB_USER: ${MYSQL_USER}
-      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
-      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: build_reference_only
+      WORDPRESS_DB_NAME: wordpress
       WORDPRESS_REDIS_HOST: redis
       WORDPRESS_REDIS_PORT: 6379
       PHP_OPCACHE_ENABLE: 1
-      PHP_MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-512M}
-    healthcheck:
-      test: ["CMD", "php-fpm", "-t"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: ${CPU_LIMIT:-1}
-          memory: 512M
+      PHP_MEMORY_LIMIT: 512M
 
   # --- Nginx 服务 ---
   nginx:
-    # 使用我们构建的Nginx镜像，支持自动更新
+    # 构建配置（用于GitHub Actions）
     build:
       context: .
       dockerfile: build/Dockerfiles/nginx/Dockerfile
     image: chisenin/wordpress-nginx:1.27.2
-    container_name: wp_nginx
-    restart: unless-stopped
+    # 注意：此配置仅用于构建参考，生产环境配置由auto_deploy.sh脚本生成
     networks:
       - app-network
     volumes:
@@ -117,36 +76,11 @@ services:
       - ./build/deploy_configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./build/deploy_configs/nginx/conf.d:/etc/nginx/conf.d:ro
       - ./html:/var/www/html
-      - nginx_logs:/var/log/nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    depends_on:
-      php:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "nginx", "-t"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: ${CPU_LIMIT:-1}
-          memory: ${MEMORY_LIMIT:-512M}
 
 networks:
   app-network:
     driver: bridge
-    ipam:
-      driver: default
-      config:
-        - subnet: 172.18.0.0/16
 
-volumes:
-  db_data:
-    driver: local
-  redis_data:
-    driver: local
-  nginx_logs:
-    driver: local
+# 注意：此docker-compose.yml仅用于GitHub Actions构建参考
+# 生产环境中，auto_deploy.sh脚本会根据服务器实际情况生成完整配置
+# Windows本地环境不需要使用此文件运行服务

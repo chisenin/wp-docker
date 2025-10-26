@@ -47,31 +47,39 @@ wp-docker/
 
 ## 快速开始
 
-### 开发环境
+### 实际工作流程说明
 
-1. **安装依赖**
-   - 确保已安装 Docker 和 Docker Compose
+**重要说明**：本项目采用 Windows 本地开发、GitHub Actions 构建、Linux 远程部署的工作流。
 
-2. **初始化项目**
-   ```bash
-   git clone <仓库地址> wp-docker
-   cd wp-docker
-   ```
+- **本地 Windows 环境**：
+  - 不需要 `.env` 和 `docker-compose.yml` 文件用于本地运行
+  - 这些文件主要用于构建配置和 GitHub Actions 工作流
+  - 本地开发主要关注代码修改和提交
 
-3. **配置环境**
-   - 开发环境默认使用本地构建，可以直接修改 `docker-compose.yml` 文件中的配置
-   - Nginx 配置位于 `build/deploy_configs/nginx/` 目录
-   - PHP 配置位于 `build/deploy_configs/php/php.ini` 文件
-   - MariaDB 配置位于 `build/deploy_configs/mariadb/my.cnf` 文件
-   - Redis 配置位于 `build/deploy_configs/redis/redis.conf` 文件
+- **初始化项目**
+  ```bash
+  git clone <仓库地址> wp-docker
+  cd wp-docker
+  ```
 
-4. **启动服务**
-   ```bash
-   docker-compose up -d --build
-   ```
+- **代码开发与提交**
+  - 修改源代码和配置文件
+  - 提交到 GitHub，触发 GitHub Actions 构建
 
-5. **完成 WordPress 安装**
-   - 访问 `http://localhost` 完成安装向导
+### 配置文件说明
+
+- **核心配置文件**（`docker-compose.yml` 和 `.env.example`）：
+  - 这些文件在 Windows 本地环境中**不需要用于运行服务**
+  - 它们的主要用途是为 GitHub Actions 构建过程提供配置参考
+  - 生产环境的实际配置会由 `auto_deploy.sh` 脚本根据目标 Linux 服务器环境动态生成
+
+- **服务配置文件**：
+  - Nginx 配置位于 `build/deploy_configs/nginx/` 目录
+  - PHP 配置位于 `build/deploy_configs/php/php.ini` 文件
+  - MariaDB 配置位于 `build/deploy_configs/mariadb/my.cnf` 文件
+  - Redis 配置位于 `build/deploy_configs/redis/redis.conf` 文件
+
+这些配置文件会被 GitHub Actions 用于构建镜像，并在生产环境中通过 `auto_deploy.sh` 脚本自动应用。在 Windows 本地开发环境中，您只需关注代码修改和配置文件的编辑，无需本地运行 Docker 容器。
 
 ### 生产环境
 

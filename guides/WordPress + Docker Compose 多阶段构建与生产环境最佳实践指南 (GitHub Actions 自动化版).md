@@ -18,8 +18,8 @@ wp-docker/
 ├── .gitignore                        # Git 忽略规则
 ├── README.md                         # 项目说明
 ├── README.release                    # 发布说明
-├── docker-compose.yml                # 开发环境服务编排
-├── .env.example                      # 环境变量模板
+├── docker-compose.yml                # 构建配置文件（主要用于GitHub Actions）
+├── .env.example                      # 环境变量模板（主要用于构建参考）
 ├── .github/workflows/                # GitHub Actions 工作流
 │   ├── version-monitor-and-build.yml # 版本监控与自动构建工作流（包含构建与推送功能）
 │   ├── version-monitor.yml           # 版本监控工作流
@@ -43,12 +43,32 @@ wp-docker/
 │       └── test-build.sh             # 构建测试脚本
 ├── deploy/                           # 部署相关文件
 │   ├── .env.example                  # 部署环境变量模板
-│   ├── docker-compose.yml            # 生产环境服务编排
+│   ├── docker-compose.yml            # 生产环境服务编排模板
 │   ├── configs/                      # 配置文件目录
 │   └── scripts/                      # 部署脚本目录
-│       └── auto_deploy.sh            # 自动化部署脚本
+│       └── auto_deploy.sh            # 自动化部署脚本（在Linux服务器上运行）
 └── html/                             # WordPress 源码目录
 ```
+
+### 实际工作流程说明
+
+本项目采用 **Windows 本地开发 → GitHub Actions 构建 → Linux 远程部署** 的工作流模式：
+
+1. **Windows 本地环境**：
+   - 主要用于代码开发和修改
+   - **不需要**在本地运行 Docker 容器
+   - `.env` 和 `docker-compose.yml` 文件在本地不是必需的运行文件
+   - 这些文件主要用于 GitHub Actions 构建过程中的配置参考
+
+2. **GitHub Actions 构建环境**：
+   - 自动构建 Docker 镜像
+   - 推送镜像到 Docker Hub
+   - 使用项目中的配置文件作为构建参考
+
+3. **Linux 远程部署环境**：
+   - 在目标服务器上运行 `auto_deploy.sh` 脚本
+   - 脚本会自动生成适合当前 Linux 环境的 `.env` 和 `docker-compose.yml` 文件
+   - 自动拉取镜像并启动容器
 
 ### 初始化 Git
 
@@ -81,8 +101,8 @@ wp-docker/
 
 4. **配置 GitHub Secrets**:
 
-   - 在 GitHub 仓库设置 `DOCKERHUB_USERNAME` 和 `DOCKERHUB_TOKEN`。
-   - 添加 `GITHUB_TOKEN`（自动生成）以支持创建 Releases。
+   - 在 GitHub 仓库设置 `DOCKERHUB_USERNAME` 和 `DOCKERHUB_TOKEN`
+   - 添加 `GITHUB_TOKEN`（自动生成）以支持创建 Releases
 
 ------
 
