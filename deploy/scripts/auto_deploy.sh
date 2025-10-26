@@ -437,7 +437,7 @@ services:
           cpus: "${CPU_LIMIT:-1}.0"
           memory: "${MEMORY_PER_SERVICE:-256}M"
     healthcheck:
-      test: ["CMD-SHELL", "exec mariadb -u root -p"'${MYSQL_ROOT_PASSWORD:-rootpassword}'" -e "SELECT 1;" || exec mysql -u root -p"'${MYSQL_ROOT_PASSWORD:-rootpassword}'" -e "SELECT 1;"]
+      test: ["CMD-SHELL", "mariadb -u root -p${MYSQL_ROOT_PASSWORD:-rootpassword} -e 'SELECT 1;' || mysql -u root -p${MYSQL_ROOT_PASSWORD:-rootpassword} -e 'SELECT 1;'"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -649,19 +649,19 @@ EOF
         # 检查MariaDB容器是否正在运行
         if docker-compose ps mariadb | grep -q "Up"; then
             # 检查MariaDB是否接受连接，优先使用mariadb命令
-            if docker-compose exec -T mariadb sh -c "command -v mariadb >/dev/null && mariadb --version" >/dev/null 2>&1; then
-                # 使用mariadb命令
-                if docker-compose exec -T mariadb mariadb -u root -p"${MYSQL_ROOT_PASSWORD:-rootpassword}" -e "SELECT 1;" >/dev/null 2>&1; then
-                    print_green "数据库连接成功"
-                    break
+                if docker-compose exec -T mariadb sh -c "command -v mariadb >/dev/null && mariadb --version" >/dev/null 2>&1; then
+                    # 使用mariadb命令
+                    if docker-compose exec -T mariadb mariadb -u root -p${MYSQL_ROOT_PASSWORD:-rootpassword} -e 'SELECT 1;' >/dev/null 2>&1; then
+                        print_green "数据库连接成功"
+                        break
+                    fi
+                else
+                    # 回退到mysql命令
+                    if docker-compose exec -T mariadb mysql -u root -p${MYSQL_ROOT_PASSWORD:-rootpassword} -e 'SELECT 1;' >/dev/null 2>&1; then
+                        print_green "数据库连接成功"
+                        break
+                    fi
                 fi
-            else
-                # 回退到mysql命令
-                if docker-compose exec -T mariadb mysql -u root -p"${MYSQL_ROOT_PASSWORD:-rootpassword}" -e "SELECT 1;" >/dev/null 2>&1; then
-                    print_green "数据库连接成功"
-                    break
-                fi
-            fi
         fi
         
         RETRY_COUNT=$((RETRY_COUNT+1))
@@ -673,10 +673,10 @@ EOF
         # 尝试使用docker exec直接设置root密码
         if docker-compose exec -T mariadb sh -c "command -v mariadb >/dev/null" >/dev/null 2>&1; then
             # 使用mariadb命令
-            docker-compose exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\"" || print_yellow "权限重置尝试失败，请检查.env文件中的MYSQL_ROOT_PASSWORD配置"
+            docker-compose exec -T mariadb sh -c "mariadb -u root -e 'ALTER USER \'root\'@\'%\' IDENTIFIED BY \'${MYSQL_ROOT_PASSWORD:-rootpassword}\'; ALTER USER \'root\'@\'localhost\' IDENTIFIED BY \'${MYSQL_ROOT_PASSWORD:-rootpassword}\'; FLUSH PRIVILEGES;'" || print_yellow "权限重置尝试失败，请检查.env文件中的MYSQL_ROOT_PASSWORD配置"
         else
             # 回退到mysql命令
-            docker-compose exec -T mariadb sh -c "mysql -u root -e \"ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\"" || print_yellow "权限重置尝试失败，请检查.env文件中的MYSQL_ROOT_PASSWORD配置"
+            docker-compose exec -T mariadb sh -c "mysql -u root -e 'ALTER USER \'root\'@\'%\' IDENTIFIED BY \'${MYSQL_ROOT_PASSWORD:-rootpassword}\'; ALTER USER \'root\'@\'localhost\' IDENTIFIED BY \'${MYSQL_ROOT_PASSWORD:-rootpassword}\'; FLUSH PRIVILEGES;'" || print_yellow "权限重置尝试失败，请检查.env文件中的MYSQL_ROOT_PASSWORD配置"
         fi
     fi
 
