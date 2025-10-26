@@ -414,12 +414,19 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
       MYSQL_USER: ${MYSQL_USER:-wordpress}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-wordpresspassword}
+      MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "false"
+      MARIADB_ROOT_HOST: "%"
     restart: always
     deploy:
       resources:
         limits:
           cpus: "${CPU_LIMIT:-1}.0"
           memory: "${MEMORY_PER_SERVICE:-256}M"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   redis:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-redis:${REDIS_VERSION:-7.4.0}
@@ -586,13 +593,31 @@ EOF
     print_blue "构建 Docker 镜像..."
     docker-compose build
 
+    # 检查是否需要重置数据库（如果存在旧数据且容器启动失败）
+    if [ -d "mysql" ] && [ "$(ls -A mysql 2>/dev/null)" ]; then
+        print_yellow "检测到数据库数据目录已存在，检查容器状态..."
+        docker-compose down >/dev/null 2>&1
+        if ! docker-compose up -d >/dev/null 2>&1; then
+            print_red "数据库容器启动失败，可能是数据目录存在兼容性问题"
+            print_yellow "建议清理数据库数据目录并重新初始化数据库"
+            read -p "是否清理数据库数据目录？(y/N): " reset_db
+            if [ "$reset_db" = "y" ] || [ "$reset_db" = "Y" ]; then
+                print_blue "清理数据库数据目录..."
+                rm -rf mysql/*
+                print_green "数据库数据目录已清理"
+            fi
+        else
+            print_green "数据库容器启动成功，使用现有数据目录"
+        fi
+    fi
+
     # 启动 Docker 容器
     print_blue "启动 Docker 容器..."
     docker-compose up -d
 
     # 等待服务启动
     print_blue "等待服务初始化.."
-    sleep 10
+    sleep 15
 
     # 显示容器状态
     print_blue "显示容器状态.."
