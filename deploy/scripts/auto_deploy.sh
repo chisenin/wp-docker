@@ -576,7 +576,8 @@ display_deployment_info() {
     print_blue "=================================================="
     print_green "部署完成"
     print_blue "=================================================="
-    local HOST_IP=$(hostname -I | awk '{print $1}')
+    # 移除local关键字以兼容标准sh
+    HOST_IP=$(hostname -I | awk '{print $1}')
     print_green "访问地址: http://$HOST_IP"
     print_green ""
     print_green "服务器信息:"
