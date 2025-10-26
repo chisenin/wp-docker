@@ -262,7 +262,7 @@ optimize_parameters() {
         redis_pwd=$(generate_password 16)
         
         # 生成WordPress密钥并直接格式化为键值对
-        wp_keys_lines=$(generate_wordpress_keys | sed 's/define("\([^"]*\)", "\([^"]*\)\);/\1=\2/g' | grep "WORDPRESS_")
+        wp_keys_lines=$(generate_wordpress_keys | grep "WORDPRESS_" | cut -d'"' -f2,4 | tr '""' '=')
         
         cat > .env << EOF
 # WordPress Docker 环境配置文件
