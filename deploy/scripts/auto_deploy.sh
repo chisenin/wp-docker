@@ -110,10 +110,11 @@ detect_host_environment() {
         AVAILABLE_RAM=512
     fi
     
-    # 检测磁盘空间（GB�?    if command -v df >/dev/null; then
+    # 检测磁盘空间（GB）
+    if command -v df >/dev/null; then
         DISK_SPACE=$(df -BG "$DEPLOY_DIR" | tail -1 | awk '{print $4}' | sed 's/G//')
     else
-        print_yellow "警告: 无法检测磁盘空间，使用默认�?0GB"
+        print_yellow "警告: 无法检测磁盘空间，使用默认值0GB"
         DISK_SPACE=0
     fi
     
