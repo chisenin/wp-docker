@@ -59,7 +59,8 @@ generate_wordpress_keys() {
     elif command -v wget >/dev/null; then
         wget -q -O - https://api.wordpress.org/secret-key/1.1/salt/
     else
-        # 如果无法获取，生成随机密钥        echo "WORDPRESS_AUTH_KEY='$(generate_password 64)'"
+        # 如果无法获取，生成随机密钥
+        echo "WORDPRESS_AUTH_KEY='$(generate_password 64)'"
         echo "WORDPRESS_SECURE_AUTH_KEY='$(generate_password 64)'"
         echo "WORDPRESS_LOGGED_IN_KEY='$(generate_password 64)'"
         echo "WORDPRESS_NONCE_KEY='$(generate_password 64)'"
@@ -506,7 +507,7 @@ define('DB_COLLATE', '');
 $table_prefix = '$table_prefix';
 
 // 安全密钥
-echo "$wp_keys";
+$wp_keys
 
 // 其他设置
 define('WP_DEBUG', false);
@@ -525,14 +526,14 @@ EOF
         fi
         
         # 直接使用 sed 命令更新密钥，避免函数定义在条件块内
-        eval "$sed_cmd -E 's@define\s*\(["'\''"']AUTH_KEY["'\''"'],[^)]*\)@define( 'AUTH_KEY', '${WORDPRESS_AUTH_KEY:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\''"']SECURE_AUTH_KEY["'\''"'],[^)]*\)@define( 'SECURE_AUTH_KEY', '${WORDPRESS_SECURE_AUTH_KEY:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\''"']LOGGED_IN_KEY["'\''"'],[^)]*\)@define( 'LOGGED_IN_KEY', '${WORDPRESS_LOGGED_IN_KEY:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\''"']NONCE_KEY["'\''"'],[^)]*\)@define( 'NONCE_KEY', '${WORDPRESS_NONCE_KEY:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\''"']AUTH_SALT["'\''"'],[^)]*\)@define( 'AUTH_SALT', '${WORDPRESS_AUTH_SALT:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\''"']SECURE_AUTH_SALT["'\''"'],[^)]*\)@define( 'SECURE_AUTH_SALT', '${WORDPRESS_SECURE_AUTH_SALT:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\''"']LOGGED_IN_SALT["'\''"'],[^)]*\)@define( 'LOGGED_IN_SALT', '${WORDPRESS_LOGGED_IN_SALT:-}' )@g' html/wp-config.php"
-        eval "$sed_cmd -E 's@define\s*\(["'\''"']NONCE_SALT["'\''"'],[^)]*\)@define( 'NONCE_SALT', '${WORDPRESS_NONCE_SALT:-}' )@g' html/wp-config.php"
+        $sed_cmd -E "s@define\s*\(['\"]AUTH_KEY['\"],[^)]*\)@define( 'AUTH_KEY', '${WORDPRESS_AUTH_KEY:-}' )@g" html/wp-config.php
+        $sed_cmd -E "s@define\s*\(['\"]SECURE_AUTH_KEY['\"],[^)]*\)@define( 'SECURE_AUTH_KEY', '${WORDPRESS_SECURE_AUTH_KEY:-}' )@g" html/wp-config.php
+        $sed_cmd -E "s@define\s*\(['\"]LOGGED_IN_KEY['\"],[^)]*\)@define( 'LOGGED_IN_KEY', '${WORDPRESS_LOGGED_IN_KEY:-}' )@g" html/wp-config.php
+        $sed_cmd -E "s@define\s*\(['\"]NONCE_KEY['\"],[^)]*\)@define( 'NONCE_KEY', '${WORDPRESS_NONCE_KEY:-}' )@g" html/wp-config.php
+        $sed_cmd -E "s@define\s*\(['\"]AUTH_SALT['\"],[^)]*\)@define( 'AUTH_SALT', '${WORDPRESS_AUTH_SALT:-}' )@g" html/wp-config.php
+        $sed_cmd -E "s@define\s*\(['\"]SECURE_AUTH_SALT['\"],[^)]*\)@define( 'SECURE_AUTH_SALT', '${WORDPRESS_SECURE_AUTH_SALT:-}' )@g" html/wp-config.php
+        $sed_cmd -E "s@define\s*\(['\"]LOGGED_IN_SALT['\"],[^)]*\)@define( 'LOGGED_IN_SALT', '${WORDPRESS_LOGGED_IN_SALT:-}' )@g" html/wp-config.php
+        $sed_cmd -E "s@define\s*\(['\"]NONCE_SALT['\"],[^)]*\)@define( 'NONCE_SALT', '${WORDPRESS_NONCE_SALT:-}' )@g" html/wp-config.php
         
         print_green "WordPress 密钥更新完成"
     fi
@@ -587,10 +588,10 @@ update_wp_config() {
     # 使用 sed 更新配置文件 - 修复标准sh兼容的语法
     if grep -q "$key_name" "$file_path"; then
         # 替换现有值
-        sed -i 's|^define(\'"$key_name"\',.*);|define(\'"$key_name"\', \'"$key_value"\');|' "$file_path"
+        sed -i "s|^define('$key_name',.*);|define('$key_name', '$key_value');|" "$file_path"
     else
         # 添加新配置（在最后一个?>前添加）
-        sed -i 's|^\?>$|define(\'"$key_name"\', \'"$key_value"\');\n?>|' "$file_path"
+        sed -i "s|^?>$|define('$key_name', '$key_value');\n?>|" "$file_path"
     fi
 }
 
