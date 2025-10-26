@@ -492,11 +492,11 @@ services:
     # 使用命令数组格式，完美兼容 Alpine 的 busybox shell
     command: ["/docker-entrypoint.sh", "nginx", "-g", "daemon off;"]
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
+      test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
       interval: 30s
-      timeout: 15s
+      timeout: 20s
       retries: 5
-      start_period: 60s
+      start_period: 90s
 
   php:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-8.3.26}
