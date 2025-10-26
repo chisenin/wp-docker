@@ -261,6 +261,9 @@ optimize_parameters() {
         current_date=$(date)
         redis_pwd=$(generate_password 16)
         
+        # 生成WordPress密钥并直接格式化为键值对
+        wp_keys_lines=$(generate_wordpress_keys | sed 's/define("\([^"]*\)", "\([^"]*\)\);/\1=\2/g' | grep "WORDPRESS_")
+        
         cat > .env << EOF
 # WordPress Docker 环境配置文件
 # 生成时间: $current_date
@@ -294,8 +297,8 @@ MEM_LIMIT=${MEM_LIMIT}MB
 PHP_MEMORY_LIMIT=$PHP_MEMORY_LIMIT
 UPLOAD_MAX_FILESIZE=64M
 
-# WordPress 密钥 - 注意使用 export 以确保 python-dotenv 能够正确读取
-export $(echo "$sanitized_keys" | sed 's/WORDPRESS_//g')
+# WordPress 密钥 - 以键值对格式存储，确保 python-dotenv 能够正确读取
+$wp_keys_lines
 EOF
         
         # 提示用户注意行尾字符问题
