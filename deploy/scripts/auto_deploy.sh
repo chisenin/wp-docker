@@ -382,6 +382,7 @@ services:
     depends_on:
       - php
     restart: always
+    command: ["nginx", "-g", "daemon off;"]
     deploy:
       resources:
         limits:
