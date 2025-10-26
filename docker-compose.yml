@@ -7,7 +7,7 @@ services:
     build:
       context: .
       dockerfile: build/Dockerfiles/mariadb/Dockerfile
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-mariadb:${MARIADB_VERSION:-11.3.2}
+    image: chisenin/wordpress-mariadb:11.3.2
     container_name: wp_db
     restart: unless-stopped
     networks:
@@ -39,7 +39,7 @@ services:
     build:
       context: .
       dockerfile: build/Dockerfiles/redis/Dockerfile
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-redis:${REDIS_VERSION:-7.4.0}
+    image: chisenin/wordpress-redis:7.4.0
     container_name: wp_redis
     restart: unless-stopped
     networks:
@@ -64,7 +64,7 @@ services:
     build:
       context: .
       dockerfile: build/Dockerfiles/php/Dockerfile
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-8.3.26}
+    image: chisenin/wordpress-php:8.3.26
     container_name: wp_fpm
     restart: unless-stopped
     networks:
@@ -95,6 +95,11 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU_LIMIT:-1}
+          memory: ${MEMORY_LIMIT:-512M}
 
   # --- Nginx 服务 ---
   nginx:
@@ -102,7 +107,7 @@ services:
     build:
       context: .
       dockerfile: build/Dockerfiles/nginx/Dockerfile
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-nginx:${NGINX_VERSION:-1.27.2}
+    image: chisenin/wordpress-nginx:1.27.2
     container_name: wp_nginx
     restart: unless-stopped
     networks:
@@ -124,6 +129,11 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU_LIMIT:-1}
+          memory: ${MEMORY_LIMIT:-512M}
 
 networks:
   app-network:
