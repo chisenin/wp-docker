@@ -424,7 +424,7 @@ services:
           cpus: "${CPU_LIMIT:-1}.0"
           memory: "${MEMORY_PER_SERVICE:-256}M"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=${MYSQL_ROOT_PASSWORD:-rootpassword}"]
       interval: 30s
       timeout: 10s
       retries: 5
