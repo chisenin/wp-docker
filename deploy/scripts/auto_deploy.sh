@@ -447,7 +447,7 @@ services:
     container_name: redis
     volumes:
       - ./redis:/data
-    command: redis-server --requirepass ${REDIS_PASSWORD:-redispassword} --maxmemory ${MEMORY_PER_SERVICE:-256}mb --maxmemory-policy allkeys-lru --delayed-fsync 0 --replica-read-only yes
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redispassword} --maxmemory ${MEMORY_PER_SERVICE:-256}mb --maxmemory-policy allkeys-lru --replica-read-only yes
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD:-redispassword}' ping || true"]
@@ -672,11 +672,15 @@ EOF
         print_red "数据库连接失败，尝试重置权限..."
         # 尝试使用docker exec直接设置root密码
         if docker-compose exec -T mariadb sh -c "command -v mariadb >/dev/null" >/dev/null 2>&1; then
-            # 使用mariadb命令
-            docker-compose exec -T mariadb sh -c "mariadb -u root -e 'ALTER USER \'root\'@\'%\' IDENTIFIED BY \'${MYSQL_ROOT_PASSWORD:-rootpassword}\'; ALTER USER \'root\'@\'localhost\' IDENTIFIED BY \'${MYSQL_ROOT_PASSWORD:-rootpassword}\'; FLUSH PRIVILEGES;'" || print_yellow "权限重置尝试失败，请检查.env文件中的MYSQL_ROOT_PASSWORD配置"
+            # 使用mariadb命令，尝试免密码连接（首次启动时）
+            docker-compose exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\"" || \
+            docker-compose exec -T mariadb sh -c "mariadb -u root -p'' -e \"ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\"" || \
+            print_yellow "权限重置尝试失败，请检查.env文件中的MYSQL_ROOT_PASSWORD配置"
         else
-            # 回退到mysql命令
-            docker-compose exec -T mariadb sh -c "mysql -u root -e 'ALTER USER \'root\'@\'%\' IDENTIFIED BY \'${MYSQL_ROOT_PASSWORD:-rootpassword}\'; ALTER USER \'root\'@\'localhost\' IDENTIFIED BY \'${MYSQL_ROOT_PASSWORD:-rootpassword}\'; FLUSH PRIVILEGES;'" || print_yellow "权限重置尝试失败，请检查.env文件中的MYSQL_ROOT_PASSWORD配置"
+            # 回退到mysql命令，尝试免密码连接（首次启动时）
+            docker-compose exec -T mariadb sh -c "mysql -u root -e \"ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\"" || \
+            docker-compose exec -T mariadb sh -c "mysql -u root -p'' -e \"ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\"" || \
+            print_yellow "权限重置尝试失败，请检查.env文件中的MYSQL_ROOT_PASSWORD配置"
         fi
     fi
 
