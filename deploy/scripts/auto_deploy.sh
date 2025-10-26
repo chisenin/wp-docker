@@ -584,13 +584,13 @@ update_wp_config() {
     key_value="$2"
     file_path="html/wp-config.php"
     
-    # 使用 sed 更新配置文件
+    # 使用 sed 更新配置文件 - 修复标准sh兼容的语法
     if grep -q "$key_name" "$file_path"; then
         # 替换现有值
-        sed -i "s|^define('$key_name',.*);|define('$key_name', '$key_value');|" "$file_path"
+        sed -i 's|^define(\'"$key_name"\',.*);|define(\'"$key_name"\', \'"$key_value"\');|' "$file_path"
     else
         # 添加新配置（在最后一个?>前添加）
-        sed -i "s|^\?>$|define('$key_name', '$key_value');\n?>|" "$file_path"
+        sed -i 's|^\?>$|define(\'"$key_name"\', \'"$key_value"\');\n?>|' "$file_path"
     fi
 }
 
