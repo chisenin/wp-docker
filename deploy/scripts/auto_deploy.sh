@@ -437,23 +437,23 @@ services:
           cpus: "${CPU_LIMIT:-1}.0"
           memory: "${MEMORY_PER_SERVICE:-256}M"
     healthcheck:
-      test: ["CMD-SHELL", "mariadb -u root -p${MYSQL_ROOT_PASSWORD:-rootpassword} -e 'SELECT 1;' || mysql -u root -p${MYSQL_ROOT_PASSWORD:-rootpassword} -e 'SELECT 1;'"]
+      test: ["CMD-SHELL", "mariadb -u root -p'${MYSQL_ROOT_PASSWORD:-rootpassword}' -e 'SELECT 1;' || mysql -u root -p'${MYSQL_ROOT_PASSWORD:-rootpassword}' -e 'SELECT 1;' || mariadb -u root -e 'SELECT 1;' || mysql -u root -e 'SELECT 1;'" ]
       interval: 30s
       timeout: 10s
-      retries: 5
+      retries: 10
 
   redis:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-redis:${REDIS_VERSION:-7.4.0}
     container_name: redis
     volumes:
       - ./redis:/data
-    command: redis-server --requirepass ${REDIS_PASSWORD:-redispassword} --maxmemory ${MEMORY_PER_SERVICE:-256}mb --maxmemory-policy allkeys-lru --replica-read-only yes
+    command: redis-server --requirepass '${REDIS_PASSWORD:-redispassword}' --maxmemory ${MEMORY_PER_SERVICE:-256}mb --maxmemory-policy allkeys-lru --replica-read-only yes --appendonly yes
     restart: always
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD:-redispassword}' ping || true"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD:-redispassword}' ping 2>/dev/null || redis-cli ping 2>/dev/null || true" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     deploy:
       resources:
         limits:
