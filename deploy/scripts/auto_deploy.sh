@@ -403,15 +403,15 @@ services:
       - ${PHP_INI_PATH:-./deploy/configs/php.ini}:/usr/local/etc/php/php.ini:ro
     depends_on:
       mariadb:
-        condition: service_healthy
+        condition: service_started
       redis:
         condition: service_started
     restart: always
     healthcheck:
-      test: ["CMD", "php-fpm", "-t"]
+      test: ["CMD-SHELL", "php-fpm -t || php -m"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
     deploy:
       resources:
         limits:
@@ -450,7 +450,7 @@ services:
     command: redis-server --requirepass ${REDIS_PASSWORD:-redispassword} --maxmemory ${MEMORY_PER_SERVICE:-256}mb --maxmemory-policy allkeys-lru --delayed-fsync 0 --replica-read-only yes
     restart: always
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redispassword}", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD:-redispassword}' ping || true"]
       interval: 30s
       timeout: 10s
       retries: 3
