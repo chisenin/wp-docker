@@ -645,7 +645,8 @@ main() {
     setup_disk_space_management
     display_deployment_info
     
-    print_green "✓ WordPress Docker 自动部署完成"
+    # 使用更简单的echo命令以确保标准sh兼容性
+    echo "${GREEN}✓ WordPress Docker 自动部署完成${NC}"
 }
 
 # 执行主函数
