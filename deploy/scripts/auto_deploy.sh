@@ -221,11 +221,27 @@ optimize_parameters() {
         CPU_LIMIT=1
     fi
     
-    # 内存限制 - 使用一半的可用内存，但确保不小于Docker允许的最小值6MB
-    MEM_LIMIT=$((AVAILABLE_RAM / 2))
-    if [ "$MEM_LIMIT" -lt 6 ]; then
-        MEM_LIMIT=6
-        print_yellow "警告: 系统内存过小，将内存限制设为Docker允许的最小值6MB"
+    # 内存限制优化 - 为每个服务设置合理的最小内存限制，而不是简单地使用系统内存的一半
+    # 默认每个服务的最小内存限制
+    NGINX_MIN_MEMORY=256
+    PHP_MIN_MEMORY=256
+    MARIADB_MIN_MEMORY=256
+    
+    # 总最小内存需求
+    TOTAL_MIN_MEMORY=$((NGINX_MIN_MEMORY + PHP_MIN_MEMORY + MARIADB_MIN_MEMORY))
+    
+    # 根据系统可用内存计算合适的内存分配
+    if [ "$AVAILABLE_RAM" -lt $TOTAL_MIN_MEMORY ]; then
+        # 如果系统内存不足，给每个服务分配最小内存，确保可以启动
+        MEMORY_PER_SERVICE=$((AVAILABLE_RAM / 3))
+        if [ "$MEMORY_PER_SERVICE" -lt 6 ]; then
+            MEMORY_PER_SERVICE=6
+        fi
+        print_yellow "警告: 系统内存不足，将为每个服务分配最小可行内存: ${MEMORY_PER_SERVICE}MB"
+    else
+        # 如果系统内存充足，给每个服务分配合理的内存
+        MEMORY_PER_SERVICE=$((AVAILABLE_RAM * 2 / 7)) # 使用约2/7的可用内存给每个主要服务
+        print_green "为各服务分配内存: ${MEMORY_PER_SERVICE}MB"
     fi
     
     # PHP 内存限制
@@ -297,7 +313,7 @@ REDIS_PASSWORD=$redis_pwd
 REDIS_MAXMEMORY=256mb
 
 CPU_LIMIT=$CPU_LIMIT
-MEM_LIMIT=${MEM_LIMIT}
+MEMORY_PER_SERVICE=$MEMORY_PER_SERVICE
 PHP_MEMORY_LIMIT=$PHP_MEMORY_LIMIT
 UPLOAD_MAX_FILESIZE=64M
 PHP_INI_PATH=./deploy/configs/php.ini
@@ -370,7 +386,7 @@ services:
       resources:
         limits:
           cpus: "${CPU_LIMIT:-1}.0"
-          memory: "${MEM_LIMIT:-512M}"
+          memory: "${MEMORY_PER_SERVICE:-256}M"
 
   php:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-8.3.26}
@@ -386,7 +402,7 @@ services:
       resources:
         limits:
           cpus: "${CPU_LIMIT:-1}.0"
-          memory: "512M"
+          memory: "${MEMORY_PER_SERVICE:-256}M"
 
   mariadb:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-mariadb:${MARIADB_VERSION:-11.3.2}
