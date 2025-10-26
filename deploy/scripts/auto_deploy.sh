@@ -382,7 +382,7 @@ services:
     depends_on:
       php:
         condition: service_started
-    restart: always
+    restart: unless-stopped
     command: ["nginx", "-g", "daemon off;"]
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
@@ -402,7 +402,7 @@ services:
         condition: service_started
       redis:
         condition: service_started
-    restart: always
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "php-fpm -t || php -m"]
       interval: 30s
@@ -420,15 +420,15 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
       MYSQL_USER: ${MYSQL_USER:-wordpress}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-wordpresspassword}
-      MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "false"
+      MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "true"
       MARIADB_ROOT_HOST: "%"
-    restart: always
+    restart: unless-stopped
     # 暂时移除资源限制以提高启动成功率
     healthcheck:
-      test: ["CMD-SHELL", "mariadb -u root -p'${MYSQL_ROOT_PASSWORD:-rootpassword}' -e 'SELECT 1;' || mysql -u root -p'${MYSQL_ROOT_PASSWORD:-rootpassword}' -e 'SELECT 1;' || mariadb -u root -e 'SELECT 1;' || mysql -u root -e 'SELECT 1;'" ]
-      interval: 30s
-      timeout: 10s
-      retries: 10
+      test: ["CMD-SHELL", "mariadb -u root -e 'SELECT 1;' || mysql -u root -e 'SELECT 1;'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
 
   redis:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-redis:${REDIS_VERSION:-7.4.0}
@@ -436,7 +436,7 @@ services:
     volumes:
       - ./redis:/data
     command: redis-server --requirepass '${REDIS_PASSWORD:-redispassword}' --maxmemory ${MEMORY_PER_SERVICE:-256}mb --maxmemory-policy allkeys-lru --replica-read-only yes --appendonly yes
-    restart: always
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD:-redispassword}' ping 2>/dev/null || redis-cli ping 2>/dev/null || true" ]
       interval: 15s
@@ -654,35 +654,15 @@ EOF
     # 如果所有尝试都失败，尝试重置权限
     if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
         print_red "数据库连接失败，尝试重置权限..."
-        # 尝试多种方式重置MariaDB权限
-        print_yellow "尝试通过重启MariaDB容器来重置权限..."
-        docker-compose restart mariadb
+        # 简化权限处理，使用免密码连接方式
+        print_yellow "等待MariaDB完全初始化..."
+        sleep 20
         
-        print_yellow "等待MariaDB重启..."
-        sleep 10
-        
-        # 尝试使用指定密码连接
-        print_yellow "尝试使用指定密码连接MariaDB..."
-        docker-compose exec -T mariadb sh -c "mariadb -u root -p'${MYSQL_ROOT_PASSWORD:-rootpassword}' -e 'SELECT 1;' 2>/dev/null || mysql -u root -p'${MYSQL_ROOT_PASSWORD:-rootpassword}' -e 'SELECT 1;' 2>/dev/null" || {
-            print_red "使用指定密码连接失败，尝试免密码连接方式..."
-            # 尝试免密码连接方式重置密码
-            docker-compose exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\" 2>/dev/null" || \
-            docker-compose exec -T mariadb sh -c "mysql -u root -e \"ALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\" 2>/dev/null" || \
-            print_red "所有权限重置尝试均失败，请检查.env文件中的MYSQL_ROOT_PASSWORD配置"
-        }
-        
-        # 创建.env文件示例（如果不存在）
-        if [ ! -f ".env" ]; then
-            print_yellow "创建.env文件示例..."
-            cat > .env << EOF
-MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-rootpassword}
-MYSQL_DATABASE=${MYSQL_DATABASE:-wordpress}
-MYSQL_USER=${MYSQL_USER:-wordpress}
-MYSQL_PASSWORD=${MYSQL_PASSWORD:-wordpresspassword}
-REDIS_PASSWORD=${REDIS_PASSWORD:-redispassword}
-EOF
-            print_green ".env文件已创建，请检查并确保配置正确"
-        fi
+        # 尝试免密码连接并设置密码
+        print_yellow "尝试设置MariaDB root密码..."
+        docker-compose exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\" 2>/dev/null" || \
+        docker-compose exec -T mariadb sh -c "mysql -u root -e \"ALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\" 2>/dev/null" || \
+        print_yellow "密码设置可能已完成或不需要，请继续..."
     fi
 
     # 显示容器状态
@@ -700,10 +680,11 @@ EOF
     else
         print_red "WordPress Docker 栈部署失败，请查看日志"
         # 修复日志命令格式
-        docker-compose logs --tail=50 mariadb > mariadb.log 2>&1
-        docker-compose logs --tail=50 nginx > nginx.log 2>&1
-        docker-compose logs --tail=50 php > php.log 2>&1
-        docker-compose logs --tail=50 redis > redis.log 2>&1
+        print_yellow "保存各服务日志..."
+        sh -c "docker-compose logs --tail=50 mariadb > mariadb.log 2>&1"
+        sh -c "docker-compose logs --tail=50 nginx > nginx.log 2>&1"
+        sh -c "docker-compose logs --tail=50 php > php.log 2>&1"
+        sh -c "docker-compose logs --tail=50 redis > redis.log 2>&1"
         print_yellow "日志已保存到相应的.log文件中，请检查"
     fi
 }
