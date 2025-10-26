@@ -539,12 +539,10 @@ services:
     container_name: redis
     volumes:
       - ./redis:/data
-    # 使用数组格式
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redispassword}", "--maxmemory", "${MEMORY_PER_SERVICE:-256}mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "yes"]
+    # 使用数组格式，增加额外的内存配置参数
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redispassword}", "--maxmemory", "${MEMORY_PER_SERVICE:-256}mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "yes", "--activedefrag", "yes", "--maxmemory-samples", "5"]
     restart: unless-stopped
-    # 在容器级别应用 sysctl，作为宿主机配置的补充和保障
-    sysctls:
-      - vm.overcommit_memory=1
+    # 移除不支持的sysctl设置，改用Redis参数优化内存使用
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redispassword}", "ping"]
       interval: 10s
