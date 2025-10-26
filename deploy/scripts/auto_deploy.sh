@@ -92,19 +92,21 @@ detect_host_environment() {
     
     print_green "操作系统: $OS_TYPE $OS_VERSION"
     
-    # 检�?CPU 核心�?    if command -v nproc >/dev/null; then
+    # 检测CPU核心数
+    if command -v nproc >/dev/null; then
         CPU_CORES=$(nproc)
     elif [ -f /proc/cpuinfo ]; then
         CPU_CORES=$(grep -c "^processor" /proc/cpuinfo)
     else
-        print_yellow "警告: 无法检�?CPU 核心数，使用默认�?1"
+        print_yellow "警告: 无法检测CPU核心数，使用默认值1"
         CPU_CORES=1
     fi
     
-    # 检测可用内存（MB�?    if [ -f /proc/meminfo ]; then
+    # 检测可用内存（MB）
+    if [ -f /proc/meminfo ]; then
         AVAILABLE_RAM=$(grep MemTotal /proc/meminfo | awk '{print int($2/1024)}')
     else
-        print_yellow "警告: 无法检测可用内存，使用默认�?512MB"
+        print_yellow "警告: 无法检测可用内存，使用默认值512MB"
         AVAILABLE_RAM=512
     fi
     
