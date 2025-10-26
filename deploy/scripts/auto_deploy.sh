@@ -45,7 +45,8 @@ print_blue() {
 
 # 生成随机密码
 generate_password() {
-    local length=${1:-16}
+    # 移除local关键字以兼容标准sh
+    length=${1:-16}
     # 使用 /dev/urandom 生成随机密码，并确保包含特殊字符
     < /dev/urandom tr -dc 'A-Za-z0-9!@#$%^&*()_+=' | head -c $length
 }
@@ -405,22 +406,23 @@ deploy_wordpress_stack() {
     # 下载并配置 WordPress
     if [ ! -f "html/wp-config.php" ]; then
         if [ -z "$(ls -A html 2>/dev/null)" ]; then
-            print_blue "下载 WordPress 核心文件..."
-            local temp_file="/tmp/wordpress-latest.tar.gz"
-            if command -v wget >/dev/null; then
-                wget -q -O "$temp_file" https://wordpress.org/latest.tar.gz
-            else
-                curl -s -o "$temp_file" https://wordpress.org/latest.tar.gz
-            fi
-            if [ -f "$temp_file" ]; then
-                tar -xzf "$temp_file" -C .
-                mv wordpress/* html/
-                rm -rf wordpress "$temp_file"
-                print_green "文件解压完成..."
-                # 使用 Docker 容器设置文件权限
-                local retry_count=3
-                local retry_delay=5
-                local docker_success=false
+                print_blue "下载 WordPress 核心文件..."
+                # 移除local关键字以兼容标准sh
+                temp_file="/tmp/wordpress-latest.tar.gz"
+                if command -v wget >/dev/null; then
+                    wget -q -O "$temp_file" https://wordpress.org/latest.tar.gz
+                else
+                    curl -s -o "$temp_file" https://wordpress.org/latest.tar.gz
+                fi
+                if [ -f "$temp_file" ]; then
+                    tar -xzf "$temp_file" -C .
+                    mv wordpress/* html/
+                    rm -rf wordpress "$temp_file"
+                    print_green "文件解压完成..."
+                    # 使用 Docker 容器设置文件权限
+                    retry_count=3
+                    retry_delay=5
+                    docker_success=false
                 
                 # 设置 Docker 镜像源（可选，根据需要取消注释）
                 # echo '{"registry-mirrors": ["https://registry.docker-cn.com", "https://docker.mirrors.ustc.edu.cn"]}' > /etc/docker/daemon.json 2>/dev/null || true
@@ -472,14 +474,15 @@ deploy_wordpress_stack() {
         mkdir -p "html"
         
         # 生成 WordPress 密钥
-        local wp_keys=$(generate_wordpress_keys)
+        # 移除local关键字以兼容标准sh
+        wp_keys=$(generate_wordpress_keys)
         
         # 从环境变量获取数据库配置
-        local db_name=${MYSQL_DATABASE:-wordpress}
-        local db_user=${MYSQL_USER:-wordpress}
-        local db_password=${MYSQL_PASSWORD:-wordpresspassword}
-        local db_host=${WORDPRESS_DB_HOST:-mariadb:3306}
-        local table_prefix=${WORDPRESS_TABLE_PREFIX:-wp_}
+        db_name=${MYSQL_DATABASE:-wordpress}
+        db_user=${MYSQL_USER:-wordpress}
+        db_password=${MYSQL_PASSWORD:-wordpresspassword}
+        db_host=${WORDPRESS_DB_HOST:-mariadb:3306}
+        table_prefix=${WORDPRESS_TABLE_PREFIX:-wp_}
         
         # 创建基本的 wp-config.php 文件
         cat > html/wp-config.php << EOF
@@ -513,7 +516,8 @@ EOF
         print_green "✓ wp-config.php 文件创建成功"
     else
         # 检测 sed 版本，适应不同系统
-        local sed_cmd="sed -i"
+        # 移除local关键字以兼容标准sh
+        sed_cmd="sed -i"
         if ! sed --version >/dev/null 2>&1; then
             sed_cmd="sed -i ''"
         fi
