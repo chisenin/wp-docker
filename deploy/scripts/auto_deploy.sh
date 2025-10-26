@@ -332,8 +332,8 @@ EOF
         print_yellow "注意: .env 文件已存在，使用现有配置"
         source .env 2>/dev/null || :
         CPU_LIMIT=${CPU_LIMIT:-$((CPU_CORES / 2))}
-        MEM_LIMIT=${MEM_LIMIT:-${AVAILABLE_RAM/2}MB}
-        PHP_MEMORY_LIMIT=${PHP_MEMORY_LIMIT:-$PHP_MEMORY_LIMIT}
+        MEM_LIMIT=${MEM_LIMIT:-$((AVAILABLE_RAM / 2))MB}
+        PHP_MEMORY_LIMIT=${PHP_MEMORY_LIMIT:-256M}
     fi
     
     # 生成 docker-compose.yml 文件
