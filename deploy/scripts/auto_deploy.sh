@@ -1,9 +1,77 @@
-#!/bin/sh
+#!/bin/bash
 
 # WordPress Docker 自动部署脚本
 # 用于快速搭建WordPress 生产环境
 
 set -e
+
+# ==============================================================================
+# 函数：准备宿主机环境
+# ==============================================================================
+prepare_host_environment() {
+    echo "------------------------------------------------"
+    echo "检查并准备宿主机环境..."
+    echo "------------------------------------------------"
+    # 1. 修复 vm.overcommit_memory 问题 (仅影响宿主机，对容器是额外保障)
+    echo -n "检查宿主机 vm.overcommit_memory 设置... "
+    CURRENT_OVERCOMMIT=$(sysctl -n vm.overcommit_memory 2>/dev/null || echo "0")
+    
+    if [ "$CURRENT_OVERCOMMIT" -ne 1 ]; then
+        echo "当前值为 $CURRENT_OVERCOMMIT，建议设置为 1 以优化 Redis 性能并避免错误。"
+        # 尝试临时生效
+        if sudo sysctl -w vm.overcommit_memory=1 > /dev/null 2>&1; then
+            echo "✓ 已临时在当前会话中设置为 1。"
+        else
+            echo "✗ 无法设置，请检查 sudo 权限。"
+        fi
+        
+        # 针对不同系统写入不同位置
+        SYSCTL_CONF="/etc/sysctl.conf"
+        if [ "$OS_TYPE" = "alpine" ]; then
+            # Alpine 使用 /etc/sysctl.d/ 目录
+            mkdir -p /etc/sysctl.d 2>/dev/null || true
+            SYSCTL_CONF="/etc/sysctl.d/99-redis.conf"
+        fi
+        
+        # 尝试永久生效
+        if ! grep -q "^vm.overcommit_memory" "$SYSCTL_CONF" 2>/dev/null; then
+            echo "正在将 vm.overcommit_memory=1 写入 $SYSCTL_CONF..."
+            echo "vm.overcommit_memory = 1" | sudo tee -a "$SYSCTL_CONF" > /dev/null
+            echo "✓ 已写入配置文件。"
+        else
+            echo "✓ $SYSCTL_CONF 中已存在该配置。"
+        fi
+        
+        echo "⚠️  重要提示: 为了让修改永久生效，请手动在宿主机上运行以下命令，然后重新运行此脚本:"
+        if [ "$OS_TYPE" = "alpine" ]; then
+            echo "    sudo sysctl --system"
+        else
+            echo "    sudo sysctl -p"
+        fi
+        echo ""
+    else
+        echo "✓ 正确 (值为 $CURRENT_OVERCOMMIT)。"
+    fi
+    # 2. 检查 Docker 和 Docker Compose
+    echo -n "检查 Docker 服务状态... "
+    if ! sudo docker info > /dev/null 2>&1; then
+        echo "✗ 失败。Docker 服务未运行或无权限。请启动 Docker 服务。"
+        exit 1
+    else
+        echo "✓ 正常。"
+    fi
+    
+    echo -n "检查 Docker Compose... "
+    if ! docker-compose --version > /dev/null 2>&1; then
+        echo "✗ 失败。未找到 docker-compose 命令。"
+        exit 1
+    else
+        echo "✓ 正常。"
+    fi
+    
+    echo "宿主机环境检查完成。"
+    echo "------------------------------------------------"
+}
 
 # 全局变量定义
 DEPLOY_DIR="$(pwd)"
@@ -87,6 +155,9 @@ detect_host_environment() {
     elif [ -f /etc/redhat-release ]; then
         OS_TYPE="redhat"
         OS_VERSION=$(cat /etc/redhat-release)
+    elif [ -f /etc/alpine-release ]; then
+        OS_TYPE="alpine"
+        OS_VERSION=$(cat /etc/alpine-release)
     else
         OS_TYPE=$(uname)
         OS_VERSION=$(uname -r)
@@ -146,6 +217,14 @@ collect_system_parameters() {
             print_yellow "安装必要的工具.."
             yum install -y -q curl wget tar gzip sed grep
         fi
+    elif [ "$OS_TYPE" = "alpine" ]; then
+        if command -v apk >/dev/null; then
+            print_yellow "更新软件包列表.."
+            apk update -q
+            
+            print_yellow "安装必要的工具.."
+            apk add -q curl wget tar gzip sed grep bash
+        fi
     fi
     
     # 检查Docker和Docker Compose是否已安装
@@ -169,9 +248,19 @@ collect_system_parameters() {
         if command -v systemctl >/dev/null; then
             systemctl start docker
             systemctl enable docker
-        else
+        elif command -v service >/dev/null; then
             service docker start
-            chkconfig docker on
+            if command -v chkconfig >/dev/null; then
+                chkconfig docker on
+            elif command -v update-rc.d >/dev/null; then
+                update-rc.d docker defaults
+            fi
+        elif [ "$OS_TYPE" = "alpine" ]; then
+            # Alpine 使用 openrc
+            if command -v rc-service >/dev/null; then
+                rc-service docker start
+                rc-update add docker default
+            fi
         fi
     fi
     
@@ -381,15 +470,18 @@ services:
       - ./logs/nginx:/var/log/nginx
     depends_on:
       php:
-        condition: service_started
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
+    # 使用命令数组格式，完美兼容 Alpine 的 busybox shell
     command: ["/docker-entrypoint.sh", "nginx", "-g", "daemon off;"]
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
+      test: ["CMD", "curl", "-f", "http://localhost/"]
       interval: 30s
       timeout: 10s
       retries: 3
-    # 暂时移除资源限制以提高启动成功率
+      start_period: 40s
 
   php:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-8.3.26}
@@ -397,24 +489,18 @@ services:
     volumes:
       - ./html:/var/www/html
       - ${PHP_INI_PATH:-./deploy/configs/php.ini}:/usr/local/etc/php/php.ini:ro
-    depends_on:
-      mariadb:
-        condition: service_started
-      redis:
-        condition: service_started
     restart: unless-stopped
+    # 使用数组格式，保持一致性
+    command: ["php-fpm"]
     healthcheck:
-      test: ["CMD-SHELL", "php-fpm -t || php -m"]
+      test: ["CMD-SHELL", "php -v > /dev/null && exit 0 || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 5
-    # 暂时移除资源限制以提高启动成功率
+      retries: 3
 
   mariadb:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-mariadb:${MARIADB_VERSION:-11.3.2}
     container_name: mariadb
-    volumes:
-      - ./mysql:/var/lib/mysql
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
@@ -422,29 +508,33 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-wordpresspassword}
       MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "true"
       MARIADB_ROOT_HOST: "%"
+    volumes:
+      - ./mysql:/var/lib/mysql
+      - ./logs/mariadb:/var/log/mysql
     restart: unless-stopped
-    # 暂时移除资源限制以提高启动成功率
     healthcheck:
-      test: ["CMD-SHELL", "mariadb -u root -e 'SELECT 1;' >/dev/null 2>&1 || mysql -u root -e 'SELECT 1;' >/dev/null 2>&1 || true"]
-      interval: 15s
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost --user=\$MYSQL_USER --password=\$MYSQL_PASSWORD"]
+      interval: 30s
       timeout: 10s
-      retries: 20
+      retries: 5
+      start_period: 60s
 
   redis:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-redis:${REDIS_VERSION:-7.4.0}
     container_name: redis
     volumes:
       - ./redis:/data
-    command: redis-server --requirepass '${REDIS_PASSWORD:-redispassword}' --maxmemory ${MEMORY_PER_SERVICE:-256}mb --maxmemory-policy allkeys-lru --replica-read-only yes --appendonly yes
+    # 使用数组格式
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redispassword}", "--maxmemory", "${MEMORY_PER_SERVICE:-256}mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "yes"]
     restart: unless-stopped
+    # 在容器级别应用 sysctl，作为宿主机配置的补充和保障
     sysctls:
-      vm.overcommit_memory: "1"
+      - vm.overcommit_memory=1
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD:-redispassword}' ping 2>/dev/null || redis-cli ping 2>/dev/null || true"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redispassword}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 3
-    # 暂时移除资源限制以提高启动成功率
 EOF
         
         print_green "docker-compose.yml 文件创建成功"
@@ -486,17 +576,18 @@ deploy_wordpress_stack() {
                 # echo '{"registry-mirrors": ["https://registry.docker-cn.com", "https://docker.mirrors.ustc.edu.cn"]}' > /etc/docker/daemon.json 2>/dev/null || true
                 
                 # 尝试使用 Docker 设置权限
-                for i in $(seq 1 $retry_count); do
-                    print_blue "设置文件权限 (尝试 $i/$retry_count)..."
-                    if docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R www-data:www-data /var/www/html 2>/dev/null; then
-                        docker_success=true
-                        print_green "Docker 设置权限成功"
-                    break
-                    else
-                        print_yellow "警告: Docker 设置权限失败，$retry_delay 秒后重试..."
-                        sleep $retry_delay
-                    fi
-                done
+        for i in $(seq 1 $retry_count); do
+            print_blue "设置文件权限 (尝试 $i/$retry_count)..."
+            # 在Alpine容器中使用www-data的UID/GID而非用户名，提高兼容性
+            if docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R 33:33 /var/www/html 2>/dev/null; then
+                docker_success=true
+                print_green "Docker 设置权限成功"
+            break
+            else
+                print_yellow "警告: Docker 设置权限失败，$retry_delay 秒后重试..."
+                sleep $retry_delay
+            fi
+        done
                 
                 # 如果 Docker 方式失败，尝试直接使用 chown
                 if [ "$docker_success" = false ]; then
@@ -637,17 +728,17 @@ EOF
             # 检查MariaDB是否接受连接，优先使用mariadb命令
                 if docker-compose exec -T mariadb sh -c "command -v mariadb >/dev/null && mariadb --version" >/dev/null 2>&1; then
                     # 使用mariadb命令
-                    if docker-compose exec -T mariadb mariadb -u root -p${MYSQL_ROOT_PASSWORD:-rootpassword} -e 'SELECT 1;' >/dev/null 2>&1; then
-                        print_green "数据库连接成功"
-                        break
-                    fi
-                else
-                    # 回退到mysql命令
-                    if docker-compose exec -T mariadb mysql -u root -p${MYSQL_ROOT_PASSWORD:-rootpassword} -e 'SELECT 1;' >/dev/null 2>&1; then
-                        print_green "数据库连接成功"
-                        break
-                    fi
+                if docker-compose exec -T mariadb sh -c "mariadb -u root -p'${MYSQL_ROOT_PASSWORD:-rootpassword}' -e 'SELECT 1;'" >/dev/null 2>&1; then
+                    print_green "数据库连接成功"
+                    break
                 fi
+            else
+                # 回退到mysql命令
+                if docker-compose exec -T mariadb sh -c "mysql -u root -p'${MYSQL_ROOT_PASSWORD:-rootpassword}' -e 'SELECT 1;'" >/dev/null 2>&1; then
+                    print_green "数据库连接成功"
+                    break
+                fi
+            fi
         fi
         
         RETRY_COUNT=$((RETRY_COUNT+1))
@@ -662,8 +753,9 @@ EOF
         
         # 尝试免密码连接并设置密码
         print_yellow "尝试设置MariaDB root密码..."
-        docker-compose exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\" 2>/dev/null" || \
-        docker-compose exec -T mariadb sh -c "mysql -u root -e \"ALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\" 2>/dev/null" || \
+        # 在Alpine环境中使用更安全的引号处理
+        docker-compose exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY '\''${MYSQL_ROOT_PASSWORD:-rootpassword}'\''; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '\''${MYSQL_ROOT_PASSWORD:-rootpassword}'\''; FLUSH PRIVILEGES;\" 2>/dev/null" || \
+        docker-compose exec -T mariadb sh -c "mysql -u root -e \"ALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY '\''${MYSQL_ROOT_PASSWORD:-rootpassword}'\''; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '\''${MYSQL_ROOT_PASSWORD:-rootpassword}'\''; FLUSH PRIVILEGES;\" 2>/dev/null" || \
         print_yellow "密码设置可能已完成或不需要，请继续..."
     fi
 
@@ -762,6 +854,9 @@ display_deployment_info() {
 main() {
     # 创建必要的目录
     mkdir -p "$DEPLOY_DIR/scripts" 2>/dev/null || :
+    
+    # 调用环境准备函数
+    prepare_host_environment
     
     # 执行部署步骤
     detect_host_environment
