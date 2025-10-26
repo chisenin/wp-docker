@@ -619,6 +619,16 @@ EOF
     # 等待服务启动
     print_blue "等待服务初始化.."
     sleep 15
+    
+    # 验证数据库连接
+    print_blue "验证数据库连接..."
+    if docker-compose exec -T mariadb mysql -u root -p"${MYSQL_ROOT_PASSWORD:-rootpassword}" -e "SELECT 1;" >/dev/null 2>&1; then
+        print_green "数据库连接成功"
+    else
+        print_red "数据库连接失败，尝试重置权限..."
+        # 尝试使用docker exec直接设置root密码
+        docker-compose exec -T mariadb sh -c "mysql -u root -e \"ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\"" || print_yellow "权限重置尝试失败，请检查.env文件中的MYSQL_ROOT_PASSWORD配置"
+    fi
 
     # 显示容器状态
     print_blue "显示容器状态.."
