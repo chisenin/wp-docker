@@ -1,9 +1,10 @@
 ﻿version: '3.8'
 
 services:
-  # --- MariaDB 鏁版嵁搴撴湇鍔?---
+  # --- MariaDB 数据库服务 ---
   mariadb:
-    # 浣跨敤鎴戜滑鏋勫缓鐨凪ariaDB闀滃儚锛屾敮鎸佽嚜鍔ㄧ増鏈洿鏂?    build:
+    # 使用我们构建的MariaDB镜像，支持自动更新
+    build:
       context: .
       dockerfile: build/Dockerfiles/mariadb/Dockerfile
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-mariadb:${MARIADB_VERSION:-11.3.2}
@@ -32,9 +33,10 @@ services:
           cpus: ${CPU_LIMIT:-1}
           memory: ${MEMORY_LIMIT:-1G}
 
-  # --- Redis 缂撳瓨鏈嶅姟 ---
+  # --- Redis 缓存服务 ---
   redis:
-    # 浣跨敤鎴戜滑鏋勫缓鐨凴edis闀滃儚锛屾敮鎸佽嚜鍔ㄧ増鏈洿鏂?    build:
+    # 使用我们构建的Redis镜像，支持自动更新
+    build:
       context: .
       dockerfile: build/Dockerfiles/redis/Dockerfile
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-redis:${REDIS_VERSION:-7.4.0}
@@ -56,9 +58,10 @@ services:
       timeout: 10s
       retries: 3
 
-  # --- PHP-FPM 鏈嶅姟 ---
+  # --- PHP-FPM 服务 ---
   php:
-    # 浣跨敤鎴戜滑鏋勫缓鐨凱HP闀滃儚锛屾敮鎸佽嚜鍔ㄧ増鏈洿鏂?    build:
+    # 使用我们构建的PHP镜像，支持自动更新
+    build:
       context: .
       dockerfile: build/Dockerfiles/php/Dockerfile
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-8.3.26}
@@ -67,9 +70,9 @@ services:
     networks:
       - app-network
     volumes:
-      # 娉ㄦ剰锛氬涓绘満 html 鐩綍鎸傝浇鍒板鍣ㄥ唴 /var/www/html
+      # 注意：主机html目录映射到容器内/var/www/html
       - ./html:/var/www/html
-      # 浣跨敤deploy鐩綍涓殑PHP閰嶇疆
+      # 使用deploy目录中的PHP配置
       - ./build/deploy_configs/php/php.ini:/usr/local/etc/php/php.ini:ro
     expose:
       - "9000"
@@ -93,9 +96,10 @@ services:
       timeout: 10s
       retries: 3
 
-  # --- Nginx 鏈嶅姟 ---
+  # --- Nginx 服务 ---
   nginx:
-    # 浣跨敤鎴戜滑鏋勫缓鐨凬ginx闀滃儚锛屾敮鎸佽嚜鍔ㄧ増鏈洿鏂?    build:
+    # 使用我们构建的Nginx镜像，支持自动更新
+    build:
       context: .
       dockerfile: build/Dockerfiles/nginx/Dockerfile
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-nginx:${NGINX_VERSION:-1.27.2}
@@ -104,7 +108,8 @@ services:
     networks:
       - app-network
     volumes:
-      # 鎸傝浇鑷畾涔夐厤缃枃浠?      - ./build/deploy_configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # 映射自定义配置文件
+      - ./build/deploy_configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./build/deploy_configs/nginx/conf.d:/etc/nginx/conf.d:ro
       - ./html:/var/www/html
       - nginx_logs:/var/log/nginx
