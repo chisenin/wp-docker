@@ -327,6 +327,12 @@ EOF
         
         # 验证PHP配置文件是否存在且为文件类型
         PHP_INI_PATH=${PHP_INI_PATH:-./deploy/configs/php.ini}
+        # 检查是否为目录，如果是则删除
+        if [ -d "$PHP_INI_PATH" ]; then
+            print_yellow "警告: $PHP_INI_PATH 被检测为目录，正在删除..."
+            rm -rf "$PHP_INI_PATH"
+        fi
+        
         if [ ! -f "$PHP_INI_PATH" ]; then
             print_yellow "警告: PHP配置文件 $PHP_INI_PATH 不存在或不是文件"
             # 确保目录存在
