@@ -224,7 +224,8 @@ optimize_parameters() {
     MEM_LIMIT=$((AVAILABLE_RAM / 2))
     
     # PHP 内存限制
-    local PHP_MEMORY_LIMIT="512M"
+    # 移除local关键字以兼容标准sh
+    PHP_MEMORY_LIMIT="512M"
     if [ "$AVAILABLE_RAM" -lt 2048 ]; then
         PHP_MEMORY_LIMIT="256M"
     elif [ "$AVAILABLE_RAM" -lt 4096 ]; then
@@ -241,22 +242,23 @@ optimize_parameters() {
     if [ ! -f ".env" ]; then
         print_blue "生成环境配置文件 (.env)..."
         
-        local root_password=$(generate_password)
-        local db_user_password=$(generate_password)
-        local wp_keys=$(generate_wordpress_keys)
+        # 移除local关键字以兼容标准sh
+        root_password=$(generate_password)
+        db_user_password=$(generate_password)
+        wp_keys=$(generate_wordpress_keys)
         
-        local php_version="8.3.26"
-        local nginx_version="1.27.2"
-        local mariadb_version="11.3.2"
-        local redis_version="7.4.0"
+        php_version="8.3.26"
+        nginx_version="1.27.2"
+        mariadb_version="11.3.2"
+        redis_version="7.4.0"
         
         # 清理 WordPress 密钥中的特殊字符
         # 移除回车并转义引号
-        local sanitized_keys=$(echo "$wp_keys" | sed 's/\r//g' | sed 's/"/\\"/g')
+        sanitized_keys=$(echo "$wp_keys" | sed 's/\r//g' | sed 's/"/\\"/g')
         
         # 先计算日期值
-        local current_date=$(date)
-        local redis_pwd=$(generate_password 16)
+        current_date=$(date)
+        redis_pwd=$(generate_password 16)
         
         cat > .env << EOF
 # WordPress Docker 环境配置文件
@@ -573,6 +575,23 @@ setup_disk_space_management() {
     print_blue "[步骤7] 设置磁盘空间管理..."
     # 此处可以添加磁盘空间管理的逻辑
     print_green "✓ 磁盘空间管理设置完成"
+}
+
+# 更新 WordPress 配置文件函数
+update_wp_config() {
+    # 移除local关键字以兼容标准sh
+    key_name="$1"
+    key_value="$2"
+    file_path="html/wp-config.php"
+    
+    # 使用 sed 更新配置文件
+    if grep -q "$key_name" "$file_path"; then
+        # 替换现有值
+        sed -i "s|^define('$key_name',.*);|define('$key_name', '$key_value');|" "$file_path"
+    else
+        # 添加新配置（在最后一个?>前添加）
+        sed -i "s|^\?>$|define('$key_name', '$key_value');\n?>|" "$file_path"
+    fi
 }
 
 # 显示部署信息
