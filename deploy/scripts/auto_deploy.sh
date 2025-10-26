@@ -362,7 +362,7 @@ services:
       resources:
         limits:
           cpus: "${CPU_LIMIT:-1}.0"
-          memory: "${MEM_LIMIT:-512M}"
+          memory: "512M"
 
   mariadb:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-mariadb:${MARIADB_VERSION:-11.3.2}

@@ -99,7 +99,7 @@ services:
       resources:
         limits:
           cpus: ${CPU_LIMIT:-1}
-          memory: ${MEMORY_LIMIT:-512M}
+          memory: 512M
 
   # --- Nginx 服务 ---
   nginx:
