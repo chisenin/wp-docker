@@ -383,7 +383,7 @@ services:
       php:
         condition: service_started
     restart: unless-stopped
-    command: nginx -g 'daemon off;'
+    command: ["/docker-entrypoint.sh", "nginx", "-g", "daemon off;"]
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
       interval: 30s
