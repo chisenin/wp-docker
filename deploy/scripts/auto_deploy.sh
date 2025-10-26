@@ -380,9 +380,15 @@ services:
       - ./configs/nginx/conf.d:/etc/nginx/conf.d
       - ./logs/nginx:/var/log/nginx
     depends_on:
-      - php
+      php:
+        condition: service_started
     restart: always
     command: ["nginx", "-g", "daemon off;"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       resources:
         limits:
@@ -396,9 +402,16 @@ services:
       - ./html:/var/www/html
       - ${PHP_INI_PATH:-./deploy/configs/php.ini}:/usr/local/etc/php/php.ini:ro
     depends_on:
-      - mariadb
-      - redis
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_started
     restart: always
+    healthcheck:
+      test: ["CMD", "php-fpm", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       resources:
         limits:
@@ -424,7 +437,7 @@ services:
           cpus: "${CPU_LIMIT:-1}.0"
           memory: "${MEMORY_PER_SERVICE:-256}M"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      test: ["CMD-SHELL", "exec mariadb -u root -p"'${MYSQL_ROOT_PASSWORD:-rootpassword}'" -e "SELECT 1;" || exec mysql -u root -p"'${MYSQL_ROOT_PASSWORD:-rootpassword}'" -e "SELECT 1;"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -436,6 +449,11 @@ services:
       - ./redis:/data
     command: redis-server --requirepass ${REDIS_PASSWORD:-redispassword} --maxmemory ${MEMORY_PER_SERVICE:-256}mb --maxmemory-policy allkeys-lru --delayed-fsync 0 --replica-read-only yes
     restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redispassword}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       resources:
         limits:
@@ -538,7 +556,10 @@ deploy_wordpress_stack() {
         db_host=${WORDPRESS_DB_HOST:-mariadb:3306}
         table_prefix=${WORDPRESS_TABLE_PREFIX:-wp_}
         
-        # 创建基本的 wp-config.php 文件
+        # 创建基本的 wp-config.php 文件，确保密钥格式正确
+        # 先生成密钥并格式化
+        wp_keys_formatted=$(generate_wordpress_keys)
+        
         cat > html/wp-config.php << EOF
 <?php
 /**
@@ -558,7 +579,7 @@ define('DB_COLLATE', '');
 $table_prefix = '$table_prefix';
 
 // 安全密钥
-$wp_keys
+$wp_keys_formatted
 
 // 其他设置
 define('WP_DEBUG', false);
@@ -616,18 +637,47 @@ EOF
     print_blue "启动 Docker 容器..."
     docker-compose up -d
 
-    # 等待服务启动
+    # 等待服务启动 - 增加等待时间并检查MariaDB健康状态
     print_blue "等待服务初始化.."
-    sleep 15
+    MAX_RETRIES=10
+    RETRY_COUNT=0
     
-    # 验证数据库连接
-    print_blue "验证数据库连接..."
-    if docker-compose exec -T mariadb mysql -u root -p"${MYSQL_ROOT_PASSWORD:-rootpassword}" -e "SELECT 1;" >/dev/null 2>&1; then
-        print_green "数据库连接成功"
-    else
+    while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+        print_yellow "等待MariaDB初始化 (尝试 $((RETRY_COUNT+1))/$MAX_RETRIES)"
+        sleep 10
+        
+        # 检查MariaDB容器是否正在运行
+        if docker-compose ps mariadb | grep -q "Up"; then
+            # 检查MariaDB是否接受连接，优先使用mariadb命令
+            if docker-compose exec -T mariadb sh -c "command -v mariadb >/dev/null && mariadb --version" >/dev/null 2>&1; then
+                # 使用mariadb命令
+                if docker-compose exec -T mariadb mariadb -u root -p"${MYSQL_ROOT_PASSWORD:-rootpassword}" -e "SELECT 1;" >/dev/null 2>&1; then
+                    print_green "数据库连接成功"
+                    break
+                fi
+            else
+                # 回退到mysql命令
+                if docker-compose exec -T mariadb mysql -u root -p"${MYSQL_ROOT_PASSWORD:-rootpassword}" -e "SELECT 1;" >/dev/null 2>&1; then
+                    print_green "数据库连接成功"
+                    break
+                fi
+            fi
+        fi
+        
+        RETRY_COUNT=$((RETRY_COUNT+1))
+    done
+    
+    # 如果所有尝试都失败，尝试重置权限
+    if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
         print_red "数据库连接失败，尝试重置权限..."
         # 尝试使用docker exec直接设置root密码
-        docker-compose exec -T mariadb sh -c "mysql -u root -e \"ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\"" || print_yellow "权限重置尝试失败，请检查.env文件中的MYSQL_ROOT_PASSWORD配置"
+        if docker-compose exec -T mariadb sh -c "command -v mariadb >/dev/null" >/dev/null 2>&1; then
+            # 使用mariadb命令
+            docker-compose exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\"" || print_yellow "权限重置尝试失败，请检查.env文件中的MYSQL_ROOT_PASSWORD配置"
+        else
+            # 回退到mysql命令
+            docker-compose exec -T mariadb sh -c "mysql -u root -e \"ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\"" || print_yellow "权限重置尝试失败，请检查.env文件中的MYSQL_ROOT_PASSWORD配置"
+        fi
     fi
 
     # 显示容器状态
