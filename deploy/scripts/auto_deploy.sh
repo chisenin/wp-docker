@@ -221,8 +221,12 @@ optimize_parameters() {
         CPU_LIMIT=1
     fi
     
-    # 内存限制 - 使用一半的可用内存
+    # 内存限制 - 使用一半的可用内存，但确保不小于Docker允许的最小值6MB
     MEM_LIMIT=$((AVAILABLE_RAM / 2))
+    if [ "$MEM_LIMIT" -lt 6 ]; then
+        MEM_LIMIT=6
+        print_yellow "警告: 系统内存过小，将内存限制设为Docker允许的最小值6MB"
+    fi
     
     # PHP 内存限制
     # 移除local关键字以兼容标准sh
