@@ -353,7 +353,7 @@ services:
     container_name: php
     volumes:
       - ./html:/var/www/html
-      - ./configs/php.ini:/usr/local/etc/php/php.ini
+      - ./deploy/configs/php.ini:/usr/local/etc/php/php.ini
     depends_on:
       - mariadb
       - redis
