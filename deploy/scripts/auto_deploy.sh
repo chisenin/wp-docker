@@ -16,6 +16,12 @@ prepare_host_environment() {
     # 动态检测是否在 LXC 容器中
     if grep -q lxc /proc/1/cgroup 2>/dev/null; then
         echo "注意: 当前运行在 LXC 容器中，修改内核参数需要特殊处理..."
+        # 检查 LXC 是否支持嵌套 Docker
+        if [ -f /etc/pve/lxc/$(hostname).conf ]; then
+            if ! grep -q "lxc.apparmor.profile: unconfined" /etc/pve/lxc/$(hostname).conf; then
+                echo "⚠️ LXC 配置可能不支持嵌套 Docker，建议添加 'lxc.apparmor.profile: unconfined' 到 LXC 配置"
+            fi
+        fi
     fi
     
     # 1. 修复 vm.overcommit_memory (使用 /proc/sys)
@@ -130,33 +136,32 @@ print_blue() {
 # 生成随机密码
 generate_password() {
     length=${1:-16}
-    # 使用 /dev/urandom 生成随机密码，并确保包含特殊字符
-    < /dev/urandom tr -dc 'A-Za-z0-9!@#$%^&*()_+=' | head -c $length
+    # 使用 /dev/urandom 生成随机密码，确保包含多种字符
+    < /dev/urandom tr -dc 'A-Za-z0-9!@#$%^&*()_+-=' | head -c $length
 }
 
 # 生成 WordPress 安全密钥
 generate_wordpress_keys() {
     # 从WordPress API 获取安全密钥
     if command -v curl >/dev/null; then
-        curl -s https://api.wordpress.org/secret-key/1.1/salt/
+        curl -s https://api.wordpress.org/secret-key/1.1/salt/ | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"
     elif command -v wget >/dev/null; then
-        wget -q -O - https://api.wordpress.org/secret-key/1.1/salt/
+        wget -q -O - https://api.wordpress.org/secret-key/1.1/salt/ | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"
     else
         # 如果无法获取，生成随机密钥
-        echo "define('AUTH_KEY', '$(generate_password 64)');"
-        echo "define('SECURE_AUTH_KEY', '$(generate_password 64)');"
-        echo "define('LOGGED_IN_KEY', '$(generate_password 64)');"
-        echo "define('NONCE_KEY', '$(generate_password 64)');"
-        echo "define('AUTH_SALT', '$(generate_password 64)');"
-        echo "define('SECURE_AUTH_SALT', '$(generate_password 64)');"
-        echo "define('LOGGED_IN_SALT', '$(generate_password 64)');"
-        echo "define('NONCE_SALT', '$(generate_password 64)');"
+        echo "AUTH_KEY=$(generate_password 64)"
+        echo "SECURE_AUTH_KEY=$(generate_password 64)"
+        echo "LOGGED_IN_KEY=$(generate_password 64)"
+        echo "NONCE_KEY=$(generate_password 64)"
+        echo "AUTH_SALT=$(generate_password 64)"
+        echo "SECURE_AUTH_SALT=$(generate_password 64)"
+        echo "LOGGED_IN_SALT=$(generate_password 64)"
+        echo "NONCE_SALT=$(generate_password 64)"
     fi
 }
 
 # 检测主机环境
 detect_host_environment() {
-
     print_blue "[步骤1] 检测主机环境.."
     
     # 检测操作系统类型
@@ -268,7 +273,7 @@ collect_system_parameters() {
             if command -v chkconfig >/dev/null; then
                 chkconfig docker on
             elif command -v update-rc.d >/dev/null; then
-                update-rc.d docker defaults
+                update-rc.d docker扔
             fi
         elif [ "$OS_TYPE" = "alpine" ]; then
             # Alpine 使用 openrc
@@ -311,6 +316,10 @@ determine_deployment_directory() {
     mkdir -p "$DEPLOY_DIR/mysql"
     mkdir -p "$DEPLOY_DIR/redis"
     
+    # 设置初始权限，预防 MariaDB 日志问题
+    docker run --rm -v "$(pwd)/logs/mariadb:/var/log/mysql" alpine:latest chown -R 999:999 /var/log/mysql
+    docker run --rm -v "$(pwd)/mysql:/var/lib/mysql" alpine:latest chown -R 999:999 /var/lib/mysql
+    
     print_green "部署目录: $DEPLOY_DIR"
     print_green "备份目录: $BACKUP_DIR"
 }
@@ -320,17 +329,17 @@ optimize_parameters() {
     print_blue "[步骤4] 优化系统参数..."
     
     # 根据系统资源优化参数
-    # 根据系统可用内存计算合适的内存分配
-    if [ "$AVAILABLE_RAM" -lt 1024 ]; then
+    # 内存限制优化
+    TOTAL_MIN_MEMORY=768  # Nginx + PHP + MariaDB 最小内存需求
+    if [ "$AVAILABLE_RAM" -lt "$TOTAL_MIN_MEMORY" ]; then
         MEMORY_PER_SERVICE=256
         print_yellow "警告: 系统内存不足，将为每个服务分配最小可行内存: ${MEMORY_PER_SERVICE}MB"
     else
-        # 如果系统内存充足，给每个服务分配合理的内存
-        MEMORY_PER_SERVICE=$((AVAILABLE_RAM * 2 / 7)) # 使用约2/7的可用内存给每个主要服务
+        MEMORY_PER_SERVICE=$((AVAILABLE_RAM * 2 / 7))
         print_green "为各服务分配内存: ${MEMORY_PER_SERVICE}MB"
     fi
     
-    # CPU 限制 - 使用一半的 CPU 核心
+    # CPU 限制
     CPU_LIMIT=$((CPU_CORES / 2))
     if [ "$CPU_LIMIT" -lt 1 ]; then
         CPU_LIMIT=1
@@ -356,7 +365,6 @@ optimize_parameters() {
         
         root_password=$(generate_password)
         db_user_password=$(generate_password)
-        wp_keys=$(generate_wordpress_keys)
         redis_pwd=$(generate_password 16)
         
         php_version="8.3.26"
@@ -400,7 +408,7 @@ UPLOAD_MAX_FILESIZE=64M
 PHP_INI_PATH=./deploy/configs/php.ini
 
 # WordPress 密钥
-$wp_keys
+$(generate_wordpress_keys)
 EOF
         
         # 转换行尾字符
@@ -435,7 +443,6 @@ EOF
         
         # 验证PHP配置文件是否存在且为文件类型
         PHP_INI_PATH=${PHP_INI_PATH:-./deploy/configs/php.ini}
-        # 检查是否为目录，如果是则删除
         if [ -d "$PHP_INI_PATH" ]; then
             print_yellow "警告: $PHP_INI_PATH 被检测为目录，正在删除..."
             rm -rf "$PHP_INI_PATH"
@@ -443,9 +450,7 @@ EOF
         
         if [ ! -f "$PHP_INI_PATH" ]; then
             print_yellow "警告: PHP配置文件 $PHP_INI_PATH 不存在或不是文件"
-            # 确保目录存在
             mkdir -p "$(dirname "$PHP_INI_PATH")"
-            # 创建默认的php.ini文件
             echo "[PHP]" > "$PHP_INI_PATH"
             echo "memory_limit = ${PHP_MEMORY_LIMIT:-512M}" >> "$PHP_INI_PATH"
             echo "upload_max_filesize = ${UPLOAD_MAX_FILESIZE:-64M}" >> "$PHP_INI_PATH"
@@ -469,13 +474,13 @@ services:
       - ./logs/nginx:/var/log/nginx
     depends_on:
       php:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       mariadb:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
-    command: nginx -g 'daemon off;'  # 绕过自定义 entrypoint 以避免 curl 错误
+    command: nginx -g 'daemon off;'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/"]
       interval: 30s
@@ -499,13 +504,12 @@ services:
   mariadb:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-mariadb:${MARIADB_VERSION:-11.3.2}
     container_name: mariadb
-    user: "999:999"  # 使用 mysql UID/GID 以修复权限问题
+    user: "999:999"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
       MYSQL_USER: ${MYSQL_USER:-wordpress}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-wordpresspassword}
-      MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "true"
       MARIADB_ROOT_HOST: "%"
     volumes:
       - ./mysql:/var/lib/mysql
@@ -523,7 +527,6 @@ services:
     user: "999:999"
     volumes:
       - ./redis:/data
-      - ./logs/redis:/var/log/redis  # 添加 Redis 日志卷
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redispassword}", "--maxmemory", "${MEMORY_PER_SERVICE:-256}mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "yes"]
     restart: unless-stopped
     healthcheck:
@@ -546,15 +549,13 @@ EOF
         print_green "docker-compose.yml 文件创建成功"
     else
         print_yellow "注意: docker-compose.yml 文件已存在，使用现有配置"
-        # 对已存在的文件也尝试转换行尾字符
-        print_yellow "尝试转换现有 docker-compose.yml 的行尾字符..."
+        # 转换行尾字符
         if command -v dos2unix >/dev/null 2>&1; then
             dos2unix docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功转换现有 docker-compose.yml 文件行尾字符"
         elif command -v sed >/dev/null 2>&1; then
             sed -i 's/\r$//' docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功使用 sed 转换现有 docker-compose.yml 文件行尾字符"
         fi
     fi
-    print_yellow "      可以使用 'dos2unix auto_deploy.sh .env docker-compose.yml' 命令进行转换"
 }
 
 # 部署 WordPress Docker 栈
@@ -564,42 +565,39 @@ deploy_wordpress_stack() {
     # 下载并配置WordPress
     if [ ! -f "html/wp-config.php" ]; then
         if [ -z "$(ls -A html 2>/dev/null)" ]; then
-                print_blue "下载 WordPress 核心文件..."
-                temp_file="/tmp/wordpress-latest.tar.gz"
-                if command -v wget >/dev/null; then
-                    wget -q -O "$temp_file" https://wordpress.org/latest.tar.gz
-                else
-                    curl -s -o "$temp_file" https://wordpress.org/latest.tar.gz
-                fi
-                if [ -f "$temp_file" ]; then
-                    tar -xzf "$temp_file" -C .
-                    mv wordpress/* html/
-                    rm -rf wordpress "$temp_file"
-                    print_green "文件解压完成..."
-                    # 使用 Docker 容器设置文件权限
-                    retry_count=3
-                    retry_delay=5
-                    docker_success=false
-                
-                # 尝试使用 Docker 设置权限
-        for i in $(seq 1 $retry_count); do
-            print_blue "设置文件权限 (尝试 $i/$retry_count)..."
-            # 在Alpine容器中使用www-data的UID/GID而非用户名，提高兼容性
-            if docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R 33:33 /var/www/html 2>/dev/null; then
-                docker_success=true
-                print_green "Docker 设置权限成功"
-            break
+            print_blue "下载 WordPress 核心文件..."
+            temp_file="/tmp/wordpress-latest.tar.gz"
+            if command -v wget >/dev/null; then
+                wget -q -O "$temp_file" https://wordpress.org/latest.tar.gz
             else
-                print_yellow "警告: Docker 设置权限失败，$retry_delay 秒后重试..."
-                sleep $retry_delay
+                curl -s -o "$temp_file" https://wordpress.org/latest.tar.gz
             fi
-        done
+            if [ -f "$temp_file" ]; then
+                tar -xzf "$temp_file" -C .
+                mv wordpress/* html/
+                rm -rf wordpress "$temp_file"
+                print_green "文件解压完成..."
+                # 设置文件权限
+                retry_count=3
+                retry_delay=5
+                docker_success=false
                 
-                # 如果 Docker 方式失败，尝试直接使用 chown
+                for i in $(seq 1 $retry_count); do
+                    print_blue "设置文件权限 (尝试 $i/$retry_count)..."
+                    if docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R 33:33 /var/www/html 2>/dev/null; then
+                        docker_success=true
+                        print_green "Docker 设置权限成功"
+                        break
+                    else
+                        print_yellow "警告: Docker 设置权限失败，$retry_delay 秒后重试..."
+                        sleep $retry_delay
+                    fi
+                done
+                
                 if [ "$docker_success" = false ]; then
                     print_yellow "警告: Docker 权限设置失败，尝试直接使用 chown..."
                     if command -v chown >/dev/null; then
-                        if chown -R 33:33 "$(pwd)/html" 2>/dev/null; then  # 33 是 www-data 用户的 UID
+                        if chown -R 33:33 "$(pwd)/html" 2>/dev/null; then
                             print_green "直接 chown 命令设置成功"
                         else
                             print_yellow "警告: 请手动执行以下命令设置权限 chown -R www-data:www-data $(pwd)/html"
@@ -620,25 +618,22 @@ deploy_wordpress_stack() {
         print_green "WordPress 配置文件已存在"
     fi
     
-    # ===== 更新 WordPress 密钥 =====
+    # 更新 WordPress 密钥
     print_blue "更新 WordPress 密钥..."
     if [ ! -f "html/wp-config.php" ]; then
         print_yellow "警告: html/wp-config.php 文件不存在，正在创建文件..."
         
-        # 确保 html 目录存在
         mkdir -p "html"
         
-        # 生成 WordPress 密钥
-        wp_keys=$(generate_wordpress_keys)
-        
-        # 从环境变量获取数据库配置
         db_name=${MYSQL_DATABASE:-wordpress}
         db_user=${MYSQL_USER:-wordpress}
         db_password=${MYSQL_PASSWORD:-wordpresspassword}
         db_host=${WORDPRESS_DB_HOST:-mariadb:3306}
         table_prefix=${WORDPRESS_TABLE_PREFIX:-wp_}
         
-        # 创建基本的 wp-config.php 文件，确保密钥格式正确
+        # 生成 PHP 格式的密钥
+        wp_keys=$(generate_wordpress_keys | sed 's/=\(.*\)/, "\1");/')
+        
         cat > html/wp-config.php << EOF
 <?php
 /**
@@ -654,13 +649,11 @@ define('DB_HOST', '$db_host');
 define('DB_CHARSET', 'utf8mb4');
 define('DB_COLLATE', '');
 
-// $table_prefix
 \$table_prefix = '$table_prefix';
 
 // 安全密钥
 $wp_keys
 
-// 其他设置
 define('WP_DEBUG', false);
 if ( !defined('ABSPATH') )
     define('ABSPATH', dirname(__FILE__) . '/');
@@ -669,31 +662,26 @@ EOF
         
         print_green "wp-config.php 文件创建成功"
     else
-        # 检测 sed 版本，适应不同系统
+        # 更新 wp-config.php 中的密钥
         sed_cmd="sed -i"
         if ! sed --version >/dev/null 2>&1; then
             sed_cmd="sed -i ''"
         fi
         
-        # 直接使用 sed 命令更新密钥，避免函数定义在条件块内
-        $sed_cmd "s@define\s*\(['\"]AUTH_KEY['\"],[^)]*\)@define( 'AUTH_KEY', '${WORDPRESS_AUTH_KEY:-}' )@g" html/wp-config.php
-        $sed_cmd "s@define\s*\(['\"]SECURE_AUTH_KEY['\"],[^)]*\)@define( 'SECURE_AUTH_KEY', '${WORDPRESS_SECURE_AUTH_KEY:-}' )@g" html/wp-config.php
-        $sed_cmd "s@define\s*\(['\"]LOGGED_IN_KEY['\"],[^)]*\)@define( 'LOGGED_IN_KEY', '${WORDPRESS_LOGGED_IN_KEY:-}' )@g" html/wp-config.php
-        $sed_cmd "s@define\s*\(['\"]NONCE_KEY['\"],[^)]*\)@define( 'NONCE_KEY', '${WORDPRESS_NONCE_KEY:-}' )@g" html/wp-config.php
-        $sed_cmd "s@define\s*\(['\"]AUTH_SALT['\"],[^)]*\)@define( 'AUTH_SALT', '${WORDPRESS_AUTH_SALT:-}' )@g" html/wp-config.php
-        $sed_cmd "s@define\s*\(['\"]SECURE_AUTH_SALT['\"],[^)]*\)@define( 'SECURE_AUTH_SALT', '${WORDPRESS_SECURE_AUTH_SALT:-}' )@g" html/wp-config.php
-        $sed_cmd "s@define\s*\(['\"]LOGGED_IN_SALT['\"],[^)]*\)@define( 'LOGGED_IN_SALT', '${WORDPRESS_LOGGED_IN_SALT:-}' )@g" html/wp-config.php
-        $sed_cmd "s@define\s*\(['\"]NONCE_SALT['\"],[^)]*\)@define( 'NONCE_SALT', '${WORDPRESS_NONCE_SALT:-}' )@g" html/wp-config.php
+        for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
+            if [ -n "${!key}" ]; then
+                $sed_cmd "s|define('$key',.*);|define('$key', '${!key}');|g" html/wp-config.php
+            fi
+        done
         
         print_green "WordPress 密钥更新完成"
     fi
-    # ===== 结束 =====
-
+    
     # 构建 Docker 镜像
     print_blue "构建 Docker 镜像..."
     docker-compose build
 
-    # 检查是否需要重置数据库（如果存在旧数据且容器启动失败）
+    # 检查是否需要重置数据库
     if [ -d "mysql" ] && [ "$(ls -A mysql 2>/dev/null)" ]; then
         print_yellow "检测到数据库数据目录已存在，检查容器状态..."
         docker-compose down >/dev/null 2>&1
@@ -712,25 +700,20 @@ EOF
     fi
 
     print_blue "配置文件权限和用户设置..."
-    # 1. 设置 html 目录权限，www-data (UID 33) 是 Nginx 和 PHP 的用户
     docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R 33:33 /var/www/html
-    # 2. 设置日志目录权限，mysql (UID 999) 是 MariaDB 的用户（Alpine 常见 UID）
     docker run --rm -v "$(pwd)/logs/mariadb:/var/log/mysql" alpine:latest chown -R 999:999 /var/log/mysql
+    docker run --rm -v "$(pwd)/mysql:/var/lib/mysql" alpine:latest chown -R 999:999 /var/lib/mysql
     docker run --rm -v "$(pwd)/logs/nginx:/var/log/nginx" alpine:latest chown -R 33:33 /var/log/nginx
-    docker run --rm -v "$(pwd)/logs/redis:/var/log/redis" alpine:latest chown -R 999:999 /var/log/redis
-    # 3. 确保 .env 文件能被正确 source，添加错误处理
+    
+    # 加载 .env 文件
     set -a
-    # .env 文件可能不在脚本所在目录，使用绝对路径或相对路径确保能找到
     if [ -f ".env" ]; then
-        # 使用更安全的方式加载.env文件，避免语法错误导致脚本中断
-        grep -v '^\s*#' .env | grep -v '^$' | while IFS= read -r line; do
-            # 检查行是否包含=且不是注释
+        # 只加载 KEY=VALUE 格式的行
+        grep -E '^[A-Z_]+=' .env | grep -v '^\s*#' | while IFS= read -r line; do
             if [[ "$line" == *"="* ]]; then
-                # 提取键和值
                 key=$(echo "$line" | cut -d'=' -f1)
                 value=$(echo "$line" | cut -d'=' -f2-)
-                # 安全地导出变量
-                export "$key"="$value"
+                export "$key=$value"
             fi
         done
         print_green "✓ 成功加载 .env 文件变量"
@@ -744,7 +727,7 @@ EOF
     print_blue "启动 Docker 容器..."
     docker-compose up -d
 
-    # 等待服务启动 - 增加等待时间并检查MariaDB健康状态
+    # 等待服务启动
     print_blue "等待服务初始化.."
     MAX_RETRIES=10
     RETRY_COUNT=0
@@ -753,28 +736,21 @@ EOF
         print_yellow "等待MariaDB初始化 (尝试 $((RETRY_COUNT+1))/$MAX_RETRIES)"
         sleep 10
         
-        # 检查MariaDB容器是否正在运行
-        if docker-compose ps mariadb | grep -q "Up"; then
-            # 检查MariaDB是否接受连接，使用mariadb-admin
-            if docker-compose exec -T mariadb sh -c "mariadb-admin ping -h localhost --user=\$MYSQL_USER --password=\$MYSQL_PASSWORD" >/dev/null 2>&1; then
-                print_green "数据库连接成功"
-                break
-            fi
+        if docker-compose ps mariadb | grep -q "Up.*healthy"; then
+            print_green "数据库连接成功"
+            break
         fi
         
         RETRY_COUNT=$((RETRY_COUNT+1))
     done
     
-    # 如果所有尝试都失败，尝试重置权限
     if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
         print_red "数据库连接失败，尝试重置权限..."
-        # 简化权限处理，使用免密码连接方式
         print_yellow "等待MariaDB完全初始化..."
         sleep 20
         
-        # 尝试免密码连接并设置密码
         print_yellow "尝试设置MariaDB root密码..."
-        docker-compose exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\" 2>/dev/null" || \
+        docker-compose exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\" 2>/dev/null" || \
         print_yellow "密码设置可能已完成或不需要，请继续..."
     fi
 
@@ -786,13 +762,12 @@ EOF
     print_blue "等待10秒后验证服务状态..."
     sleep 10
     
-    if [ "$(docker-compose ps -q | wc -l)" -ge "3" ]; then
-        print_green "WordPress Docker 栈部署基本成功"
+    if [ "$(docker-compose ps -q | wc -l)" -ge "3" ] && docker-compose ps | grep -q "Up.*healthy"; then
+        print_green "WordPress Docker 栈部署成功"
         print_blue "服务状态摘要："
         docker-compose ps
     else
         print_red "WordPress Docker 栈部署失败，请查看日志"
-        # 修复日志命令格式
         print_yellow "保存各服务日志..."
         sh -c "docker-compose logs --tail=50 mariadb > mariadb.log 2>&1"
         sh -c "docker-compose logs --tail=50 nginx > nginx.log 2>&1"
@@ -805,8 +780,7 @@ EOF
 # 设置自动备份
 setup_auto_backup() {
     print_blue "[步骤6] 设置自动备份..."
-    # 添加 crontab 任务：每天凌晨3点备份数据库
-    CRON_JOB="0 3 * * * docker-compose exec -T mariadb mariadb-dump -u \$MYSQL_USER -p\$MYSQL_PASSWORD \$MYSQL_DATABASE > $BACKUP_DIR/db_backup_\$(date +\%Y\%m\%d).sql && find $BACKUP_DIR -mtime +$BACKUP_RETENTION_DAYS -delete"
+    CRON_JOB="0 3 * * * docker-compose -f $DEPLOY_DIR/docker-compose.yml exec -T mariadb mariadb-dump -u \$MYSQL_USER -p\$MYSQL_PASSWORD \$MYSQL_DATABASE > $BACKUP_DIR/db_backup_\$(date +\%Y\%m\%d).sql && find $BACKUP_DIR -mtime +$BACKUP_RETENTION_DAYS -delete"
     (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
     print_green "自动备份功能设置完成（每天凌晨3点备份，保留 $BACKUP_RETENTION_DAYS 天）"
 }
@@ -814,8 +788,7 @@ setup_auto_backup() {
 # 设置磁盘空间管理
 setup_disk_space_management() {
     print_blue "[步骤7] 设置磁盘空间管理..."
-    # 添加 crontab 任务：每小时检查磁盘使用率 >80% 时 prune Docker
-    CRON_JOB="0 * * * * [ \$(df -P $DEPLOY_DIR | awk 'NR==2 {print (\$3/\$2)*100}') -gt 80 ] && docker system prune -f"
+    CRON_JOB="0 * * * * [ \$(df -P $DEPLOY_DIR | awk 'NR==2 {print int((\$3/\$2)*100)}') -gt 80 ] && $DOCKER_CMD system prune -f"
     (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
     print_green "磁盘空间管理设置完成（使用率 >80% 时自动清理 Docker）"
 }
@@ -826,13 +799,10 @@ update_wp_config() {
     key_value="$2"
     file_path="html/wp-config.php"
     
-    # 使用 sed 更新配置文件 - 修复标准sh兼容的语法
     if grep -q "$key_name" "$file_path"; then
-        # 替换现有值
-        sed -i "s|^define('$key_name',.*);|define('$key_name', '$key_value');|" "$file_path"
+        sed -i "s|define('$key_name',.*);|define('$key_name', '$key_value');|g" "$file_path"
     else
-        # 添加新配置（在最后一个?>前添加）
-        sed -i "s|^?>$|define('$key_name', '$key_value');\n?>|" "$file_path"
+        sed -i "s|^\?>$|define('$key_name', '$key_value');\n?>|" "$file_path"
     fi
 }
 
@@ -846,10 +816,8 @@ display_deployment_info() {
     print_green ""
     print_green "服务器信息"
     print_green "  - 操作系统: $OS_TYPE $OS_VERSION"
-    cpu_limit=$((CPU_CORES / 2))
-    print_green "  - CPU 核心数: $CPU_CORES 限制使用: ${cpu_limit} 核"
-    mem_limit=$((AVAILABLE_RAM / 2))
-    print_green "  - 内存总量: ${AVAILABLE_RAM}MB 限制使用: ${mem_limit}MB"
+    print_green "  - CPU 核心数: $CPU_CORES 限制使用: $CPU_LIMIT 核"
+    print_green "  - 内存总量: ${AVAILABLE_RAM}MB 限制使用: ${MEMORY_PER_SERVICE}MB"
     print_green "  - 部署目录: $DEPLOY_DIR"
     print_green "  - 备份目录: $BACKUP_DIR"
     print_green "  - 备份保留: $BACKUP_RETENTION_DAYS 天"
@@ -863,7 +831,7 @@ display_deployment_info() {
     print_green "自动任务:"
     print_green "  - 数据库备份: 每天凌晨 3 点"
     print_green "  - 磁盘空间检查: 当使用率超过 80% 时"
-    print_green "  - Docker 镜像清理: 每 12 小时"
+    print_green "  - Docker 镜像清理: 每小时"
     print_green ""
     print_yellow "警告: 请妥善保管 .env 文件中的敏感信息"
     print_blue "=================================================="
@@ -871,13 +839,9 @@ display_deployment_info() {
 
 # 主函数
 main() {
-    # 创建必要的目录
     mkdir -p "$DEPLOY_DIR/scripts" 2>/dev/null || :
     
-    # 调用环境准备函数
     prepare_host_environment
-    
-    # 执行部署步骤
     detect_host_environment
     collect_system_parameters
     determine_deployment_directory
@@ -887,7 +851,6 @@ main() {
     setup_disk_space_management
     display_deployment_info
     
-    # 使用更简单的echo命令以确保标准sh兼容性
     echo "WordPress Docker 自动部署完成"
 }
 
