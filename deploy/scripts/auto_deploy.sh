@@ -324,13 +324,15 @@ determine_deployment_directory() {
     print_green "备份目录: $BACKUP_DIR"
 }
 
+bash#!/bin/bash
+
+# ... [之前的函数和变量定义保持不变，直到 optimize_parameters] ...
+
 # 优化系统参数
 optimize_parameters() {
     print_blue "[步骤4] 优化系统参数..."
     
-    # 根据系统资源优化参数
-    # 内存限制优化
-    TOTAL_MIN_MEMORY=768  # Nginx + PHP + MariaDB 最小内存需求
+    TOTAL_MIN_MEMORY=768
     if [ "$AVAILABLE_RAM" -lt "$TOTAL_MIN_MEMORY" ]; then
         MEMORY_PER_SERVICE=256
         print_yellow "警告: 系统内存不足，将为每个服务分配最小可行内存: ${MEMORY_PER_SERVICE}MB"
@@ -339,13 +341,11 @@ optimize_parameters() {
         print_green "为各服务分配内存: ${MEMORY_PER_SERVICE}MB"
     fi
     
-    # CPU 限制
     CPU_LIMIT=$((CPU_CORES / 2))
     if [ "$CPU_LIMIT" -lt 1 ]; then
         CPU_LIMIT=1
     fi
     
-    # PHP 内存限制
     PHP_MEMORY_LIMIT="512M"
     if [ "$AVAILABLE_RAM" -lt 2048 ]; then
         PHP_MEMORY_LIMIT="256M"
@@ -372,7 +372,6 @@ optimize_parameters() {
         mariadb_version="11.3.2"
         redis_version="7.4.0"
         
-        # 生成 .env 文件
         cat > .env << EOF
 # WordPress Docker 环境配置文件
 # 生成时间: $(date)
@@ -411,7 +410,6 @@ PHP_INI_PATH=./deploy/configs/php.ini
 $(generate_wordpress_keys)
 EOF
         
-        # 转换行尾字符
         if command -v dos2unix >/dev/null 2>&1; then
             dos2unix .env >/dev/null 2>&1 && print_green "✓ 成功将 .env 文件行尾字符转换为 LF"
         elif command -v sed >/dev/null 2>&1; then
@@ -432,16 +430,55 @@ EOF
         PHP_MEMORY_LIMIT=${PHP_MEMORY_LIMIT:-256M}
     fi
     
+    # 生成 Nginx 配置文件
+    mkdir -p ./configs/nginx/conf.d
+    if [ ! -f "./configs/nginx/conf.d/default.conf" ]; then
+        print_blue "生成 Nginx 配置文件..."
+        cat > ./configs/nginx/conf.d/default.conf << EOF
+server {
+    listen 80;
+    server_name localhost;
+    root /var/www/html;
+    index index.php index.html;
+
+    location / {
+        try_files \$uri \$uri/ /index.php?\$args;
+    }
+
+    location ~ \.php\$ {
+        fastcgi_pass php:9000;
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        fastcgi_read_timeout 300;
+    }
+
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff|woff2|ttf|svg|eot|otf|ttc|ttf|ttc)$ {
+        expires max;
+        log_not_found off;
+    }
+}
+EOF
+        print_green "Nginx 配置文件创建成功"
+    fi
+    
+    # 验证 Nginx 配置文件
+    print_blue "验证 Nginx 配置文件..."
+    if $DOCKER_CMD run --rm -v "$(pwd)/configs/nginx/conf.d:/etc/nginx/conf.d" nginx:${NGINX_VERSION:-1.27.2} nginx -t -c /etc/nginx/nginx.conf 2>/dev/null; then
+        print_green "✓ Nginx 配置文件语法正确"
+    else
+        print_red "错误: Nginx 配置文件语法错误，请检查 ./configs/nginx/conf.d/default.conf"
+        exit 1
+    fi
+    
     # 生成 docker-compose.yml 文件
     if [ ! -f "docker-compose.yml" ]; then
         print_blue "生成 Docker Compose 配置文件..."
         
-        # 确保 CPU_LIMIT 有效
         if [ -z "$CPU_LIMIT" ] || [ "$CPU_LIMIT" -eq 0 ]; then
             CPU_LIMIT=1
         fi
         
-        # 验证PHP配置文件是否存在且为文件类型
         PHP_INI_PATH=${PHP_INI_PATH:-./deploy/configs/php.ini}
         if [ -d "$PHP_INI_PATH" ]; then
             print_yellow "警告: $PHP_INI_PATH 被检测为目录，正在删除..."
@@ -454,16 +491,16 @@ EOF
             echo "[PHP]" > "$PHP_INI_PATH"
             echo "memory_limit = ${PHP_MEMORY_LIMIT:-512M}" >> "$PHP_INI_PATH"
             echo "upload_max_filesize = ${UPLOAD_MAX_FILESIZE:-64M}" >> "$PHP_INI_PATH"
+            echo "post_max_size = ${UPLOAD_MAX_FILESIZE:-64M}" >> "$PHP_INI_PATH"
             print_green "已创建默认的php.ini配置文件"
         fi
         
-        # 生成 docker-compose.yml 文件
         cat > docker-compose.yml << EOF
 version: '3.8'
 
 services:
   nginx:
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-nginx:${NGINX_VERSION:-1.27.2}
+    image: nginx:${NGINX_VERSION:-1.27.2}
     container_name: nginx
     ports:
       - "80:80"
@@ -475,14 +512,12 @@ services:
     depends_on:
       php:
         condition: service_healthy
-      redis:
-        condition: service_healthy
       mariadb:
         condition: service_healthy
     restart: unless-stopped
     command: nginx -g 'daemon off;'
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/"]
+      test: ["CMD", "nginx", "-t"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -496,13 +531,13 @@ services:
     restart: unless-stopped
     command: ["php-fpm"]
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f 'php-fpm: master process' > /dev/null"]
+      test: ["CMD-SHELL", "pgrep -f 'php-fpm: master process' > /dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
   mariadb:
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-mariadb:${MARIADB_VERSION:-11.3.2}
+    image: mariadb:${MARIADB_VERSION:-11.3.2}
     container_name: mariadb
     user: "999:999"
     environment:
@@ -519,10 +554,10 @@ services:
       test: ["CMD-SHELL", "mariadb-admin ping -h localhost --user=\$MYSQL_USER --password=\$MYSQL_PASSWORD || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 120s
+      retries: 6
+      start_period: 240s
   redis:
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-redis:${REDIS_VERSION:-7.4.0}
+    image: redis:${REDIS_VERSION:-7.4.0}
     container_name: redis
     user: "999:999"
     volumes:
@@ -537,7 +572,6 @@ services:
       start_period: 60s
 EOF
         
-        # 转换行尾字符
         if command -v dos2unix >/dev/null 2>&1; then
             dos2unix docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功将 docker-compose.yml 文件行尾字符转换为 LF"
         elif command -v sed >/dev/null 2>&1; then
@@ -549,7 +583,6 @@ EOF
         print_green "docker-compose.yml 文件创建成功"
     else
         print_yellow "注意: docker-compose.yml 文件已存在，使用现有配置"
-        # 转换行尾字符
         if command -v dos2unix >/dev/null 2>&1; then
             dos2unix docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功转换现有 docker-compose.yml 文件行尾字符"
         elif command -v sed >/dev/null 2>&1; then
@@ -577,14 +610,13 @@ deploy_wordpress_stack() {
                 mv wordpress/* html/
                 rm -rf wordpress "$temp_file"
                 print_green "文件解压完成..."
-                # 设置文件权限
                 retry_count=3
                 retry_delay=5
                 docker_success=false
                 
                 for i in $(seq 1 $retry_count); do
                     print_blue "设置文件权限 (尝试 $i/$retry_count)..."
-                    if docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R 33:33 /var/www/html 2>/dev/null; then
+                    if $DOCKER_CMD run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R 33:33 /var/www/html 2>/dev/null; then
                         docker_success=true
                         print_green "Docker 设置权限成功"
                         break
@@ -631,7 +663,6 @@ deploy_wordpress_stack() {
         db_host=${WORDPRESS_DB_HOST:-mariadb:3306}
         table_prefix=${WORDPRESS_TABLE_PREFIX:-wp_}
         
-        # 从 .env 加载密钥并转换为 PHP 格式
         wp_keys=""
         for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
             if [ -n "${!key}" ]; then
@@ -667,7 +698,6 @@ EOF
         
         print_green "wp-config.php 文件创建成功"
     else
-        # 更新 wp-config.php 中的密钥
         sed_cmd="sed -i"
         if ! sed --version >/dev/null 2>&1; then
             sed_cmd="sed -i ''"
@@ -680,6 +710,16 @@ EOF
         done
         
         print_green "WordPress 密钥更新完成"
+    fi
+    
+    # 验证 wp-config.php 语法
+    print_blue "验证 wp-config.php 语法..."
+    if $DOCKER_CMD run --rm -v "$(pwd)/html:/var/www/html" php:${PHP_VERSION:-8.3.26} php -l /var/www/html/wp-config.php 2>/dev/null; then
+        print_green "✓ wp-config.php 语法正确"
+    else
+        print_red "错误: wp-config.php 语法错误，请检查文件内容"
+        cat html/wp-config.php
+        exit 1
     fi
     
     # 构建 Docker 镜像
@@ -710,10 +750,8 @@ EOF
     $DOCKER_CMD run --rm -v "$(pwd)/mysql:/var/lib/mysql" alpine:latest chown -R 999:999 /var/lib/mysql
     $DOCKER_CMD run --rm -v "$(pwd)/logs/nginx:/var/log/nginx" alpine:latest chown -R 33:33 /var/log/nginx
     
-    # 加载 .env 文件
     set -a
     if [ -f ".env" ]; then
-        # 只加载符合 KEY=VALUE 格式的行
         grep -E '^[A-Z_][A-Z0-9_]*=' .env | while IFS= read -r line; do
             if [[ "$line" == *"="* ]]; then
                 key=$(echo "$line" | cut -d'=' -f1)
@@ -722,7 +760,6 @@ EOF
             fi
         done
         print_green "✓ 成功加载 .env 文件变量"
-        # 输出 .env 文件内容（屏蔽敏感信息）以便调试
         print_yellow "加载的 .env 变量："
         grep -E '^[A-Z_][A-Z0-9_]*=' .env | sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' || true
     else
@@ -733,16 +770,33 @@ EOF
     
     # 启动 Docker 容器
     print_blue "启动 Docker 容器..."
-    $DOCKER_COMPOSE_CMD up -d
+    if ! $DOCKER_COMPOSE_CMD up -d; then
+        print_red "容器启动失败，检查日志..."
+        print_yellow "Nginx 日志："
+        $DOCKER_CMD logs nginx
+        print_yellow "PHP 日志："
+        $DOCKER_CMD logs php
+        print_yellow "MariaDB 日志："
+        $DOCKER_CMD logs mariadb
+        print_yellow "Redis 日志："
+        $DOCKER_CMD logs redis
+        print_yellow "Nginx 容器状态："
+        $DOCKER_CMD inspect nginx | grep -E '"Status"|"Health"'
+        print_yellow "检查 Nginx 配置文件："
+        $DOCKER_CMD run --rm -v "$(pwd)/configs/nginx/conf.d:/etc/nginx/conf.d" nginx:${NGINX_VERSION:-1.27.2} nginx -t -c /etc/nginx/nginx.conf
+        print_yellow "检查 wp-config.php 内容："
+        cat html/wp-config.php | sed 's/define('\''DB_PASSWORD'\'',.*);/define('\''DB_PASSWORD'\'', '\''[HIDDEN]'\'');/'
+        exit 1
+    fi
 
     # 等待服务启动
     print_blue "等待服务初始化.."
-    MAX_RETRIES=10
+    MAX_RETRIES=15
     RETRY_COUNT=0
     
     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
         print_yellow "等待MariaDB初始化 (尝试 $((RETRY_COUNT+1))/$MAX_RETRIES)"
-        sleep 10
+        sleep 15
         
         if $DOCKER_COMPOSE_CMD ps mariadb | grep -q "Up.*healthy"; then
             print_green "数据库连接成功"
@@ -753,10 +807,8 @@ EOF
     done
     
     if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-        print_red "数据库连接失败，尝试重置权限..."
-        print_yellow "等待MariaDB完全初始化..."
-        sleep 20
-        
+        print_red "数据库连接失败，检查 MariaDB 日志..."
+        $DOCKER_CMD logs mariadb
         print_yellow "尝试设置MariaDB root密码..."
         $DOCKER_COMPOSE_CMD exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\" 2>/dev/null" || \
         print_yellow "密码设置可能已完成或不需要，请继续..."
@@ -782,6 +834,12 @@ EOF
         $DOCKER_COMPOSE_CMD logs --tail=50 php > php.log 2>&1
         $DOCKER_COMPOSE_CMD logs --tail=50 redis > redis.log 2>&1
         print_yellow "日志已保存到相应的.log文件中，请检查"
+        print_yellow "Nginx 容器状态："
+        $DOCKER_CMD inspect nginx | grep -E '"Status"|"Health"'
+        print_yellow "检查 Nginx 配置文件："
+        $DOCKER_CMD run --rm -v "$(pwd)/configs/nginx/conf.d:/etc/nginx/conf.d" nginx:${NGINX_VERSION:-1.27.2} nginx -t -c /etc/nginx/nginx.conf
+        print_yellow "检查 wp-config.php 内容："
+        cat html/wp-config.php | sed 's/define('\''DB_PASSWORD'\'',.*);/define('\''DB_PASSWORD'\'', '\''[HIDDEN]'\'');/'
     fi
 }
 
