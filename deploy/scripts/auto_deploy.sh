@@ -12,7 +12,12 @@ prepare_host_environment() {
     echo "------------------------------------------------"
     echo "检查并准备宿主机环境..."
     echo "------------------------------------------------"
-    echo "注意: 当前运行在 LXC 容器中，修改内核参数需要特殊处理..."
+    
+    # 动态检测是否在 LXC 容器中
+    if grep -q lxc /proc/1/cgroup 2>/dev/null; then
+        echo "注意: 当前运行在 LXC 容器中，修改内核参数需要特殊处理..."
+    fi
+    
     # 1. 修复 vm.overcommit_memory (使用 /proc/sys)
     echo -n "检查 vm.overcommit_memory 设置... "
     CURRENT_OVERCOMMIT=$(cat /proc/sys/vm/overcommit_memory 2>/dev/null || echo "0")
@@ -124,7 +129,6 @@ print_blue() {
 
 # 生成随机密码
 generate_password() {
-    # 移除local关键字以兼容标准sh
     length=${1:-16}
     # 使用 /dev/urandom 生成随机密码，并确保包含特殊字符
     < /dev/urandom tr -dc 'A-Za-z0-9!@#$%^&*()_+=' | head -c $length
@@ -139,14 +143,14 @@ generate_wordpress_keys() {
         wget -q -O - https://api.wordpress.org/secret-key/1.1/salt/
     else
         # 如果无法获取，生成随机密钥
-        echo "WORDPRESS_AUTH_KEY='$(generate_password 64)'"
-        echo "WORDPRESS_SECURE_AUTH_KEY='$(generate_password 64)'"
-        echo "WORDPRESS_LOGGED_IN_KEY='$(generate_password 64)'"
-        echo "WORDPRESS_NONCE_KEY='$(generate_password 64)'"
-        echo "WORDPRESS_AUTH_SALT='$(generate_password 64)'"
-        echo "WORDPRESS_SECURE_AUTH_SALT='$(generate_password 64)'"
-        echo "WORDPRESS_LOGGED_IN_SALT='$(generate_password 64)'"
-        echo "WORDPRESS_NONCE_SALT='$(generate_password 64)'"
+        echo "define('AUTH_KEY', '$(generate_password 64)');"
+        echo "define('SECURE_AUTH_KEY', '$(generate_password 64)');"
+        echo "define('LOGGED_IN_KEY', '$(generate_password 64)');"
+        echo "define('NONCE_KEY', '$(generate_password 64)');"
+        echo "define('AUTH_SALT', '$(generate_password 64)');"
+        echo "define('SECURE_AUTH_SALT', '$(generate_password 64)');"
+        echo "define('LOGGED_IN_SALT', '$(generate_password 64)');"
+        echo "define('NONCE_SALT', '$(generate_password 64)');"
     fi
 }
 
@@ -221,7 +225,7 @@ collect_system_parameters() {
             apt-get update -qq
             
             print_yellow "安装必要的工具.."
-            apt-get install -y -qq curl wget tar gzip sed grep
+            apt-get install -y -qq curl wget tar gzip sed grep dos2unix
         fi
     elif [ "$OS_TYPE" = "centos" ] || [ "$OS_TYPE" = "rhel" ] || [ "$OS_TYPE" = "fedora" ]; then
         if command -v yum >/dev/null; then
@@ -234,7 +238,7 @@ collect_system_parameters() {
             apk update -q
             
             print_yellow "安装必要的工具.."
-            apk add -q curl wget tar gzip sed grep bash
+            apk add -q curl wget tar gzip sed grep bash dos2unix
         fi
     fi
     
@@ -303,6 +307,7 @@ determine_deployment_directory() {
     mkdir -p "$DEPLOY_DIR/html"
     mkdir -p "$DEPLOY_DIR/configs/nginx/conf.d"
     mkdir -p "$DEPLOY_DIR/logs/nginx"
+    mkdir -p "$DEPLOY_DIR/logs/mariadb"
     mkdir -p "$DEPLOY_DIR/mysql"
     mkdir -p "$DEPLOY_DIR/redis"
     
@@ -315,28 +320,9 @@ optimize_parameters() {
     print_blue "[步骤4] 优化系统参数..."
     
     # 根据系统资源优化参数
-    # CPU 限制 - 使用一半的 CPU 核心
-    CPU_LIMIT=$((CPU_CORES / 2))
-    if [ "$CPU_LIMIT" -lt 1 ]; then
-        CPU_LIMIT=1
-    fi
-    
-    # 内存限制优化 - 为每个服务设置合理的最小内存限制，而不是简单地使用系统内存的一半
-    # 默认每个服务的最小内存限制
-    NGINX_MIN_MEMORY=256
-    PHP_MIN_MEMORY=256
-    MARIADB_MIN_MEMORY=256
-    
-    # 总最小内存需求
-    TOTAL_MIN_MEMORY=$((NGINX_MIN_MEMORY + PHP_MIN_MEMORY + MARIADB_MIN_MEMORY))
-    
     # 根据系统可用内存计算合适的内存分配
-    if [ "$AVAILABLE_RAM" -lt $TOTAL_MIN_MEMORY ]; then
-        # 如果系统内存不足，给每个服务分配最小内存，确保可以启动
-        MEMORY_PER_SERVICE=$((AVAILABLE_RAM / 3))
-        if [ "$MEMORY_PER_SERVICE" -lt 6 ]; then
-            MEMORY_PER_SERVICE=6
-        fi
+    if [ "$AVAILABLE_RAM" -lt 1024 ]; then
+        MEMORY_PER_SERVICE=256
         print_yellow "警告: 系统内存不足，将为每个服务分配最小可行内存: ${MEMORY_PER_SERVICE}MB"
     else
         # 如果系统内存充足，给每个服务分配合理的内存
@@ -344,8 +330,13 @@ optimize_parameters() {
         print_green "为各服务分配内存: ${MEMORY_PER_SERVICE}MB"
     fi
     
+    # CPU 限制 - 使用一半的 CPU 核心
+    CPU_LIMIT=$((CPU_CORES / 2))
+    if [ "$CPU_LIMIT" -lt 1 ]; then
+        CPU_LIMIT=1
+    fi
+    
     # PHP 内存限制
-    # 移除local关键字以兼容标准sh
     PHP_MEMORY_LIMIT="512M"
     if [ "$AVAILABLE_RAM" -lt 2048 ]; then
         PHP_MEMORY_LIMIT="256M"
@@ -356,38 +347,27 @@ optimize_parameters() {
     fi
     
     print_green "CPU 限制: $CPU_LIMIT 核心"
-    print_green "内存限制: ${MEM_LIMIT}MB"
+    print_green "内存限制: ${MEMORY_PER_SERVICE}MB"
     print_green "PHP 内存限制: $PHP_MEMORY_LIMIT"
     
     # 生成 .env 文件
     if [ ! -f ".env" ]; then
-        print_blue "生成环境配置文件 (.env)..."
+        print_blue "生成 .env 文件..."
         
-        # 移除local关键字以兼容标准sh
         root_password=$(generate_password)
         db_user_password=$(generate_password)
         wp_keys=$(generate_wordpress_keys)
+        redis_pwd=$(generate_password 16)
         
         php_version="8.3.26"
         nginx_version="1.27.2"
         mariadb_version="11.3.2"
         redis_version="7.4.0"
         
-        # 清理 WordPress 密钥中的特殊字符
-        # 移除回车并转义引号
-        sanitized_keys=$(echo "$wp_keys" | sed 's/\r//g' | sed 's/"/\\"/g')
-        
-        # 先计算日期
-        current_date=$(date)
-        redis_pwd=$(generate_password 16)
-        
-        # 生成WordPress密钥并直接格式化为键值对
-        wp_keys_lines=$(generate_wordpress_keys | grep "WORDPRESS_" | cut -d'"' -f2,4 | tr '""' '=')
-        
-        # 使用更稳定的方式创建.env文件，避免EOF标记问题
-        cat > .env << 'EOT'
+        # 生成 .env 文件
+        cat > .env << EOF
 # WordPress Docker 环境配置文件
-# 生成时间: ${current_date}
+# 生成时间: $(date)
 
 DOCKERHUB_USERNAME=chisenin
 PHP_VERSION=${php_version}
@@ -419,27 +399,19 @@ PHP_MEMORY_LIMIT=${PHP_MEMORY_LIMIT}
 UPLOAD_MAX_FILESIZE=64M
 PHP_INI_PATH=./deploy/configs/php.ini
 
-# WordPress 密钥 - 以键值对格式存储，确保 python-dotenv 能够正确读取
-EOT
+# WordPress 密钥
+$wp_keys
+EOF
         
-        # 安全地添加WordPress密钥，避免特殊字符问题
-        echo "${wp_keys_lines}" >> .env
-        
-        # 添加一个空行确保文件结尾正常
-        echo >> .env
-        
-        # 尝试自动转换行尾字符（跨平台兼容性）
-        print_yellow "尝试自动转换行尾字符（Windows CRLF 到 Linux LF）..."
+        # 转换行尾字符
         if command -v dos2unix >/dev/null 2>&1; then
             dos2unix .env >/dev/null 2>&1 && print_green "✓ 成功将 .env 文件行尾字符转换为 LF"
         elif command -v sed >/dev/null 2>&1; then
-            # 使用 sed 作为备选方案
             sed -i 's/\r$//' .env >/dev/null 2>&1 && print_green "✓ 成功使用 sed 将 .env 文件行尾字符转换为 LF"
         else
             print_yellow "注意: 无法自动转换行尾字符，请在 Linux 环境下手动执行 'dos2unix .env'"
         fi
         
-        # 设置.env文件权限为600，确保只有当前用户可读写
         chmod 600 .env
         print_green ".env 文件创建成功"
         print_green "✓ 已设置 .env 文件权限为 600（安全权限）"
@@ -448,7 +420,7 @@ EOT
         print_yellow "注意: .env 文件已存在，使用现有配置"
         source .env 2>/dev/null || :
         CPU_LIMIT=${CPU_LIMIT:-$((CPU_CORES / 2))}
-        MEM_LIMIT=${MEM_LIMIT:-$((AVAILABLE_RAM / 2))MB}
+        MEMORY_PER_SERVICE=${MEMORY_PER_SERVICE:-$((AVAILABLE_RAM / 2))}
         PHP_MEMORY_LIMIT=${PHP_MEMORY_LIMIT:-256M}
     fi
     
@@ -496,8 +468,6 @@ services:
       - ./configs/nginx/conf.d:/etc/nginx/conf.d
       - ./logs/nginx:/var/log/nginx
     depends_on:
-      # 改为 service_started，因为我们希望容器启动后就开始尝试连接
-      # 健康检查由各自的 healthcheck 负责
       php:
         condition: service_started
       redis:
@@ -505,15 +475,13 @@ services:
       mariadb:
         condition: service_started
     restart: unless-stopped
-    # === 最终修复：使用 sh -c 包装包含空格的命令，完美兼容 busybox ===
-    command: ["/bin/sh", "-c", "/docker-entrypoint.sh nginx -g 'daemon off;'"]
-    # === 关键修复：使用 curl 检查 HTTP 服务是否真正可用 ===
+    command: nginx -g 'daemon off;'  # 绕过自定义 entrypoint 以避免 curl 错误
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/"] # 访问根路径，检查 Nginx 是否能返回 HTTP 200
+      test: ["CMD", "curl", "-f", "http://localhost/"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s # 给 Nginx 更多的时间来加载配置和启动
+      start_period: 40s
   php:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-8.3.26}
     container_name: php
@@ -522,7 +490,6 @@ services:
       - ${PHP_INI_PATH:-./deploy/configs/php.ini}:/usr/local/etc/php/php.ini:ro
     restart: unless-stopped
     command: ["php-fpm"]
-    # === 最终修复：检查 php-fpm 主进程是否存在，这是最可靠的检查方式 ===
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f 'php-fpm: master process' > /dev/null"]
       interval: 30s
@@ -532,6 +499,7 @@ services:
   mariadb:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-mariadb:${MARIADB_VERSION:-11.3.2}
     container_name: mariadb
+    user: "999:999"  # 使用 mysql UID/GID 以修复权限问题
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
@@ -543,36 +511,33 @@ services:
       - ./mysql:/var/lib/mysql
       - ./logs/mariadb:/var/log/mysql
     restart: unless-stopped
-    # === 最终修复：使用 mariadb-admin 进行健康检查，这是更现代和推荐的方式 ===
     healthcheck:
-      test: ["CMD-SHELL", "command -v mariadb-admin >/dev/null && mariadb-admin ping -h localhost --user=\$MYSQL_USER --password=\$MYSQL_PASSWORD || mysqladmin ping -h localhost --user=\$MYSQL_USER --password=\$MYSQL_PASSWORD"]
+      test: ["CMD-SHELL", "mariadb-admin ping -h localhost --user=\$MYSQL_USER --password=\$MYSQL_PASSWORD || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 120s # MariaDB 初始化确实需要更长时间，延长此时间
+      start_period: 120s
   redis:
     image: ${DOCKERHUB_USERNAME:-library}/wordpress-redis:${REDIS_VERSION:-7.4.0}
     container_name: redis
+    user: "999:999"
     volumes:
       - ./redis:/data
+      - ./logs/redis:/var/log/redis  # 添加 Redis 日志卷
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redispassword}", "--maxmemory", "${MEMORY_PER_SERVICE:-256}mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "yes"]
     restart: unless-stopped
-    # 删除容器级别的sysctl设置，避免OCI运行时错误
-    # 健康检查本身是正确的，但延长启动等待时间
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redispassword}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 3
-      start_period: 60s # Redis 首次启动或AOF重写时可能较慢
+      start_period: 60s
 EOF
         
-        # 尝试自动转换行尾字符（跨平台兼容性）
-        print_yellow "尝试自动转换行尾字符（Windows CRLF 到 Linux LF）..."
+        # 转换行尾字符
         if command -v dos2unix >/dev/null 2>&1; then
             dos2unix docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功将 docker-compose.yml 文件行尾字符转换为 LF"
         elif command -v sed >/dev/null 2>&1; then
-            # 使用 sed 作为备选方案
             sed -i 's/\r$//' docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功使用 sed 将 docker-compose.yml 文件行尾字符转换为 LF"
         else
             print_yellow "注意: 无法自动转换行尾字符，请在 Linux 环境下手动执行 'dos2unix docker-compose.yml'"
@@ -600,7 +565,6 @@ deploy_wordpress_stack() {
     if [ ! -f "html/wp-config.php" ]; then
         if [ -z "$(ls -A html 2>/dev/null)" ]; then
                 print_blue "下载 WordPress 核心文件..."
-                # 移除local关键字以兼容标准sh
                 temp_file="/tmp/wordpress-latest.tar.gz"
                 if command -v wget >/dev/null; then
                     wget -q -O "$temp_file" https://wordpress.org/latest.tar.gz
@@ -616,9 +580,6 @@ deploy_wordpress_stack() {
                     retry_count=3
                     retry_delay=5
                     docker_success=false
-                
-                # 设置 Docker 镜像源（可选，根据需要取消注释）
-                # echo '{"registry-mirrors": ["https://registry.docker-cn.com", "https://docker.mirrors.ustc.edu.cn"]}' > /etc/docker/daemon.json 2>/dev/null || true
                 
                 # 尝试使用 Docker 设置权限
         for i in $(seq 1 $retry_count); do
@@ -668,7 +629,6 @@ deploy_wordpress_stack() {
         mkdir -p "html"
         
         # 生成 WordPress 密钥
-        # 移除local关键字以兼容标准sh
         wp_keys=$(generate_wordpress_keys)
         
         # 从环境变量获取数据库配置
@@ -679,9 +639,6 @@ deploy_wordpress_stack() {
         table_prefix=${WORDPRESS_TABLE_PREFIX:-wp_}
         
         # 创建基本的 wp-config.php 文件，确保密钥格式正确
-        # 先生成密钥并格式化
-        wp_keys_formatted=$(generate_wordpress_keys)
-        
         cat > html/wp-config.php << EOF
 <?php
 /**
@@ -698,10 +655,10 @@ define('DB_CHARSET', 'utf8mb4');
 define('DB_COLLATE', '');
 
 // $table_prefix
-$table_prefix = '$table_prefix';
+\$table_prefix = '$table_prefix';
 
 // 安全密钥
-$wp_keys_formatted
+$wp_keys
 
 // 其他设置
 define('WP_DEBUG', false);
@@ -713,21 +670,20 @@ EOF
         print_green "wp-config.php 文件创建成功"
     else
         # 检测 sed 版本，适应不同系统
-        # 移除local关键字以兼容标准sh
         sed_cmd="sed -i"
         if ! sed --version >/dev/null 2>&1; then
             sed_cmd="sed -i ''"
         fi
         
         # 直接使用 sed 命令更新密钥，避免函数定义在条件块内
-        $sed_cmd -E "s@define\s*\(['\"]AUTH_KEY['\"],[^)]*\)@define( 'AUTH_KEY', '${WORDPRESS_AUTH_KEY:-}' )@g" html/wp-config.php
-        $sed_cmd -E "s@define\s*\(['\"]SECURE_AUTH_KEY['\"],[^)]*\)@define( 'SECURE_AUTH_KEY', '${WORDPRESS_SECURE_AUTH_KEY:-}' )@g" html/wp-config.php
-        $sed_cmd -E "s@define\s*\(['\"]LOGGED_IN_KEY['\"],[^)]*\)@define( 'LOGGED_IN_KEY', '${WORDPRESS_LOGGED_IN_KEY:-}' )@g" html/wp-config.php
-        $sed_cmd -E "s@define\s*\(['\"]NONCE_KEY['\"],[^)]*\)@define( 'NONCE_KEY', '${WORDPRESS_NONCE_KEY:-}' )@g" html/wp-config.php
-        $sed_cmd -E "s@define\s*\(['\"]AUTH_SALT['\"],[^)]*\)@define( 'AUTH_SALT', '${WORDPRESS_AUTH_SALT:-}' )@g" html/wp-config.php
-        $sed_cmd -E "s@define\s*\(['\"]SECURE_AUTH_SALT['\"],[^)]*\)@define( 'SECURE_AUTH_SALT', '${WORDPRESS_SECURE_AUTH_SALT:-}' )@g" html/wp-config.php
-        $sed_cmd -E "s@define\s*\(['\"]LOGGED_IN_SALT['\"],[^)]*\)@define( 'LOGGED_IN_SALT', '${WORDPRESS_LOGGED_IN_SALT:-}' )@g" html/wp-config.php
-        $sed_cmd -E "s@define\s*\(['\"]NONCE_SALT['\"],[^)]*\)@define( 'NONCE_SALT', '${WORDPRESS_NONCE_SALT:-}' )@g" html/wp-config.php
+        $sed_cmd "s@define\s*\(['\"]AUTH_KEY['\"],[^)]*\)@define( 'AUTH_KEY', '${WORDPRESS_AUTH_KEY:-}' )@g" html/wp-config.php
+        $sed_cmd "s@define\s*\(['\"]SECURE_AUTH_KEY['\"],[^)]*\)@define( 'SECURE_AUTH_KEY', '${WORDPRESS_SECURE_AUTH_KEY:-}' )@g" html/wp-config.php
+        $sed_cmd "s@define\s*\(['\"]LOGGED_IN_KEY['\"],[^)]*\)@define( 'LOGGED_IN_KEY', '${WORDPRESS_LOGGED_IN_KEY:-}' )@g" html/wp-config.php
+        $sed_cmd "s@define\s*\(['\"]NONCE_KEY['\"],[^)]*\)@define( 'NONCE_KEY', '${WORDPRESS_NONCE_KEY:-}' )@g" html/wp-config.php
+        $sed_cmd "s@define\s*\(['\"]AUTH_SALT['\"],[^)]*\)@define( 'AUTH_SALT', '${WORDPRESS_AUTH_SALT:-}' )@g" html/wp-config.php
+        $sed_cmd "s@define\s*\(['\"]SECURE_AUTH_SALT['\"],[^)]*\)@define( 'SECURE_AUTH_SALT', '${WORDPRESS_SECURE_AUTH_SALT:-}' )@g" html/wp-config.php
+        $sed_cmd "s@define\s*\(['\"]LOGGED_IN_SALT['\"],[^)]*\)@define( 'LOGGED_IN_SALT', '${WORDPRESS_LOGGED_IN_SALT:-}' )@g" html/wp-config.php
+        $sed_cmd "s@define\s*\(['\"]NONCE_SALT['\"],[^)]*\)@define( 'NONCE_SALT', '${WORDPRESS_NONCE_SALT:-}' )@g" html/wp-config.php
         
         print_green "WordPress 密钥更新完成"
     fi
@@ -743,7 +699,7 @@ EOF
         docker-compose down >/dev/null 2>&1
         if ! docker-compose up -d >/dev/null 2>&1; then
             print_red "数据库容器启动失败，可能是数据目录存在兼容性问题"
-            print_yellow "建议清理数据库数据目录并重新初始化数据库"
+            print_yellow "建议清理数据库数据目录并重新初始化"
             read -p "是否清理数据库数据目录？(y/N): " reset_db
             if [ "$reset_db" = "y" ] || [ "$reset_db" = "Y" ]; then
                 print_blue "清理数据库数据目录..."
@@ -757,11 +713,11 @@ EOF
 
     print_blue "配置文件权限和用户设置..."
     # 1. 设置 html 目录权限，www-data (UID 33) 是 Nginx 和 PHP 的用户
-    # 在Alpine容器中直接使用UID，避免用户名查找问题
     docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R 33:33 /var/www/html
-    # 2. 设置日志目录权限，mysql (UID 99) 是 MariaDB 的用户
-    docker run --rm -v "$(pwd)/logs/mariadb:/var/log/mysql" alpine:latest chown -R 99:99 /var/log/mysql
+    # 2. 设置日志目录权限，mysql (UID 999) 是 MariaDB 的用户（Alpine 常见 UID）
+    docker run --rm -v "$(pwd)/logs/mariadb:/var/log/mysql" alpine:latest chown -R 999:999 /var/log/mysql
     docker run --rm -v "$(pwd)/logs/nginx:/var/log/nginx" alpine:latest chown -R 33:33 /var/log/nginx
+    docker run --rm -v "$(pwd)/logs/redis:/var/log/redis" alpine:latest chown -R 999:999 /var/log/redis
     # 3. 确保 .env 文件能被正确 source，添加错误处理
     set -a
     # .env 文件可能不在脚本所在目录，使用绝对路径或相对路径确保能找到
@@ -799,19 +755,10 @@ EOF
         
         # 检查MariaDB容器是否正在运行
         if docker-compose ps mariadb | grep -q "Up"; then
-            # 检查MariaDB是否接受连接，优先使用mariadb命令
-                if docker-compose exec -T mariadb sh -c "command -v mariadb >/dev/null && mariadb --version" >/dev/null 2>&1; then
-                    # 使用mariadb命令
-                if docker-compose exec -T mariadb sh -c "mariadb -u root -p'${MYSQL_ROOT_PASSWORD:-rootpassword}' -e 'SELECT 1;'" >/dev/null 2>&1; then
-                    print_green "数据库连接成功"
-                    break
-                fi
-            else
-                # 回退到mysql命令
-                if docker-compose exec -T mariadb sh -c "mysql -u root -p'${MYSQL_ROOT_PASSWORD:-rootpassword}' -e 'SELECT 1;'" >/dev/null 2>&1; then
-                    print_green "数据库连接成功"
-                    break
-                fi
+            # 检查MariaDB是否接受连接，使用mariadb-admin
+            if docker-compose exec -T mariadb sh -c "mariadb-admin ping -h localhost --user=\$MYSQL_USER --password=\$MYSQL_PASSWORD" >/dev/null 2>&1; then
+                print_green "数据库连接成功"
+                break
             fi
         fi
         
@@ -827,9 +774,7 @@ EOF
         
         # 尝试免密码连接并设置密码
         print_yellow "尝试设置MariaDB root密码..."
-        # 在Alpine环境中使用更安全的引号处理
-        docker-compose exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY '\''${MYSQL_ROOT_PASSWORD:-rootpassword}'\''; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '\''${MYSQL_ROOT_PASSWORD:-rootpassword}'\''; FLUSH PRIVILEGES;\" 2>/dev/null" || \
-        docker-compose exec -T mariadb sh -c "mysql -u root -e \"ALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY '\''${MYSQL_ROOT_PASSWORD:-rootpassword}'\''; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '\''${MYSQL_ROOT_PASSWORD:-rootpassword}'\''; FLUSH PRIVILEGES;\" 2>/dev/null" || \
+        docker-compose exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER IF EXISTS 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER IF EXISTS 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\" 2>/dev/null" || \
         print_yellow "密码设置可能已完成或不需要，请继续..."
     fi
 
@@ -860,20 +805,23 @@ EOF
 # 设置自动备份
 setup_auto_backup() {
     print_blue "[步骤6] 设置自动备份..."
-    # 此处可以添加自动备份的逻辑
-    print_green "自动备份功能设置完成"
+    # 添加 crontab 任务：每天凌晨3点备份数据库
+    CRON_JOB="0 3 * * * docker-compose exec -T mariadb mariadb-dump -u \$MYSQL_USER -p\$MYSQL_PASSWORD \$MYSQL_DATABASE > $BACKUP_DIR/db_backup_\$(date +\%Y\%m\%d).sql && find $BACKUP_DIR -mtime +$BACKUP_RETENTION_DAYS -delete"
+    (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
+    print_green "自动备份功能设置完成（每天凌晨3点备份，保留 $BACKUP_RETENTION_DAYS 天）"
 }
 
 # 设置磁盘空间管理
 setup_disk_space_management() {
     print_blue "[步骤7] 设置磁盘空间管理..."
-    # 此处可以添加磁盘空间管理的逻辑
-    print_green "磁盘空间管理设置完成"
+    # 添加 crontab 任务：每小时检查磁盘使用率 >80% 时 prune Docker
+    CRON_JOB="0 * * * * [ \$(df -P $DEPLOY_DIR | awk 'NR==2 {print (\$3/\$2)*100}') -gt 80 ] && docker system prune -f"
+    (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
+    print_green "磁盘空间管理设置完成（使用率 >80% 时自动清理 Docker）"
 }
 
 # 更新 WordPress 配置文件函数
 update_wp_config() {
-    # 移除local关键字以兼容标准sh
     key_name="$1"
     key_value="$2"
     file_path="html/wp-config.php"
@@ -893,16 +841,13 @@ display_deployment_info() {
     print_blue "=================================================="
     print_green "部署完成"
     print_blue "=================================================="
-    # 移除local关键字以兼容标准sh
     HOST_IP=$(hostname -I | awk '{print $1}')
     print_green "访问地址: http://$HOST_IP"
     print_green ""
     print_green "服务器信息"
     print_green "  - 操作系统: $OS_TYPE $OS_VERSION"
-    # 使用兼容sh的方式计算CPU限制
     cpu_limit=$((CPU_CORES / 2))
     print_green "  - CPU 核心数: $CPU_CORES 限制使用: ${cpu_limit} 核"
-    # 使用兼容sh的方式计算内存限制
     mem_limit=$((AVAILABLE_RAM / 2))
     print_green "  - 内存总量: ${AVAILABLE_RAM}MB 限制使用: ${mem_limit}MB"
     print_green "  - 部署目录: $DEPLOY_DIR"
