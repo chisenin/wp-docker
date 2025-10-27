@@ -401,18 +401,17 @@ deploy_wordpress_stack() {
     
     print_blue "加载 .env 文件变量..."
     if [ -f ".env" ]; then
+        # 使用 source 加载 .env 文件，确保变量在当前 shell 中生效
         set -a
-        grep -E '^[A-Z_][A-Z0-9_]*=' .env | while IFS= read -r line; do
-            if [[ "$line" == *"="* ]]; then
-                key=$(echo "$line" | cut -d'=' -f1)
-                value=$(echo "$line" | cut -d'=' -f2-)
-                export "$key=$value"
-            fi
-        done
+        source .env 2>/dev/null || {
+            print_red "错误: 无法加载 .env 文件，请检查文件格式"
+            sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' .env
+            exit 1
+        }
         set +a
         print_green "✓ 成功加载 .env 文件变量"
         print_yellow "加载的 .env 变量（屏蔽敏感信息）："
-        grep -E '^[A-Z_][A-Z0-9_]*=' .env | sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' || true
+        env | grep -E '^[A-Z_][A-Z0-9_]*=' | grep -vE '^(MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD|REDIS_PASSWORD)=' | sort || true
     else
         print_red "错误: .env 文件不存在!"
         exit 1
@@ -424,6 +423,8 @@ deploy_wordpress_stack() {
             print_red "错误: 环境变量中缺失密钥 $key"
             print_yellow ".env 文件内容（屏蔽敏感信息）："
             sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' .env
+            print_yellow "当前环境变量（屏蔽敏感信息）："
+            env | grep -E '^[A-Z_][A-Z0-9_]*=' | grep -vE '^(MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD|REDIS_PASSWORD)=' | sort || true
             exit 1
         fi
     done
@@ -488,6 +489,8 @@ EOF
                 print_red "错误: 缺失密钥 $key，无法更新 wp-config.php"
                 print_yellow ".env 文件内容（屏蔽敏感信息）："
                 sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' .env
+                print_yellow "当前环境变量（屏蔽敏感信息）："
+                env | grep -E '^[A-Z_][A-Z0-9_]*=' | grep -vE '^(MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD|REDIS_PASSWORD)=' | sort || true
                 exit 1
             fi
         done
