@@ -1,154 +1,30 @@
-#!/bin/bash
+bash#!/bin/bash
 
-# WordPress Docker 自动部署脚本
-# 用于快速搭建WordPress 生产环境
+# WordPress Docker 全栈自动部署脚本 - 生产环境优化版
 
+# 启用调试模式
 set -e
+# set -x  # 启用后可输出每行执行的命令，调试完成后可注释掉
 
-# ==============================================================================
-# 函数：准备宿主机环境
-# ==============================================================================
-prepare_host_environment() {
-    echo "------------------------------------------------"
-    echo "检查并准备宿主机环境..."
-    echo "------------------------------------------------"
-    
-    # 动态检测是否在 LXC 容器中
-    if grep -q lxc /proc/1/cgroup 2>/dev/null; then
-        echo "注意: 当前运行在 LXC 容器中，修改内核参数需要特殊处理..."
-        # 检查 LXC 是否支持嵌套 Docker
-        if [ -f /etc/pve/lxc/$(hostname).conf ]; then
-            if ! grep -q "lxc.apparmor.profile: unconfined" /etc/pve/lxc/$(hostname).conf; then
-                echo "⚠️ LXC 配置可能不支持嵌套 Docker，建议添加 'lxc.apparmor.profile: unconfined' 到 LXC 配置"
-            fi
-        fi
-    fi
-    
-    # 1. 修复 vm.overcommit_memory (使用 /proc/sys)
-    echo -n "检查 vm.overcommit_memory 设置... "
-    CURRENT_OVERCOMMIT=$(cat /proc/sys/vm/overcommit_memory 2>/dev/null || echo "0")
-    
-    # 检查 sudo 是否可用
-    SUDO_AVAILABLE=true
-    if ! command -v sudo > /dev/null 2>&1; then
-        SUDO_AVAILABLE=false
-    fi
-    
-    if [ "$CURRENT_OVERCOMMIT" -ne "1" ]; then
-        echo "当前值为 $CURRENT_OVERCOMMIT，必须设置为 1。"
-        # 尝试通过写入 /proc/sys 来实时修改
-        if [ "$SUDO_AVAILABLE" = true ] && echo 1 | sudo tee /proc/sys/vm/overcommit_memory > /dev/null 2>&1; then
-            echo "✓ 已通过 /proc/sys 临时设置为 1。"
-        else
-            # 如果 sudo 不可用或失败，尝试直接写入（需要特权）
-            if echo 1 > /proc/sys/vm/overcommit_memory 2>/dev/null; then
-                 echo "✓ 已直接写入 /proc/sys 设置为 1。"
-            else
-                echo "✗ 失败。当前用户无权限修改内核参数。"
-                echo "⚠️  CRITICAL: Redis 服务可能会失败。请联系宿主机管理员设置 vm.overcommit_memory=1。"
-            fi
-        fi
-        
-        # 尝试永久生效（如果可以访问宿主机文件系统）
-        if [ "$SUDO_AVAILABLE" = true ]; then
-            echo "尝试写入 /etc/sysctl.conf 永久生效..."
-            if ! grep -q "^vm.overcommit_memory" /etc/sysctl.conf 2>/dev/null; then
-                if echo "vm.overcommit_memory = 1" | sudo tee -a /etc/sysctl.conf > /dev/null 2>&1; then
-                    echo "✓ 已写入 /etc/sysctl.conf。"
-                else
-                    echo "✗ 无法写入 /etc/sysctl.conf。"
-                fi
-            else
-                echo "✓ /etc/sysctl.conf 中已存在该配置。"
-            fi
-            # 尝试加载 sysctl 配置
-            sudo sysctl -p > /dev/null 2>&1 || echo "⚠️  无法执行 'sudo sysctl -p'。"
-        fi
-    else
-        echo "✓ 正确 (值为 $CURRENT_OVERCOMMIT)。"
-    fi
-    # 2. 检查 Docker 和 Docker Compose
-    echo -n "检查 Docker 服务状态... "
-    # 尝试使用 sudo 或直接运行 docker
-    if [ "$SUDO_AVAILABLE" = true ] && sudo docker info > /dev/null 2>&1; then
-        echo "✓ 正常 (使用 sudo)。"
-        DOCKER_CMD="sudo docker"
-        DOCKER_COMPOSE_CMD="sudo docker-compose"
-    elif docker info > /dev/null 2>&1; then
-        echo "✓ 正常 (无需 sudo)。"
-        DOCKER_CMD="docker"
-        DOCKER_COMPOSE_CMD="docker-compose"
-    else
-        echo "✗ 失败。Docker 服务未运行或无权限。请启动 Docker 服务。"
-        exit 1
-    fi
-    
-    echo -n "检查 Docker Compose... "
-    if ! docker-compose --version > /dev/null 2>&1; then
-        echo "✗ 失败。未找到 docker-compose 命令。"
-        exit 1
-    else
-        echo "✓ 正常。"
-    fi
-    
-    echo "宿主机环境检查完成。"
-    echo "------------------------------------------------"
-}
-
-# 全局变量定义
-DEPLOY_DIR="$(pwd)"
-BACKUP_DIR="${DEPLOY_DIR}/backups"
-BACKUP_RETENTION_DAYS=30
-OS_TYPE=""
-OS_VERSION=""
-CPU_CORES=1
-CPU_LIMIT=1
-AVAILABLE_RAM=512
-DISK_SPACE=0
-
-# 设置Docker Hub用户名，确保使用项目构建的镜像
-DOCKERHUB_USERNAME="chisenin"
-
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# 打印彩色日志函数
-print_red() {
-    echo -e "${RED}$1${NC}"
-}
-
-print_green() {
-    echo -e "${GREEN}$1${NC}"
-}
-
-print_yellow() {
-    echo -e "${YELLOW}$1${NC}"
-}
-
-print_blue() {
-    echo -e "${BLUE}$1${NC}"
-}
+# 颜色输出函数
+print_blue() { echo -e "\033[34m$1\033[0m"; }
+print_green() { echo -e "\033[32m$1\033[0m"; }
+print_yellow() { echo -e "\033[33m$1\033[0m"; }
+print_red() { echo -e "\033[31m$1\033[0m"; }
 
 # 生成随机密码
 generate_password() {
-    length=${1:-16}
-    # 使用 /dev/urandom 生成随机密码，确保包含多种字符
-    < /dev/urandom tr -dc 'A-Za-z0-9!@#$%^&*()_+-=' | head -c $length
+    length=${1:-32}
+    tr -dc 'A-Za-z0-9!@#$%^&*()' < /dev/urandom | head -c "$length" 2>/dev/null || openssl rand -base64 48 | tr -dc 'A-Za-z0-9!@#$%^&*()' | head -c "$length"
 }
 
 # 生成 WordPress 安全密钥
 generate_wordpress_keys() {
-    # 从 WordPress API 获取安全密钥并转换为 KEY=VALUE 格式
     if command -v curl >/dev/null; then
         curl -s https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"
     elif command -v wget >/dev/null; then
         wget -q -O - https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"
     else
-        # 如果无法获取，生成随机密钥
         echo "AUTH_KEY=$(generate_password 64)"
         echo "SECURE_AUTH_KEY=$(generate_password 64)"
         echo "LOGGED_IN_KEY=$(generate_password 64)"
@@ -357,7 +233,7 @@ optimize_parameters() {
     
     # 生成 .env 文件
     if [ ! -f ".env" ]; then
-        print_blue "生成 .env 文件..."
+        print_blue "生成环境配置文件 (.env)..."
         
         root_password=$(generate_password)
         db_user_password=$(generate_password)
@@ -436,7 +312,6 @@ server {
     root /var/www/html;
     index index.php index.html index.htm;
 
-    # 优化 FastCGI 设置
     fastcgi_buffers 16 16k;
     fastcgi_buffer_size 32k;
     fastcgi_read_timeout 300;
