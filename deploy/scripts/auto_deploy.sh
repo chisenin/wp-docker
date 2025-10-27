@@ -400,9 +400,9 @@ MYSQL_USER=wordpress
 MYSQL_PASSWORD=$db_user_password
 
 WORDPRESS_DB_HOST=mariadb:3306
-WORDPRESS_DB_USER=$MYSQL_USER
+WORDPRESS_DB_USER=wordpress
 WORDPRESS_DB_PASSWORD=$db_user_password
-WORDPRESS_DB_NAME=$MYSQL_DATABASE
+WORDPRESS_DB_NAME=wordpress
 WORDPRESS_REDIS_HOST=redis
 WORDPRESS_REDIS_PORT=6379
 WORDPRESS_TABLE_PREFIX=wp_
@@ -433,7 +433,10 @@ EOF
             print_yellow "注意: 无法自动转换行尾字符，请在 Linux 环境下手动执行 'dos2unix .env'"
         fi
         
+        # 设置.env文件权限为600，确保只有当前用户可读写
+        chmod 600 .env
         print_green ".env 文件创建成功"
+        print_green "✓ 已设置 .env 文件权限为 600（安全权限）"
         print_yellow "警告: 请妥善保存 .env 文件中的敏感信息"
     else
         print_yellow "注意: .env 文件已存在，使用现有配置"
