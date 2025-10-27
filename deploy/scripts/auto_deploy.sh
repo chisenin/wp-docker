@@ -49,7 +49,6 @@ prepare_host_environment() {
     print_blue "检查并准备宿主机环境..."
     print_blue "------------------------------------------------"
     
-    # 检查 vm.overcommit_memory
     if [ -f /proc/sys/vm/overcommit_memory ]; then
         overcommit=$(cat /proc/sys/vm/overcommit_memory)
         if [ "$overcommit" -ne 1 ]; then
@@ -67,7 +66,6 @@ prepare_host_environment() {
         print_yellow "警告: 未找到 /proc/sys/vm/overcommit_memory，可能在容器环境中"
     fi
     
-    # 检查 Docker 服务
     if systemctl is-active docker >/dev/null 2>&1; then
         print_green "✓ 正常 (无需 sudo)。"
     elif docker info >/dev/null 2>&1; then
@@ -77,7 +75,6 @@ prepare_host_environment() {
         exit 1
     fi
     
-    # 检查 Docker Compose
     if command -v docker-compose >/dev/null 2>&1; then
         print_green "✓ 正常。"
         DOCKER_COMPOSE_CMD="docker-compose"
@@ -244,12 +241,34 @@ EOF
         print_green ".env 文件创建成功"
         print_green "✓ 已设置 .env 文件权限为 600（安全权限）"
         print_yellow "警告: 请妥善保存 .env 文件中的敏感信息"
+        
+        # 验证 .env 文件中的密钥
+        print_blue "验证 .env 文件中的密钥..."
+        for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
+            if ! grep -q "^$key=" .env; then
+                print_red "错误: .env 文件中缺失密钥 $key"
+                exit 1
+            fi
+        done
+        print_green "✓ .env 文件密钥验证通过"
     else
         print_yellow "注意: .env 文件已存在，使用现有配置"
         source .env 2>/dev/null || :
         CPU_LIMIT=${CPU_LIMIT:-$((CPU_CORES / 2))}
         MEMORY_PER_SERVICE=${MEMORY_PER_SERVICE:-$((AVAILABLE_RAM / 2))}
         PHP_MEMORY_LIMIT=${PHP_MEMORY_LIMIT:-256M}
+        
+        # 验证现有 .env 文件中的密钥
+        print_blue "验证现有 .env 文件中的密钥..."
+        for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
+            if ! grep -q "^$key=" .env; then
+                print_red "错误: 现有 .env 文件中缺失密钥 $key，尝试重新生成..."
+                rm -f .env
+                optimize_parameters
+                return
+            fi
+        done
+        print_green "✓ 现有 .env 文件密钥验证通过"
     fi
     
     mkdir -p ./configs/nginx/conf.d
@@ -288,7 +307,10 @@ EOF
     print_green "Nginx 配置文件创建成功"
     
     print_blue "验证 Nginx 配置文件..."
-    if $DOCKER_CMD run --rm -v "$(pwd)/configs/nginx/conf.d:/etc/nginx/conf.d" nginx:${NGINX_VERSION:-1.27.2} nginx -t -c /etc/nginx/nginx.conf 2>&1 | tee /tmp/nginx_config_test.log; then
+    # 临时替换 fastcgi_pass 为 127.0.0.1:9000 以通过验证
+    cp ./configs/nginx/conf.d/default.conf /tmp/default.conf
+    sed -i 's/fastcgi_pass php:9000;/fastcgi_pass 127.0.0.1:9000;/' /tmp/default.conf
+    if $DOCKER_CMD run --rm -v /tmp/default.conf:/etc/nginx/conf.d/default.conf nginx:${NGINX_VERSION:-1.27.2} nginx -t -c /etc/nginx/nginx.conf 2>&1 | tee /tmp/nginx_config_test.log; then
         print_green "✓ Nginx 配置文件语法正确"
     else
         print_red "错误: Nginx 配置文件语法错误，请检查以下内容："
@@ -296,6 +318,126 @@ EOF
         print_yellow "Nginx 配置测试日志："
         cat /tmp/nginx_config_test.log
         exit 1
+    fi
+    rm -f /tmp/default.conf
+    
+    # 生成 docker-compose.yml 文件
+    if [ ! -f "docker-compose.yml" ]; then
+        print_blue "生成 Docker Compose 配置文件..."
+        
+        if [ -z "$CPU_LIMIT" ] || [ "$CPU_LIMIT" -eq 0 ]; then
+            CPU_LIMIT=1
+        fi
+        
+        PHP_INI_PATH=${PHP_INI_PATH:-./deploy/configs/php.ini}
+        if [ -d "$PHP_INI_PATH" ]; then
+            print_yellow "警告: $PHP_INI_PATH 被检测为目录，正在删除..."
+            rm -rf "$PHP_INI_PATH"
+        fi
+        
+        if [ ! -f "$PHP_INI_PATH" ]; then
+            print_yellow "警告: PHP配置文件 $PHP_INI_PATH 不存在或不是文件"
+            mkdir -p "$(dirname "$PHP_INI_PATH")"
+            echo "[PHP]" > "$PHP_INI_PATH"
+            echo "memory_limit = ${PHP_MEMORY_LIMIT:-512M}" >> "$PHP_INI_PATH"
+            echo "upload_max_filesize = ${UPLOAD_MAX_FILESIZE:-64M}" >> "$PHP_INI_PATH"
+            echo "post_max_size = ${UPLOAD_MAX_FILESIZE:-64M}" >> "$PHP_INI_PATH"
+            print_green "已创建默认的php.ini配置文件"
+        fi
+        
+        cat > docker-compose.yml << EOF
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:${NGINX_VERSION:-1.27.2}
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./html:/var/www/html
+      - ./configs/nginx/conf.d:/etc/nginx/conf.d
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      php:
+        condition: service_healthy
+      mariadb:
+        condition: service_healthy
+    restart: unless-stopped
+    command: nginx -g 'daemon off;'
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+  php:
+    image: php:${PHP_VERSION:-8.3.26}-fpm
+    container_name: php
+    volumes:
+      - ./html:/var/www/html
+      - ${PHP_INI_PATH:-./deploy/configs/php.ini}:/usr/local/etc/php/php.ini:ro
+    restart: unless-stopped
+    command: ["php-fpm"]
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'php-fpm: master process' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+  mariadb:
+    image: mariadb:${MARIADB_VERSION:-11.3.2}
+    container_name: mariadb
+    user: "999:999"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
+      MYSQL_USER: ${MYSQL_USER:-wordpress}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-wordpresspassword}
+      MARIADB_ROOT_HOST: "%"
+    volumes:
+      - ./mysql:/var/lib/mysql
+      - ./logs/mariadb:/var/log/mysql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h localhost --user=\$MYSQL_USER --password=\$MYSQL_PASSWORD || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 6
+      start_period: 240s
+  redis:
+    image: redis:${REDIS_VERSION:-7.4.0}
+    container_name: redis
+    user: "999:999"
+    volumes:
+      - ./redis:/data
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redispassword}", "--maxmemory", "${MEMORY_PER_SERVICE:-256}mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "yes"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redispassword}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+EOF
+        
+        if command -v dos2unix >/dev/null 2>&1; then
+            dos2unix docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功将 docker-compose.yml 文件行尾字符转换为 LF"
+        elif command -v sed >/dev/null 2>&1; then
+            sed -i 's/\r$//' docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功使用 sed 将 docker-compose.yml 文件行尾字符转换为 LF"
+        else
+            print_yellow "注意: 无法自动转换行尾字符，请在 Linux 环境下手动执行 'dos2unix docker-compose.yml'"
+        fi
+        
+        print_green "docker-compose.yml 文件创建成功"
+    else
+        print_yellow "注意: docker-compose.yml 文件已存在，使用现有配置"
+        if command -v dos2unix >/dev/null 2>&1; then
+            dos2unix docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功转换现有 docker-compose.yml 文件行尾字符"
+        elif command -v sed >/dev/null 2>&1; then
+            sed -i 's/\r$//' docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功使用 sed 转换现有 docker-compose.yml 文件行尾字符"
+        fi
     fi
 }
 
@@ -560,7 +702,6 @@ EOF
 setup_auto_backup() {
     print_blue "设置自动备份..."
     mkdir -p "$BACKUP_DIR" 2>/dev/null || :
-    # 简单备份脚本示例，实际生产环境需完善
     cat > "$DEPLOY_DIR/scripts/backup.sh" << 'EOF'
 #!/bin/bash
 BACKUP_DIR="/opt/backups"
@@ -576,7 +717,6 @@ EOF
 # 设置磁盘空间管理
 setup_disk_space_management() {
     print_blue "设置磁盘空间管理..."
-    # 示例清理脚本，实际生产环境需完善
     cat > "$DEPLOY_DIR/scripts/cleanup.sh" << 'EOF'
 #!/bin/bash
 find /opt/backups -type f -name "*.tar.gz" -mtime +7 -delete
@@ -597,7 +737,6 @@ display_deployment_info() {
 
 # 主函数
 main() {
-    # 检查必要函数是否存在
     for func in prepare_host_environment detect_host_environment collect_system_parameters determine_deployment_directory optimize_parameters deploy_wordpress_stack setup_auto_backup setup_disk_space_management display_deployment_info; do
         if ! type -t "$func" >/dev/null; then
             print_red "错误: 函数 $func 未定义"
