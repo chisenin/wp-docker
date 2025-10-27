@@ -142,11 +142,11 @@ generate_password() {
 
 # 生成 WordPress 安全密钥
 generate_wordpress_keys() {
-    # 从WordPress API 获取安全密钥
+    # 从 WordPress API 获取安全密钥并转换为 KEY=VALUE 格式
     if command -v curl >/dev/null; then
-        curl -s https://api.wordpress.org/secret-key/1.1/salt/ | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"
+        curl -s https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"
     elif command -v wget >/dev/null; then
-        wget -q -O - https://api.wordpress.org/secret-key/1.1/salt/ | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"
+        wget -q -O - https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"
     else
         # 如果无法获取，生成随机密钥
         echo "AUTH_KEY=$(generate_password 64)"
@@ -562,7 +562,7 @@ EOF
 deploy_wordpress_stack() {
     print_blue "[步骤5] 部署 WordPress Docker 栈.."
     
-    # 下载并配置WordPress
+    # 下载并配置 WordPress
     if [ ! -f "html/wp-config.php" ]; then
         if [ -z "$(ls -A html 2>/dev/null)" ]; then
             print_blue "下载 WordPress 核心文件..."
@@ -631,8 +631,13 @@ deploy_wordpress_stack() {
         db_host=${WORDPRESS_DB_HOST:-mariadb:3306}
         table_prefix=${WORDPRESS_TABLE_PREFIX:-wp_}
         
-        # 生成 PHP 格式的密钥
-        wp_keys=$(generate_wordpress_keys | sed 's/=\(.*\)/, "\1");/')
+        # 从 .env 加载密钥并转换为 PHP 格式
+        wp_keys=""
+        for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
+            if [ -n "${!key}" ]; then
+                wp_keys="$wp_keys\ndefine('$key', '${!key}');"
+            fi
+        done
         
         cat > html/wp-config.php << EOF
 <?php
@@ -679,13 +684,13 @@ EOF
     
     # 构建 Docker 镜像
     print_blue "构建 Docker 镜像..."
-    docker-compose build
+    $DOCKER_COMPOSE_CMD build
 
     # 检查是否需要重置数据库
     if [ -d "mysql" ] && [ "$(ls -A mysql 2>/dev/null)" ]; then
         print_yellow "检测到数据库数据目录已存在，检查容器状态..."
-        docker-compose down >/dev/null 2>&1
-        if ! docker-compose up -d >/dev/null 2>&1; then
+        $DOCKER_COMPOSE_CMD down >/dev/null 2>&1
+        if ! $DOCKER_COMPOSE_CMD up -d >/dev/null 2>&1; then
             print_red "数据库容器启动失败，可能是数据目录存在兼容性问题"
             print_yellow "建议清理数据库数据目录并重新初始化"
             read -p "是否清理数据库数据目录？(y/N): " reset_db
@@ -700,16 +705,16 @@ EOF
     fi
 
     print_blue "配置文件权限和用户设置..."
-    docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R 33:33 /var/www/html
-    docker run --rm -v "$(pwd)/logs/mariadb:/var/log/mysql" alpine:latest chown -R 999:999 /var/log/mysql
-    docker run --rm -v "$(pwd)/mysql:/var/lib/mysql" alpine:latest chown -R 999:999 /var/lib/mysql
-    docker run --rm -v "$(pwd)/logs/nginx:/var/log/nginx" alpine:latest chown -R 33:33 /var/log/nginx
+    $DOCKER_CMD run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R 33:33 /var/www/html
+    $DOCKER_CMD run --rm -v "$(pwd)/logs/mariadb:/var/log/mysql" alpine:latest chown -R 999:999 /var/log/mysql
+    $DOCKER_CMD run --rm -v "$(pwd)/mysql:/var/lib/mysql" alpine:latest chown -R 999:999 /var/lib/mysql
+    $DOCKER_CMD run --rm -v "$(pwd)/logs/nginx:/var/log/nginx" alpine:latest chown -R 33:33 /var/log/nginx
     
     # 加载 .env 文件
     set -a
     if [ -f ".env" ]; then
-        # 只加载 KEY=VALUE 格式的行
-        grep -E '^[A-Z_]+=' .env | grep -v '^\s*#' | while IFS= read -r line; do
+        # 只加载符合 KEY=VALUE 格式的行
+        grep -E '^[A-Z_][A-Z0-9_]*=' .env | while IFS= read -r line; do
             if [[ "$line" == *"="* ]]; then
                 key=$(echo "$line" | cut -d'=' -f1)
                 value=$(echo "$line" | cut -d'=' -f2-)
@@ -717,6 +722,9 @@ EOF
             fi
         done
         print_green "✓ 成功加载 .env 文件变量"
+        # 输出 .env 文件内容（屏蔽敏感信息）以便调试
+        print_yellow "加载的 .env 变量："
+        grep -E '^[A-Z_][A-Z0-9_]*=' .env | sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' || true
     else
         print_red "错误: .env 文件不存在!"
         exit 1
@@ -725,7 +733,7 @@ EOF
     
     # 启动 Docker 容器
     print_blue "启动 Docker 容器..."
-    docker-compose up -d
+    $DOCKER_COMPOSE_CMD up -d
 
     # 等待服务启动
     print_blue "等待服务初始化.."
@@ -736,7 +744,7 @@ EOF
         print_yellow "等待MariaDB初始化 (尝试 $((RETRY_COUNT+1))/$MAX_RETRIES)"
         sleep 10
         
-        if docker-compose ps mariadb | grep -q "Up.*healthy"; then
+        if $DOCKER_COMPOSE_CMD ps mariadb | grep -q "Up.*healthy"; then
             print_green "数据库连接成功"
             break
         fi
@@ -750,29 +758,29 @@ EOF
         sleep 20
         
         print_yellow "尝试设置MariaDB root密码..."
-        docker-compose exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\" 2>/dev/null" || \
+        $DOCKER_COMPOSE_CMD exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\" 2>/dev/null" || \
         print_yellow "密码设置可能已完成或不需要，请继续..."
     fi
 
     # 显示容器状态
     print_blue "显示容器状态.."
-    docker-compose ps
+    $DOCKER_COMPOSE_CMD ps
 
     # 验证部署是否成功
     print_blue "等待10秒后验证服务状态..."
     sleep 10
     
-    if [ "$(docker-compose ps -q | wc -l)" -ge "3" ] && docker-compose ps | grep -q "Up.*healthy"; then
+    if [ "$($DOCKER_COMPOSE_CMD ps -q | wc -l)" -ge "3" ] && $DOCKER_COMPOSE_CMD ps | grep -q "Up.*healthy"; then
         print_green "WordPress Docker 栈部署成功"
         print_blue "服务状态摘要："
-        docker-compose ps
+        $DOCKER_COMPOSE_CMD ps
     else
         print_red "WordPress Docker 栈部署失败，请查看日志"
         print_yellow "保存各服务日志..."
-        sh -c "docker-compose logs --tail=50 mariadb > mariadb.log 2>&1"
-        sh -c "docker-compose logs --tail=50 nginx > nginx.log 2>&1"
-        sh -c "docker-compose logs --tail=50 php > php.log 2>&1"
-        sh -c "docker-compose logs --tail=50 redis > redis.log 2>&1"
+        $DOCKER_COMPOSE_CMD logs --tail=50 mariadb > mariadb.log 2>&1
+        $DOCKER_COMPOSE_CMD logs --tail=50 nginx > nginx.log 2>&1
+        $DOCKER_COMPOSE_CMD logs --tail=50 php > php.log 2>&1
+        $DOCKER_COMPOSE_CMD logs --tail=50 redis > redis.log 2>&1
         print_yellow "日志已保存到相应的.log文件中，请检查"
     fi
 }
