@@ -1,10 +1,8 @@
-bash#!/bin/bash
+#!/bin/bash
 
 # WordPress Docker 全栈自动部署脚本 - 生产环境优化版
 
-# 启用调试模式
 set -e
-# set -x  # 启用后可输出每行执行的命令，调试完成后可注释掉
 
 # 颜色输出函数
 print_blue() { echo -e "\033[34m$1\033[0m"; }
@@ -20,20 +18,32 @@ generate_password() {
 
 # 生成 WordPress 安全密钥
 generate_wordpress_keys() {
+    local keys=()
+    local key_names=("AUTH_KEY" "SECURE_AUTH_KEY" "LOGGED_IN_KEY" "NONCE_KEY" "AUTH_SALT" "SECURE_AUTH_SALT" "LOGGED_IN_SALT" "NONCE_SALT")
+    
+    # 尝试从 WordPress API 获取密钥
     if command -v curl >/dev/null; then
-        curl -s https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"
+        keys=($(curl -s https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"))
     elif command -v wget >/dev/null; then
-        wget -q -O - https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"
-    else
-        echo "AUTH_KEY=$(generate_password 64)"
-        echo "SECURE_AUTH_KEY=$(generate_password 64)"
-        echo "LOGGED_IN_KEY=$(generate_password 64)"
-        echo "NONCE_KEY=$(generate_password 64)"
-        echo "AUTH_SALT=$(generate_password 64)"
-        echo "SECURE_AUTH_SALT=$(generate_password 64)"
-        echo "LOGGED_IN_SALT=$(generate_password 64)"
-        echo "NONCE_SALT=$(generate_password 64)"
+        keys=($(wget -q -O - https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"))
     fi
+    
+    # 如果 API 获取失败，生成随机密钥
+    if [ ${#keys[@]} -lt 8 ]; then
+        for key in "${key_names[@]}"; do
+            keys+=("$key=$(generate_password 64)")
+        done
+    fi
+    
+    # 输出密钥并验证非空
+    for key in "${keys[@]}"; do
+        if [[ "$key" =~ ^[A-Z_]+=.+$ ]]; then
+            echo "$key"
+        else
+            print_red "错误: 无效的密钥格式: $key"
+            exit 1
+        fi
+    done
 }
 
 # 检测主机环境
@@ -542,10 +552,16 @@ deploy_wordpress_stack() {
         db_host=${WORDPRESS_DB_HOST:-mariadb:3306}
         table_prefix=${WORDPRESS_TABLE_PREFIX:-wp_}
         
+        # 从 .env 加载密钥
         wp_keys=""
         for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
             if [ -n "${!key}" ]; then
                 wp_keys="$wp_keys\ndefine('$key', '${!key}');"
+            else
+                print_red "错误: 缺失密钥 $key，请检查 .env 文件"
+                print_yellow ".env 密钥内容："
+                grep -E '^(AUTH_KEY|SECURE_AUTH_KEY|LOGGED_IN_KEY|NONCE_KEY|AUTH_SALT|SECURE_AUTH_SALT|LOGGED_IN_SALT|NONCE_SALT)=' .env || true
+                exit 1
             fi
         done
         
@@ -564,11 +580,13 @@ define('DB_HOST', '$db_host');
 define('DB_CHARSET', 'utf8mb4');
 define('DB_COLLATE', '');
 
-\$table_prefix = '$table_prefix';
+// 表前缀
+define('WP_TABLE_PREFIX', '$table_prefix');
 
 // 安全密钥
 $wp_keys
 
+// 其他设置
 define('WP_DEBUG', false);
 if ( !defined('ABSPATH') )
     define('ABSPATH', dirname(__FILE__) . '/');
@@ -585,6 +603,11 @@ EOF
         for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
             if [ -n "${!key}" ]; then
                 $sed_cmd "s|define('$key',.*);|define('$key', '${!key}');|g" html/wp-config.php
+            else
+                print_red "错误: 缺失密钥 $key，无法更新 wp-config.php"
+                print_yellow ".env 密钥内容："
+                grep -E '^(AUTH_KEY|SECURE_AUTH_KEY|LOGGED_IN_KEY|NONCE_KEY|AUTH_SALT|SECURE_AUTH_SALT|LOGGED_IN_SALT|NONCE_SALT)=' .env || true
+                exit 1
             fi
         done
         
@@ -593,11 +616,13 @@ EOF
     
     # 验证 wp-config.php 语法
     print_blue "验证 wp-config.php 语法..."
-    if $DOCKER_CMD run --rm -v "$(pwd)/html:/var/www/html" php:${PHP_VERSION:-8.3.26} php -l /var/www/html/wp-config.php 2>/dev/null; then
+    if $DOCKER_CMD run --rm -v "$(pwd)/html:/var/www/html" php:${PHP_VERSION:-8.3.26}-fpm php -l /var/www/html/wp-config.php 2>/dev/null; then
         print_green "✓ wp-config.php 语法正确"
     else
-        print_red "错误: wp-config.php 语法错误，请检查文件内容"
-        cat html/wp-config.php
+        print_red "错误: wp-config.php 语法错误，请检查以下内容："
+        cat html/wp-config.php | sed 's/define('\''DB_PASSWORD'\'',.*);/define('\''DB_PASSWORD'\'', '\''[HIDDEN]'\'');/'
+        print_yellow ".env 密钥内容："
+        grep -E '^(AUTH_KEY|SECURE_AUTH_KEY|LOGGED_IN_KEY|NONCE_KEY|AUTH_SALT|SECURE_AUTH_SALT|LOGGED_IN_SALT|NONCE_SALT)=' .env || true
         exit 1
     fi
     
