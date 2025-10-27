@@ -21,17 +21,35 @@ generate_password() {
 generate_wordpress_keys() {
     local keys=()
     local key_names=("AUTH_KEY" "SECURE_AUTH_KEY" "LOGGED_IN_KEY" "NONCE_KEY" "AUTH_SALT" "SECURE_AUTH_SALT" "LOGGED_IN_SALT" "NONCE_SALT")
+    local api_success=false
     
+    print_blue "尝试从 WordPress API 获取安全密钥..."
     if command -v curl >/dev/null; then
-        keys=($(curl -s https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"))
+        keys=($(curl -s --connect-timeout 10 https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/" || true))
+        if [ ${#keys[@]} -eq 8 ]; then
+            api_success=true
+            print_green "✓ 成功从 WordPress API 获取密钥"
+        else
+            print_yellow "警告: WordPress API 请求失败或返回不完整密钥，生成随机密钥..."
+        fi
     elif command -v wget >/dev/null; then
-        keys=($(wget -q -O - https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/"))
+        keys=($(wget -q --timeout=10 -O - https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/" || true))
+        if [ ${#keys[@]} -eq 8 ]; then
+            api_success=true
+            print_green "✓ 成功从 WordPress API 获取密钥"
+        else
+            print_yellow "警告: WordPress API 请求失败或返回不完整密钥，生成随机密钥..."
+        fi
+    else
+        print_yellow "警告: 未找到 curl 或 wget，生成随机密钥..."
     fi
     
-    if [ ${#keys[@]} -lt 8 ]; then
+    if [ "$api_success" = false ]; then
+        keys=()
         for key in "${key_names[@]}"; do
             keys+=("$key=$(generate_password 64)")
         done
+        print_green "✓ 已生成随机密钥"
     fi
     
     for key in "${keys[@]}"; do
@@ -247,6 +265,8 @@ EOF
         for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
             if ! grep -q "^$key=" .env; then
                 print_red "错误: .env 文件中缺失密钥 $key"
+                print_yellow ".env 文件内容（屏蔽敏感信息）："
+                sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' .env
                 exit 1
             fi
         done
@@ -307,7 +327,6 @@ EOF
     print_green "Nginx 配置文件创建成功"
     
     print_blue "验证 Nginx 配置文件..."
-    # 临时替换 fastcgi_pass 为 127.0.0.1:9000 以通过验证
     cp ./configs/nginx/conf.d/default.conf /tmp/default.conf
     sed -i 's/fastcgi_pass php:9000;/fastcgi_pass 127.0.0.1:9000;/' /tmp/default.conf
     if $DOCKER_CMD run --rm -v /tmp/default.conf:/etc/nginx/conf.d/default.conf nginx:${NGINX_VERSION:-1.27.2} nginx -t -c /etc/nginx/nginx.conf 2>&1 | tee /tmp/nginx_config_test.log; then
@@ -320,125 +339,6 @@ EOF
         exit 1
     fi
     rm -f /tmp/default.conf
-    
-    # 生成 docker-compose.yml 文件
-    if [ ! -f "docker-compose.yml" ]; then
-        print_blue "生成 Docker Compose 配置文件..."
-        
-        if [ -z "$CPU_LIMIT" ] || [ "$CPU_LIMIT" -eq 0 ]; then
-            CPU_LIMIT=1
-        fi
-        
-        PHP_INI_PATH=${PHP_INI_PATH:-./deploy/configs/php.ini}
-        if [ -d "$PHP_INI_PATH" ]; then
-            print_yellow "警告: $PHP_INI_PATH 被检测为目录，正在删除..."
-            rm -rf "$PHP_INI_PATH"
-        fi
-        
-        if [ ! -f "$PHP_INI_PATH" ]; then
-            print_yellow "警告: PHP配置文件 $PHP_INI_PATH 不存在或不是文件"
-            mkdir -p "$(dirname "$PHP_INI_PATH")"
-            echo "[PHP]" > "$PHP_INI_PATH"
-            echo "memory_limit = ${PHP_MEMORY_LIMIT:-512M}" >> "$PHP_INI_PATH"
-            echo "upload_max_filesize = ${UPLOAD_MAX_FILESIZE:-64M}" >> "$PHP_INI_PATH"
-            echo "post_max_size = ${UPLOAD_MAX_FILESIZE:-64M}" >> "$PHP_INI_PATH"
-            print_green "已创建默认的php.ini配置文件"
-        fi
-        
-        cat > docker-compose.yml << EOF
-version: '3.8'
-
-services:
-  nginx:
-    image: nginx:${NGINX_VERSION:-1.27.2}
-    container_name: nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./html:/var/www/html
-      - ./configs/nginx/conf.d:/etc/nginx/conf.d
-      - ./logs/nginx:/var/log/nginx
-    depends_on:
-      php:
-        condition: service_healthy
-      mariadb:
-        condition: service_healthy
-    restart: unless-stopped
-    command: nginx -g 'daemon off;'
-    healthcheck:
-      test: ["CMD", "nginx", "-t"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-  php:
-    image: php:${PHP_VERSION:-8.3.26}-fpm
-    container_name: php
-    volumes:
-      - ./html:/var/www/html
-      - ${PHP_INI_PATH:-./deploy/configs/php.ini}:/usr/local/etc/php/php.ini:ro
-    restart: unless-stopped
-    command: ["php-fpm"]
-    healthcheck:
-      test: ["CMD-SHELL", "pgrep -f 'php-fpm: master process' > /dev/null || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-  mariadb:
-    image: mariadb:${MARIADB_VERSION:-11.3.2}
-    container_name: mariadb
-    user: "999:999"
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
-      MYSQL_USER: ${MYSQL_USER:-wordpress}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-wordpresspassword}
-      MARIADB_ROOT_HOST: "%"
-    volumes:
-      - ./mysql:/var/lib/mysql
-      - ./logs/mariadb:/var/log/mysql
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "mariadb-admin ping -h localhost --user=\$MYSQL_USER --password=\$MYSQL_PASSWORD || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 6
-      start_period: 240s
-  redis:
-    image: redis:${REDIS_VERSION:-7.4.0}
-    container_name: redis
-    user: "999:999"
-    volumes:
-      - ./redis:/data
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redispassword}", "--maxmemory", "${MEMORY_PER_SERVICE:-256}mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "yes"]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redispassword}", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 60s
-EOF
-        
-        if command -v dos2unix >/dev/null 2>&1; then
-            dos2unix docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功将 docker-compose.yml 文件行尾字符转换为 LF"
-        elif command -v sed >/dev/null 2>&1; then
-            sed -i 's/\r$//' docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功使用 sed 将 docker-compose.yml 文件行尾字符转换为 LF"
-        else
-            print_yellow "注意: 无法自动转换行尾字符，请在 Linux 环境下手动执行 'dos2unix docker-compose.yml'"
-        fi
-        
-        print_green "docker-compose.yml 文件创建成功"
-    else
-        print_yellow "注意: docker-compose.yml 文件已存在，使用现有配置"
-        if command -v dos2unix >/dev/null 2>&1; then
-            dos2unix docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功转换现有 docker-compose.yml 文件行尾字符"
-        elif command -v sed >/dev/null 2>&1; then
-            sed -i 's/\r$//' docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功使用 sed 转换现有 docker-compose.yml 文件行尾字符"
-        fi
-    fi
 }
 
 # 部署 WordPress Docker 栈
