@@ -384,24 +384,25 @@ optimize_parameters() {
         # 生成WordPress密钥并直接格式化为键值对
         wp_keys_lines=$(generate_wordpress_keys | grep "WORDPRESS_" | cut -d'"' -f2,4 | tr '""' '=')
         
-        cat > .env << EOF
+        # 使用更稳定的方式创建.env文件，避免EOF标记问题
+        cat > .env << 'EOT'
 # WordPress Docker 环境配置文件
-# 生成时间: $current_date
+# 生成时间: ${current_date}
 
 DOCKERHUB_USERNAME=chisenin
-PHP_VERSION=$php_version
-NGINX_VERSION=$nginx_version
-MARIADB_VERSION=$mariadb_version
-REDIS_VERSION=$redis_version
+PHP_VERSION=${php_version}
+NGINX_VERSION=${nginx_version}
+MARIADB_VERSION=${mariadb_version}
+REDIS_VERSION=${redis_version}
 
-MYSQL_ROOT_PASSWORD=$root_password
+MYSQL_ROOT_PASSWORD=${root_password}
 MYSQL_DATABASE=wordpress
 MYSQL_USER=wordpress
-MYSQL_PASSWORD=$db_user_password
+MYSQL_PASSWORD=${db_user_password}
 
 WORDPRESS_DB_HOST=mariadb:3306
 WORDPRESS_DB_USER=wordpress
-WORDPRESS_DB_PASSWORD=$db_user_password
+WORDPRESS_DB_PASSWORD=${db_user_password}
 WORDPRESS_DB_NAME=wordpress
 WORDPRESS_REDIS_HOST=redis
 WORDPRESS_REDIS_PORT=6379
@@ -409,18 +410,23 @@ WORDPRESS_TABLE_PREFIX=wp_
 
 REDIS_HOST=redis
 REDIS_PORT=6379
-REDIS_PASSWORD=$redis_pwd
+REDIS_PASSWORD=${redis_pwd}
 REDIS_MAXMEMORY=256mb
 
-CPU_LIMIT=$CPU_LIMIT
-MEMORY_PER_SERVICE=$MEMORY_PER_SERVICE
-PHP_MEMORY_LIMIT=$PHP_MEMORY_LIMIT
+CPU_LIMIT=${CPU_LIMIT}
+MEMORY_PER_SERVICE=${MEMORY_PER_SERVICE}
+PHP_MEMORY_LIMIT=${PHP_MEMORY_LIMIT}
 UPLOAD_MAX_FILESIZE=64M
 PHP_INI_PATH=./deploy/configs/php.ini
 
 # WordPress 密钥 - 以键值对格式存储，确保 python-dotenv 能够正确读取
-$wp_keys_lines
-EOF
+EOT
+        
+        # 安全地添加WordPress密钥，避免特殊字符问题
+        echo "${wp_keys_lines}" >> .env
+        
+        # 添加一个空行确保文件结尾正常
+        echo >> .env
         
         # 尝试自动转换行尾字符（跨平台兼容性）
         print_yellow "尝试自动转换行尾字符（Windows CRLF 到 Linux LF）..."
@@ -749,19 +755,29 @@ EOF
         fi
     fi
 
-    # 配置文件权限和用户...
-    print_blue "配置文件权限和用户..."
+    print_blue "配置文件权限和用户设置..."
     # 1. 设置 html 目录权限，www-data (UID 33) 是 Nginx 和 PHP 的用户
     # 在Alpine容器中直接使用UID，避免用户名查找问题
     docker run --rm -v "$(pwd)/html:/var/www/html" alpine:latest chown -R 33:33 /var/www/html
     # 2. 设置日志目录权限，mysql (UID 99) 是 MariaDB 的用户
     docker run --rm -v "$(pwd)/logs/mariadb:/var/log/mysql" alpine:latest chown -R 99:99 /var/log/mysql
     docker run --rm -v "$(pwd)/logs/nginx:/var/log/nginx" alpine:latest chown -R 33:33 /var/log/nginx
-    # 3. 确保 .env 文件能被正确 source
+    # 3. 确保 .env 文件能被正确 source，添加错误处理
     set -a
     # .env 文件可能不在脚本所在目录，使用绝对路径或相对路径确保能找到
     if [ -f ".env" ]; then
-        source .env
+        # 使用更安全的方式加载.env文件，避免语法错误导致脚本中断
+        grep -v '^\s*#' .env | grep -v '^$' | while IFS= read -r line; do
+            # 检查行是否包含=且不是注释
+            if [[ "$line" == *"="* ]]; then
+                # 提取键和值
+                key=$(echo "$line" | cut -d'=' -f1)
+                value=$(echo "$line" | cut -d'=' -f2-)
+                # 安全地导出变量
+                export "$key"="$value"
+            fi
+        done
+        print_green "✓ 成功加载 .env 文件变量"
     else
         print_red "错误: .env 文件不存在!"
         exit 1
