@@ -400,9 +400,9 @@ MYSQL_USER=wordpress
 MYSQL_PASSWORD=$db_user_password
 
 WORDPRESS_DB_HOST=mariadb:3306
-WORDPRESS_DB_USER=\${MYSQL_USER}
-WORDPRESS_DB_PASSWORD=\${MYSQL_PASSWORD}
-WORDPRESS_DB_NAME=\${MYSQL_DATABASE}
+WORDPRESS_DB_USER=$MYSQL_USER
+WORDPRESS_DB_PASSWORD=$db_user_password
+WORDPRESS_DB_NAME=$MYSQL_DATABASE
 WORDPRESS_REDIS_HOST=redis
 WORDPRESS_REDIS_PORT=6379
 WORDPRESS_TABLE_PREFIX=wp_
@@ -422,9 +422,16 @@ PHP_INI_PATH=./deploy/configs/php.ini
 $wp_keys_lines
 EOF
         
-        # 提示用户注意行尾字符问题
-        print_yellow "注意: .env 文件可能需要在 Linux 环境下转换行尾字符"
-        print_yellow "      可以使用 'dos2unix .env' 命令将 CRLF 转换为 LF"
+        # 尝试自动转换行尾字符（跨平台兼容性）
+        print_yellow "尝试自动转换行尾字符（Windows CRLF 到 Linux LF）..."
+        if command -v dos2unix >/dev/null 2>&1; then
+            dos2unix .env >/dev/null 2>&1 && print_green "✓ 成功将 .env 文件行尾字符转换为 LF"
+        elif command -v sed >/dev/null 2>&1; then
+            # 使用 sed 作为备选方案
+            sed -i 's/\r$//' .env >/dev/null 2>&1 && print_green "✓ 成功使用 sed 将 .env 文件行尾字符转换为 LF"
+        else
+            print_yellow "注意: 无法自动转换行尾字符，请在 Linux 环境下手动执行 'dos2unix .env'"
+        fi
         
         print_green ".env 文件创建成功"
         print_yellow "警告: 请妥善保存 .env 文件中的敏感信息"
@@ -553,13 +560,28 @@ services:
       start_period: 60s # Redis 首次启动或AOF重写时可能较慢
 EOF
         
+        # 尝试自动转换行尾字符（跨平台兼容性）
+        print_yellow "尝试自动转换行尾字符（Windows CRLF 到 Linux LF）..."
+        if command -v dos2unix >/dev/null 2>&1; then
+            dos2unix docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功将 docker-compose.yml 文件行尾字符转换为 LF"
+        elif command -v sed >/dev/null 2>&1; then
+            # 使用 sed 作为备选方案
+            sed -i 's/\r$//' docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功使用 sed 将 docker-compose.yml 文件行尾字符转换为 LF"
+        else
+            print_yellow "注意: 无法自动转换行尾字符，请在 Linux 环境下手动执行 'dos2unix docker-compose.yml'"
+        fi
+        
         print_green "docker-compose.yml 文件创建成功"
     else
         print_yellow "注意: docker-compose.yml 文件已存在，使用现有配置"
+        # 对已存在的文件也尝试转换行尾字符
+        print_yellow "尝试转换现有 docker-compose.yml 的行尾字符..."
+        if command -v dos2unix >/dev/null 2>&1; then
+            dos2unix docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功转换现有 docker-compose.yml 文件行尾字符"
+        elif command -v sed >/dev/null 2>&1; then
+            sed -i 's/\r$//' docker-compose.yml >/dev/null 2>&1 && print_green "✓ 成功使用 sed 转换现有 docker-compose.yml 文件行尾字符"
+        fi
     fi
-    
-    # 提示用户注意行尾字符问题
-    print_yellow "注意: 在 Linux 环境下可能需要转换行尾字符为 LF 而不是 CRLF"
     print_yellow "      可以使用 'dos2unix auto_deploy.sh .env docker-compose.yml' 命令进行转换"
 }
 
