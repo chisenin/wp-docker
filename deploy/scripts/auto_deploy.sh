@@ -324,10 +324,6 @@ determine_deployment_directory() {
     print_green "备份目录: $BACKUP_DIR"
 }
 
-bash#!/bin/bash
-
-# ... [之前的函数和变量定义保持不变，直到 optimize_parameters] ...
-
 # 优化系统参数
 optimize_parameters() {
     print_blue "[步骤4] 优化系统参数..."
@@ -376,7 +372,7 @@ optimize_parameters() {
 # WordPress Docker 环境配置文件
 # 生成时间: $(date)
 
-DOCKERHUB_USERNAME=chisenin
+DOCKERHUB_USERNAME=library
 PHP_VERSION=${php_version}
 NGINX_VERSION=${nginx_version}
 MARIADB_VERSION=${mariadb_version}
@@ -432,42 +428,50 @@ EOF
     
     # 生成 Nginx 配置文件
     mkdir -p ./configs/nginx/conf.d
-    if [ ! -f "./configs/nginx/conf.d/default.conf" ]; then
-        print_blue "生成 Nginx 配置文件..."
-        cat > ./configs/nginx/conf.d/default.conf << EOF
+    print_blue "生成 Nginx 配置文件..."
+    cat > ./configs/nginx/conf.d/default.conf << 'EOF'
 server {
     listen 80;
     server_name localhost;
     root /var/www/html;
-    index index.php index.html;
+    index index.php index.html index.htm;
+
+    # 优化 FastCGI 设置
+    fastcgi_buffers 16 16k;
+    fastcgi_buffer_size 32k;
+    fastcgi_read_timeout 300;
 
     location / {
-        try_files \$uri \$uri/ /index.php?\$args;
+        try_files $uri $uri/ /index.php?$args;
     }
 
-    location ~ \.php\$ {
+    location ~ \.php$ {
+        include fastcgi_params;
         fastcgi_pass php:9000;
         fastcgi_index index.php;
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
-        fastcgi_read_timeout 300;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
     }
 
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff|woff2|ttf|svg|eot|otf|ttc|ttf|ttc)$ {
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff|woff2|ttf|svg|eot|otf|ttc)$ {
         expires max;
         log_not_found off;
     }
+
+    error_log /var/log/nginx/error.log warn;
+    access_log /var/log/nginx/access.log;
 }
 EOF
-        print_green "Nginx 配置文件创建成功"
-    fi
+    print_green "Nginx 配置文件创建成功"
     
     # 验证 Nginx 配置文件
     print_blue "验证 Nginx 配置文件..."
-    if $DOCKER_CMD run --rm -v "$(pwd)/configs/nginx/conf.d:/etc/nginx/conf.d" nginx:${NGINX_VERSION:-1.27.2} nginx -t -c /etc/nginx/nginx.conf 2>/dev/null; then
+    if $DOCKER_CMD run --rm -v "$(pwd)/configs/nginx/conf.d:/etc/nginx/conf.d" nginx:${NGINX_VERSION:-1.27.2} nginx -t -c /etc/nginx/nginx.conf 2>&1 | tee /tmp/nginx_config_test.log; then
         print_green "✓ Nginx 配置文件语法正确"
     else
-        print_red "错误: Nginx 配置文件语法错误，请检查 ./configs/nginx/conf.d/default.conf"
+        print_red "错误: Nginx 配置文件语法错误，请检查以下内容："
+        cat ./configs/nginx/conf.d/default.conf
+        print_yellow "Nginx 配置测试日志："
+        cat /tmp/nginx_config_test.log
         exit 1
     fi
     
@@ -523,7 +527,7 @@ services:
       retries: 3
       start_period: 40s
   php:
-    image: ${DOCKERHUB_USERNAME:-library}/wordpress-php:${PHP_VERSION:-8.3.26}
+    image: php:${PHP_VERSION:-8.3.26}-fpm
     container_name: php
     volumes:
       - ./html:/var/www/html
