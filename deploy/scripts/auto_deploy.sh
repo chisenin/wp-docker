@@ -551,9 +551,7 @@ services:
       - ./redis:/data
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redispassword}", "--maxmemory", "${MEMORY_PER_SERVICE:-256}mb", "--maxmemory-policy", "allkeys-lru", "--appendonly", "yes"]
     restart: unless-stopped
-    # === 关键修复：在容器级别再次强制应用 sysctl，作为双重保险 ===
-    sysctls:
-      - vm.overcommit_memory=1
+    # 删除容器级别的sysctl设置，避免OCI运行时错误
     # 健康检查本身是正确的，但延长启动等待时间
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redispassword}", "ping"]
