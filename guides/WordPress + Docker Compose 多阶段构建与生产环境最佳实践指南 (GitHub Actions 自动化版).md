@@ -909,6 +909,52 @@ chmod +x deploy/scripts/auto_deploy.sh
 - 浏览器访问 `http://服务器IP`，按向导配置数据库
 - 安装并配置 "Redis Object Cache" 插件以启用缓存功能
 
+## 跨平台兼容性注意事项
+
+由于本项目采用 Windows 本地开发 → GitHub Actions 构建 → Linux 远程部署的工作流模式，在使用过程中需要注意以下跨平台兼容性问题：
+
+### 1. Redis 服务特殊注意事项
+
+在某些容器运行环境（如特定版本的 Docker Desktop 或容器编排系统）中，Redis 服务可能会遇到以下错误：
+
+```
+ERROR: for redis  Cannot start service redis: failed to create shim task: OCI runtime create failed: runc create failed: sysctl "vm.overcommit_memory" is not in a separate kernel namespace: unknown
+```
+
+**解决方案**：
+- 我们的 `auto_deploy.sh` 脚本已经移除了容器级别的 `sysctl` 设置，避免了这个 OCI 运行时错误
+- 宿主机级别仍然会尝试设置 `vm.overcommit_memory=1`，但如果设置失败也不会影响容器启动
+- 对于生产环境，建议联系宿主机管理员确保 `vm.overcommit_memory` 设置为 1 以获得最佳 Redis 性能
+
+### 2. 行尾字符兼容性
+
+在 Windows 和 Linux 系统之间切换开发和部署环境时，需要注意行尾字符的差异：
+
+- Windows 使用 CRLF (`\r\n`) 作为行尾字符
+- Linux/Unix 使用 LF (`\n`) 作为行尾字符
+
+**解决方案**：
+- `.gitattributes` 文件已配置为自动处理常见文件类型的行尾字符
+- `auto_deploy.sh` 脚本中包含自动转换行尾字符的功能，会尝试使用 `dos2unix` 或 `sed` 命令将配置文件转换为 Linux 兼容格式
+- 在 Windows 上编辑脚本文件后，确保在提交前检查行尾字符设置
+
+### 3. 文件权限注意事项
+
+在不同操作系统之间移动文件时，文件权限可能会丢失或更改：
+
+- Windows 和 Linux 的文件权限模型不同
+- 在 Windows 上创建的文件可能在 Linux 上没有执行权限
+
+**解决方案**：
+- 在 Linux 部署服务器上，使用 `chmod +x` 命令确保脚本文件有执行权限
+- `auto_deploy.sh` 脚本会自动设置 `.env` 文件的权限为 `600`（仅当前用户可读写）
+
+### 4. 环境变量文件注意事项
+
+- Windows 上编辑 `.env` 文件时，避免使用特殊字符或空格，可能会在 Linux 环境下导致解析问题
+- `.env` 文件中的敏感信息（如数据库密码）在不同环境中应使用不同的值
+- 在 Windows 开发环境中，不需要创建实际的 `.env` 文件，它会在 Linux 部署环境中由脚本自动生成
+
 ## 总结
 
 本指南提供了一个稳定、高效、可维护的 WordPress 生产环境，集成了最佳实践:
@@ -918,5 +964,6 @@ chmod +x deploy/scripts/auto_deploy.sh
 - **CI/CD 自动化**：GitHub Actions 自动构建、测试和部署
 - **版本监控**：自动检测依赖版本更新并触发构建
 - **自动化部署**：一键部署脚本简化生产环境部署流程
+- **跨平台兼容性**：经过优化的脚本和配置，确保在不同操作系统环境中正常工作
 
 如需更详细的配置说明，请参考项目中的示例配置文件和脚本注释。
