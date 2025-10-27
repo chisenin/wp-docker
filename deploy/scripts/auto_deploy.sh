@@ -399,6 +399,36 @@ deploy_wordpress_stack() {
         print_green "WordPress 配置文件已存在"
     fi
     
+    print_blue "加载 .env 文件变量..."
+    if [ -f ".env" ]; then
+        set -a
+        grep -E '^[A-Z_][A-Z0-9_]*=' .env | while IFS= read -r line; do
+            if [[ "$line" == *"="* ]]; then
+                key=$(echo "$line" | cut -d'=' -f1)
+                value=$(echo "$line" | cut -d'=' -f2-)
+                export "$key=$value"
+            fi
+        done
+        set +a
+        print_green "✓ 成功加载 .env 文件变量"
+        print_yellow "加载的 .env 变量（屏蔽敏感信息）："
+        grep -E '^[A-Z_][A-Z0-9_]*=' .env | sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' || true
+    else
+        print_red "错误: .env 文件不存在!"
+        exit 1
+    fi
+    
+    print_blue "验证环境变量中的密钥..."
+    for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
+        if [ -z "${!key}" ]; then
+            print_red "错误: 环境变量中缺失密钥 $key"
+            print_yellow ".env 文件内容（屏蔽敏感信息）："
+            sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' .env
+            exit 1
+        fi
+    done
+    print_green "✓ 环境变量密钥验证通过"
+    
     print_blue "更新 WordPress 密钥..."
     if [ ! -f "html/wp-config.php" ]; then
         print_yellow "警告: html/wp-config.php 文件不存在，正在创建文件..."
@@ -413,14 +443,7 @@ deploy_wordpress_stack() {
         
         wp_keys=""
         for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
-            if [ -n "${!key}" ]; then
-                wp_keys="$wp_keys\ndefine('$key', '${!key}');"
-            else
-                print_red "错误: 缺失密钥 $key，请检查 .env 文件"
-                print_yellow ".env 密钥内容："
-                grep -E '^(AUTH_KEY|SECURE_AUTH_KEY|LOGGED_IN_KEY|NONCE_KEY|AUTH_SALT|SECURE_AUTH_SALT|LOGGED_IN_SALT|NONCE_SALT)=' .env || true
-                exit 1
-            fi
+            wp_keys="$wp_keys\ndefine('$key', '${!key}');"
         done
         
         cat > html/wp-config.php << EOF
@@ -463,8 +486,8 @@ EOF
                 $sed_cmd "s|define('$key',.*);|define('$key', '${!key}');|g" html/wp-config.php
             else
                 print_red "错误: 缺失密钥 $key，无法更新 wp-config.php"
-                print_yellow ".env 密钥内容："
-                grep -E '^(AUTH_KEY|SECURE_AUTH_KEY|LOGGED_IN_KEY|NONCE_KEY|AUTH_SALT|SECURE_AUTH_SALT|LOGGED_IN_SALT|NONCE_SALT)=' .env || true
+                print_yellow ".env 文件内容（屏蔽敏感信息）："
+                sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' .env
                 exit 1
             fi
         done
@@ -478,8 +501,8 @@ EOF
     else
         print_red "错误: wp-config.php 语法错误，请检查以下内容："
         cat html/wp-config.php | sed 's/define('\''DB_PASSWORD'\'',.*);/define('\''DB_PASSWORD'\'', '\''[HIDDEN]'\'');/'
-        print_yellow ".env 密钥内容："
-        grep -E '^(AUTH_KEY|SECURE_AUTH_KEY|LOGGED_IN_KEY|NONCE_KEY|AUTH_SALT|SECURE_AUTH_SALT|LOGGED_IN_SALT|NONCE_SALT)=' .env || true
+        print_yellow ".env 文件内容（屏蔽敏感信息）："
+        sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' .env
         exit 1
     fi
     
