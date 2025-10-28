@@ -402,36 +402,37 @@ deploy_wordpress_stack() {
         print_green "WordPress 配置文件已存在"
     fi
     
-    print_blue "加载 .env 文件变量..."
+print_blue "加载 .env 文件变量..."
     if [ -f ".env" ]; then
-        # 使用 source 加载 .env 文件，确保变量在当前 shell 中生效
-        set -a
-        source .env 2>/dev/null || {
-            print_red "错误: 无法加载 .env 文件，请检查文件格式"
+        export $(grep -E '^[A-Z_][A-Z0-9_]*=' .env | xargs) 2>/dev/null
+        
+        if [ -z "$(env | grep -E '^[A-Z_][A-Z0-9_]*=')" ]; then
+            print_red "错误: .env 文件加载失败，无有效变量"
+            print_yellow ".env 文件内容（屏蔽敏感信息）："
             sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' .env
             exit 1
-        }
-        set +a
-        print_green "✓ 成功加载 .env 文件变量"
-        print_yellow "加载的 .env 变量（屏蔽敏感信息）："
-        env | grep -E '^[A-Z_][A-Z0-9_]*=' | grep -vE '^(MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD|REDIS_PASSWORD)=' | sort || true
+        fi
+        
+        print_green "成功加载 .env 文件变量"
+        print_yellow "已加载变量（屏蔽敏感信息）："
+        env | grep -E '^[A-Z_][A-Z0-9_]*=' | \
+            grep -vE '^(MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD|REDIS_PASSWORD)=' | \
+            sort || true
     else
         print_red "错误: .env 文件不存在!"
         exit 1
     fi
-    
+
     print_blue "验证环境变量中的密钥..."
     for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
         if [ -z "${!key}" ]; then
             print_red "错误: 环境变量中缺失密钥 $key"
-            print_yellow ".env 文件内容（屏蔽敏感信息）："
-            sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' .env
-            print_yellow "当前环境变量（屏蔽敏感信息）："
-            env | grep -E '^[A-Z_][A-Z0-9_]*=' | grep -vE '^(MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD|REDIS_PASSWORD)=' | sort || true
+            print_yellow "当前环境变量："
+            env | grep -E "^(AUTH_|SECURE_|LOGGED_|NONCE_)" | head -10
             exit 1
         fi
     done
-    print_green "✓ 环境变量密钥验证通过"
+    print_green "环境变量密钥验证通过"
     
     print_blue "更新 WordPress 密钥..."
     if [ ! -f "html/wp-config.php" ]; then
