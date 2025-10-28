@@ -1,11 +1,10 @@
 #!/bin/bash
 # ==================================================
-# WordPress Docker 全栈自动部署脚本 - Base64 修正版（无 ANSI 污染）
-# 修正版 v2025.10.29-fix
-# 变更：
-# - 修复 .env 写入 ANSI 转义字符问题
-# - 自动清理 .env 中的非键值行
-# - 强化安全性与容错性
+# WordPress Docker 全栈自动部署脚本 - Base64 最终修正版
+# v2025.10.30-final
+# 修复：
+# - 修正 .env 被写入多行转义字符串（\n、\"）问题
+# - 所有 WordPress 密钥逐行写入，不使用 echo -e
 # ==================================================
 
 set -e
@@ -28,8 +27,9 @@ generate_wordpress_keys_b64() {
                      "AUTH_SALT" "SECURE_AUTH_SALT" "LOGGED_IN_SALT" "NONCE_SALT")
     print_blue "生成 WordPress 安全密钥（Base64 编码）..."
     for key in "${key_names[@]}"; do
-        val=$(generate_password 64 | base64 | tr -d '\n')
-        echo "${key}=${val}"
+        # 保证每行都是 KEY=base64_value 格式（无引号、无转义）
+        val=$(generate_password 64 | base64 | tr -d '\n' | tr -d '\r')
+        printf "%s=%s\n" "$key" "$val"
     done
 }
 
@@ -107,23 +107,28 @@ UPLOAD_MAX_FILESIZE=64M
 PHP_INI_PATH=./deploy/configs/php.ini
 EOF
 
-    # --- 仅保留键值对输出，过滤掉颜色提示行 ---
-    generate_wordpress_keys_b64 | grep -E '^[A-Z_]+=.*' >> .env
+    # 写入 WordPress 密钥（确保一行一个键值）
+    generate_wordpress_keys_b64 >> .env
 
-    # 清理控制符和回车符
+    # 清理所有隐藏字符
     sed -i 's/\x1b\[[0-9;]*m//g' .env || true
-    sed -i 's/\r$//' .env || true
+    sed -i 's/\r//g' .env || true
+    sed -i 's/\\n//g' .env || true
+    sed -i 's/\\\"//g' .env || true
 
     chmod 600 .env
-    print_green ".env 文件已生成（Base64 安全格式，ANSI 已过滤）"
+    print_green ".env 文件已生成（无转义、无引号、Base64 安全格式）"
 }
 
 # ---------- 部署 ----------
 deploy_wordpress_stack() {
     print_blue "[步骤5] 部署 WordPress Docker 栈..."
 
+    # 确保 .env 纯净
     sed -i 's/\x1b\[[0-9;]*m//g' .env || true
-    sed -i 's/\r$//' .env || true
+    sed -i 's/\r//g' .env || true
+    sed -i 's/\\n//g' .env || true
+    sed -i 's/\\\"//g' .env || true
 
     export $(grep -E '^[A-Z_][A-Z0-9_]*=' .env | xargs) 2>/dev/null
 
@@ -173,7 +178,7 @@ display_deployment_info() {
 
 main() {
     print_blue "=================================================="
-    print_blue "WordPress Docker 全栈自动部署脚本 - Base64 修正版（无 ANSI 污染）"
+    print_blue "WordPress Docker 全栈自动部署脚本 - Base64 最终修正版"
     print_blue "=================================================="
 
     prepare_host_environment
