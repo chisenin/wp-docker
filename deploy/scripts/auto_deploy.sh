@@ -3,7 +3,7 @@
 # WordPress Docker 全栈自动部署脚本 - 生产环境优化版
 
 set -e
-# set -x  # 启用调试模式，完成后可注释掉
+# set -x  # 调试模式，完成后注释
 
 # 颜色输出函数
 print_blue() { echo -e "\033[34m$1\033[0m"; }
@@ -17,13 +17,12 @@ generate_password() {
     tr -dc 'A-Za-z0-9!@#$%^&*()' < /dev/urandom | head -c "$length" 2>/dev/null || openssl rand -base64 48 | tr -dc 'A-Za-z0-9!@#$%^&*()' | head -c "$length"
 }
 
-# 生成 WordPress 安全密钥（仅输出密钥，不输出调试信息）
+# 生成 WordPress 安全密钥（仅输出密钥）
 generate_wordpress_keys() {
     local keys=()
     local key_names=("AUTH_KEY" "SECURE_AUTH_KEY" "LOGGED_IN_KEY" "NONCE_KEY" "AUTH_SALT" "SECURE_AUTH_SALT" "LOGGED_IN_SALT" "NONCE_SALT")
     local api_success=false
     
-    # 调试信息输出到 stderr，避免写入 .env
     print_blue "尝试从 WordPress API 获取安全密钥..." >&2
     if command -v curl >/dev/null; then
         keys=($(curl -s --connect-timeout 10 https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/" || true))
@@ -53,7 +52,6 @@ generate_wordpress_keys() {
         print_green "已生成随机密钥" >&2
     fi
     
-    # 仅输出密钥行到 stdout
     for key in "${keys[@]}"; do
         if [[ "$key" =~ ^[A-Z_]+=.+$ ]]; then
             echo "$key"
@@ -74,32 +72,32 @@ prepare_host_environment() {
         if [ "$overcommit" -ne 1 ]; then
             print_yellow "警告: vm.overcommit_memory 未设置为 1，尝试修改..."
             if sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1; then
-                print_green "✓ vm.overcommit_memory 设置为 1"
+                print_green "vm.overcommit_memory 设置为 1"
             else
                 print_red "错误: 无法设置 vm.overcommit_memory，请手动设置为 1"
                 exit 1
             fi
         else
-            print_green "✓ 正确 (值为 1)。"
+            print_green "正确 (值为 1)。"
         fi
     else
         print_yellow "警告: 未找到 /proc/sys/vm/overcommit_memory，可能在容器环境中"
     fi
     
     if systemctl is-active docker >/dev/null 2>&1; then
-        print_green "✓ 正常 (无需 sudo)。"
+        print_green "正常 (无需 sudo)。"
     elif docker info >/dev/null 2>&1; then
-        print_green "✓ 正常 (无需 sudo)。"
+        print_green "正常 (无需 sudo)。"
     else
         print_red "错误: Docker 服务未运行或未安装"
         exit 1
     fi
     
     if command -v docker-compose >/dev/null 2>&1; then
-        print_green "✓ 正常。"
+        print_green "正常。"
         DOCKER_COMPOSE_CMD="docker-compose"
     elif docker compose version >/dev/null 2>&1; then
-        print_green "✓ 正常。"
+        print_green "正常。"
         DOCKER_COMPOSE_CMD="docker compose"
     else
         print_red "错误: Docker Compose 未安装"
@@ -211,7 +209,6 @@ optimize_parameters() {
         mariadb_version="11.3.2"
         redis_version="7.4.0"
         
-        # 使用 $(generate_wordpress_keys) 捕获 stdout，调试信息输出到 stderr
         cat > .env << EOF
 # WordPress Docker 环境配置文件
 # 生成时间: $(date)
@@ -276,7 +273,7 @@ EOF
         print_green ".env 文件密钥验证通过"
     else
         print_yellow "注意: .env 文件已存在，使用现有配置"
-        source .env 2>/dev/null || :
+        # 不再 source，避免重复
         CPU_LIMIT=${CPU_LIMIT:-$((CPU_CORES / 2))}
         MEMORY_PER_SERVICE=${MEMORY_PER_SERVICE:-$((AVAILABLE_RAM / 2))}
         PHP_MEMORY_LIMIT=${PHP_MEMORY_LIMIT:-256M}
@@ -333,7 +330,7 @@ EOF
     cp ./configs/nginx/conf.d/default.conf /tmp/default.conf
     sed -i 's/fastcgi_pass php:9000;/fastcgi_pass 127.0.0.1:9000;/' /tmp/default.conf
     if $DOCKER_CMD run --rm -v /tmp/default.conf:/etc/nginx/conf.d/default.conf nginx:${NGINX_VERSION:-1.27.2} nginx -t -c /etc/nginx/nginx.conf 2>&1 | tee /tmp/nginx_config_test.log; then
-        print_green "✓ Nginx 配置文件语法正确"
+        print_green "Nginx 配置文件语法正确"
     else
         print_red "错误: Nginx 配置文件语法错误，请检查以下内容："
         cat ./configs/nginx/conf.d/default.conf
@@ -391,7 +388,7 @@ deploy_wordpress_stack() {
                     fi
                 fi
                 
-                print_green "✓ WordPress 文件准备完成"
+                print_green "WordPress 文件准备完成"
             else
                 print_yellow "警告: WordPress 核心文件下载失败，请检查网络连接或手动放置文件到 html 目录"
             fi
@@ -402,12 +399,12 @@ deploy_wordpress_stack() {
         print_green "WordPress 配置文件已存在"
     fi
     
-print_blue "加载 .env 文件变量..."
+    print_blue "加载 .env 文件变量..."
     if [ -f ".env" ]; then
         export $(grep -E '^[A-Z_][A-Z0-9_]*=' .env | xargs) 2>/dev/null
         
-        if [ -z "$(env | grep -E '^[A-Z_][A-Z0-9_]*=')" ]; then
-            print_red "错误: .env 文件加载失败，无有效变量"
+        if [ -z "$AUTH_KEY" ]; then
+            print_red "错误: .env 加载失败，AUTH_KEY 未定义"
             print_yellow ".env 文件内容（屏蔽敏感信息）："
             sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' .env
             exit 1
@@ -434,31 +431,25 @@ print_blue "加载 .env 文件变量..."
     done
     print_green "环境变量密钥验证通过"
     
-print_blue "更新 WordPress 密钥..."
-if [ ! -f "html/wp-config.php" ]; then
-    print_yellow "警告: html/wp-config.php 文件不存在，正在创建文件..."
-    
-    mkdir -p "html"
-    
-    db_name=${MYSQL_DATABASE:-wordpress}
-    db_user=${MYSQL_USER:-wordpress}
-    db_password=${MYSQL_PASSWORD:-wordpresspassword}
-    db_host=${WORDPRESS_DB_HOST:-mariadb:3306}
-    table_prefix=${WORDPRESS_TABLE_PREFIX:-wp_}
-    
-    # 安全构建密钥行
-    wp_keys=""
-    for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
-        if [ -z "${!key}" ]; then
-            print_red "错误: 密钥 $key 未定义"
-            exit 1
-        fi
-        # 使用 printf 避免特殊字符转义问题
-        printf -v key_line "define('%s', '%s');\n" "$key" "${!key}"
-        wp_keys+="$key_line"
-    done
-    
-    cat > html/wp-config.php << EOF
+    print_blue "更新 WordPress 密钥..."
+    if [ ! -f "html/wp-config.php" ]; then
+        print_yellow "警告: html/wp-config.php 文件不存在，正在创建文件..."
+        
+        mkdir -p "html"
+        
+        db_name=${MYSQL_DATABASE:-wordpress}
+        db_user=${MYSQL_USER:-wordpress}
+        db_password=${MYSQL_PASSWORD:-wordpresspassword}
+        db_host=${WORDPRESS_DB_HOST:-mariadb:3306}
+        table_prefix=${WORDPRESS_TABLE_PREFIX:-wp_}
+        
+        wp_keys=""
+        for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
+            printf -v key_line "define('%s', '%s');\n" "$key" "${!key}"
+            wp_keys+="$key_line"
+        done
+        
+        cat > html/wp-config.php << EOF
 <?php
 /**
  * WordPress 配置文件
@@ -485,32 +476,38 @@ if ( !defined('ABSPATH') )
     define('ABSPATH', dirname(__FILE__) . '/');
 require_once(ABSPATH . 'wp-settings.php');
 EOF
-    
-    print_green "wp-config.php 文件创建成功"
-else
-    # 更新现有文件
-    sed_cmd="sed -i"
-    if ! sed --version >/dev/null 2>&1; then
-        sed_cmd="sed -i ''"
-    fi
-    
-    for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
-        if [ -n "${!key}" ]; then
-            # 转义特殊字符
-            escaped_value=$(printf '%s\n' "${!key}" | sed -e 's/[\/&]/\\&/g')
-            $sed_cmd "s/define('$key',.*/define('$key', '$escaped_value');/g" html/wp-config.php
+        
+        print_green "wp-config.php 文件创建成功"
+    else
+        sed_cmd="sed -i"
+        if ! sed --version >/dev/null 2>&1; then
+            sed_cmd="sed -i ''"
         fi
-    done
-    
-    # 修复表前缀
-    $sed_cmd "s/define('WP_TABLE_PREFIX',.*/define('WP_TABLE_PREFIX', '$table_prefix');/g" html/wp-config.php
-    
-    print_green "WordPress 密钥更新完成"
-fi
+
+        # 1. 删除错误行
+        $sed_cmd '/^wp_ = /d' html/wp-config.php 2>/dev/null || true
+
+        # 2. 删除旧的表前缀定义
+        $sed_cmd "/define('WP_TABLE_PREFIX',/d" html/wp-config.php
+
+        # 3. 追加正确的表前缀
+        echo "define('WP_TABLE_PREFIX', '${WORDPRESS_TABLE_PREFIX:-wp_}');" >> html/wp-config.php
+
+        # 4. 更新所有安全密钥
+        for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
+            if [ -n "${!key}" ]; then
+                escaped_value=$(printf '%s' "${!key}" | sed 's/[\/&]/\\&/g')
+                $sed_cmd "/define('$key',/d" html/wp-config.php
+                echo "define('$key', '$escaped_value');" >> html/wp-config.php
+            fi
+        done
+
+        print_green "WordPress 密钥更新完成"
+    fi
     
     print_blue "验证 wp-config.php 语法..."
     if $DOCKER_CMD run --rm -v "$(pwd)/html:/var/www/html" php:${PHP_VERSION:-8.3.26}-fpm php -l /var/www/html/wp-config.php 2>/dev/null; then
-        print_green "✓ wp-config.php 语法正确"
+        print_green "wp-config.php 语法正确"
     else
         print_red "错误: wp-config.php 语法错误，请检查以下内容："
         cat html/wp-config.php | sed 's/define('\''DB_PASSWORD'\'',.*);/define('\''DB_PASSWORD'\'', '\''[HIDDEN]'\'');/'
@@ -544,34 +541,7 @@ fi
     $DOCKER_CMD run --rm -v "$(pwd)/logs/mariadb:/var/log/mysql" alpine:latest chown -R 999:999 /var/log/mysql
     $DOCKER_CMD run --rm -v "$(pwd)/mysql:/var/lib/mysql" alpine:latest chown -R 999:999 /var/lib/mysql
     $DOCKER_CMD run --rm -v "$(pwd)/logs/nginx:/var/log/nginx" alpine:latest chown -R 33:33 /var/log/nginx
-    
-    set -a
-    if [ -f ".env" ]; then
-        grep -E '^[A-Z_][A-Z0-9_]*=' .env | while IFS= read -r line; do
-            if [[ "$line" == *"="* ]]; then
-                key=$(echo "$line" | cut -d'=' -f1)
-                value=$(echo "$line" | cut -d'=' -f2-)
-                export "$key=$value"
-            fi
-        done
-        print_green "✓ 成功加载 .env 文件变量"
-        print_blue "加载 .env 文件变量..."
-        if [ -f ".env" ]; then
-            export $(grep -E '^[A-Z_][A-Z0-9_]*=' .env | xargs) 2>/dev/null
-            
-            if [ -z "$AUTH_KEY" ]; then
-                print_red "错误: .env 加载失败，AUTH_KEY 未定义"
-                exit 1
-            fi
-            
-            print_green "成功加载 .env 文件变量"
-        else
-            print_red "错误: .env 文件不存在!"
-            exit 1
-        fi
-    fi
-    set +a
-    
+
     print_blue "启动 Docker 容器..."
     if ! $DOCKER_COMPOSE_CMD up -d; then
         print_red "容器启动失败，检查日志..."
@@ -583,12 +553,6 @@ fi
         $DOCKER_CMD logs mariadb
         print_yellow "Redis 日志："
         $DOCKER_CMD logs redis
-        print_yellow "Nginx 容器状态："
-        $DOCKER_CMD inspect nginx | grep -E '"Status"|"Health"'
-        print_yellow "检查 Nginx 配置文件："
-        $DOCKER_CMD run --rm -v "$(pwd)/configs/nginx/conf.d:/etc/nginx/conf.d" nginx:${NGINX_VERSION:-1.27.2} nginx -t -c /etc/nginx/nginx.conf
-        print_yellow "检查 wp-config.php 内容："
-        cat html/wp-config.php | sed 's/define('\''DB_PASSWORD'\'',.*);/define('\''DB_PASSWORD'\'', '\''[HIDDEN]'\'');/'
         exit 1
     fi
 
@@ -611,9 +575,6 @@ fi
     if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
         print_red "数据库连接失败，检查 MariaDB 日志..."
         $DOCKER_CMD logs mariadb
-        print_yellow "尝试设置MariaDB root密码..."
-        $DOCKER_COMPOSE_CMD exec -T mariadb sh -c "mariadb -u root -e \"ALTER USER 'root'@'%' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-rootpassword}'; FLUSH PRIVILEGES;\" 2>/dev/null" || \
-        print_yellow "密码设置可能已完成或不需要，请继续..."
     fi
 
     print_blue "显示容器状态.."
@@ -634,12 +595,6 @@ fi
         $DOCKER_COMPOSE_CMD logs --tail=50 php > php.log 2>&1
         $DOCKER_COMPOSE_CMD logs --tail=50 redis > redis.log 2>&1
         print_yellow "日志已保存到相应的.log文件中，请检查"
-        print_yellow "Nginx 容器状态："
-        $DOCKER_CMD inspect nginx | grep -E '"Status"|"Health"'
-        print_yellow "检查 Nginx 配置文件："
-        $DOCKER_CMD run --rm -v "$(pwd)/configs/nginx/conf.d:/etc/nginx/conf.d" nginx:${NGINX_VERSION:-1.27.2} nginx -t -c /etc/nginx/nginx.conf
-        print_yellow "检查 wp-config.php 内容："
-        cat html/wp-config.php | sed 's/define('\''DB_PASSWORD'\'',.*);/define('\''DB_PASSWORD'\'', '\''[HIDDEN]'\'');/'
     fi
 }
 
@@ -653,7 +608,7 @@ BACKUP_DIR="/opt/backups"
 TIMESTAMP=$(date +%F_%H-%M-%S)
 mkdir -p "$BACKUP_DIR"
 tar -czf "$BACKUP_DIR/wordpress_backup_$TIMESTAMP.tar.gz" -C /opt html mysql
-print_green "备份完成: wordpress_backup_$TIMESTAMP.tar.gz"
+echo -e "\033[32m备份完成: wordpress_backup_$TIMESTAMP.tar.gz\033[0m"
 EOF
     chmod +x "$DEPLOY_DIR/scripts/backup.sh"
     print_green "自动备份脚本已生成: $DEPLOY_DIR/scripts/backup.sh"
@@ -665,7 +620,7 @@ setup_disk_space_management() {
     cat > "$DEPLOY_DIR/scripts/cleanup.sh" << 'EOF'
 #!/bin/bash
 find /opt/backups -type f -name "*.tar.gz" -mtime +7 -delete
-print_green "清理7天前的备份文件完成"
+echo -e "\033[32m清理7天前的备份文件完成\033[0m"
 EOF
     chmod +x "$DEPLOY_DIR/scripts/cleanup.sh"
     print_green "磁盘空间管理脚本已生成: $DEPLOY_DIR/scripts/cleanup.sh"
