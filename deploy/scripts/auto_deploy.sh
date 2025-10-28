@@ -139,7 +139,10 @@ EOF
 # ===== 解码 env =====
 generate_env_decoded() {
     print_blue "[步骤2] 生成 ${ENV_DECODED}（解码后供 Docker Compose 使用）..."
-    grep -E -v '^WORDPRESS_' "${ENV_FILE}" > "${ENV_DECODED}" || true
+    # 复制所有非WordPress密钥的环境变量（包括WORDPRESS_DB_HOST等）
+    grep -E -v '^WORDPRESS_(AUTH_KEY|SECURE_AUTH_KEY|LOGGED_IN_KEY|NONCE_KEY|AUTH_SALT|SECURE_AUTH_SALT|LOGGED_IN_SALT|NONCE_SALT)=' "${ENV_FILE}" > "${ENV_DECODED}" || true
+    
+    # 单独处理需要Base64解码的WordPress密钥
     for key in WORDPRESS_AUTH_KEY WORDPRESS_SECURE_AUTH_KEY WORDPRESS_LOGGED_IN_KEY WORDPRESS_NONCE_KEY \
                WORDPRESS_AUTH_SALT WORDPRESS_SECURE_AUTH_SALT WORDPRESS_LOGGED_IN_SALT WORDPRESS_NONCE_SALT; do
         b64val=$(grep -E "^${key}=" "${ENV_FILE}" | sed -E "s/^${key}=(.*)$/\1/")
