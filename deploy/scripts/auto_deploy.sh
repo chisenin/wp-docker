@@ -17,31 +17,32 @@ generate_password() {
     tr -dc 'A-Za-z0-9!@#$%^&*()' < /dev/urandom | head -c "$length" 2>/dev/null || openssl rand -base64 48 | tr -dc 'A-Za-z0-9!@#$%^&*()' | head -c "$length"
 }
 
-# 生成 WordPress 安全密钥
+# 生成 WordPress 安全密钥（仅输出密钥，不输出调试信息）
 generate_wordpress_keys() {
     local keys=()
     local key_names=("AUTH_KEY" "SECURE_AUTH_KEY" "LOGGED_IN_KEY" "NONCE_KEY" "AUTH_SALT" "SECURE_AUTH_SALT" "LOGGED_IN_SALT" "NONCE_SALT")
     local api_success=false
     
-    print_blue "尝试从 WordPress API 获取安全密钥..."
+    # 调试信息输出到 stderr，避免写入 .env
+    print_blue "尝试从 WordPress API 获取安全密钥..." >&2
     if command -v curl >/dev/null; then
         keys=($(curl -s --connect-timeout 10 https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/" || true))
         if [ ${#keys[@]} -eq 8 ]; then
             api_success=true
-            print_green "✓ 成功从 WordPress API 获取密钥"
+            print_green "成功从 WordPress API 获取密钥" >&2
         else
-            print_yellow "警告: WordPress API 请求失败或返回不完整密钥，生成随机密钥..."
+            print_yellow "警告: WordPress API 请求失败或返回不完整密钥，生成随机密钥..." >&2
         fi
     elif command -v wget >/dev/null; then
         keys=($(wget -q --timeout=10 -O - https://api.wordpress.org/secret-key/1.1/salt/ | grep "define" | sed "s/define('\(.*\)',\s*'\(.*\)');/\1=\2/" || true))
         if [ ${#keys[@]} -eq 8 ]; then
             api_success=true
-            print_green "✓ 成功从 WordPress API 获取密钥"
+            print_green "成功从 WordPress API 获取密钥" >&2
         else
-            print_yellow "警告: WordPress API 请求失败或返回不完整密钥，生成随机密钥..."
+            print_yellow "警告: WordPress API 请求失败或返回不完整密钥，生成随机密钥..." >&2
         fi
     else
-        print_yellow "警告: 未找到 curl 或 wget，生成随机密钥..."
+        print_yellow "警告: 未找到 curl 或 wget，生成随机密钥..." >&2
     fi
     
     if [ "$api_success" = false ]; then
@@ -49,14 +50,15 @@ generate_wordpress_keys() {
         for key in "${key_names[@]}"; do
             keys+=("$key=$(generate_password 64)")
         done
-        print_green "✓ 已生成随机密钥"
+        print_green "已生成随机密钥" >&2
     fi
     
+    # 仅输出密钥行到 stdout
     for key in "${keys[@]}"; do
         if [[ "$key" =~ ^[A-Z_]+=.+$ ]]; then
             echo "$key"
         else
-            print_red "错误: 无效的密钥格式: $key"
+            print_red "错误: 无效的密钥格式: $key" >&2
             exit 1
         fi
     done
@@ -209,6 +211,7 @@ optimize_parameters() {
         mariadb_version="11.3.2"
         redis_version="7.4.0"
         
+        # 使用 $(generate_wordpress_keys) 捕获 stdout，调试信息输出到 stderr
         cat > .env << EOF
 # WordPress Docker 环境配置文件
 # 生成时间: $(date)
@@ -248,16 +251,16 @@ $(generate_wordpress_keys)
 EOF
         
         if command -v dos2unix >/dev/null 2>&1; then
-            dos2unix .env >/dev/null 2>&1 && print_green "✓ 成功将 .env 文件行尾字符转换为 LF"
+            dos2unix .env >/dev/null 2>&1 && print_green "成功将 .env 文件行尾字符转换为 LF"
         elif command -v sed >/dev/null 2>&1; then
-            sed -i 's/\r$//' .env >/dev/null 2>&1 && print_green "✓ 成功使用 sed 将 .env 文件行尾字符转换为 LF"
+            sed -i 's/\r$//' .env >/dev/null 2>&1 && print_green "成功使用 sed 将 .env 文件行尾字符转换为 LF"
         else
             print_yellow "注意: 无法自动转换行尾字符，请在 Linux 环境下手动执行 'dos2unix .env'"
         fi
         
         chmod 600 .env
         print_green ".env 文件创建成功"
-        print_green "✓ 已设置 .env 文件权限为 600（安全权限）"
+        print_green "已设置 .env 文件权限为 600（安全权限）"
         print_yellow "警告: 请妥善保存 .env 文件中的敏感信息"
         
         # 验证 .env 文件中的密钥
@@ -270,7 +273,7 @@ EOF
                 exit 1
             fi
         done
-        print_green "✓ .env 文件密钥验证通过"
+        print_green ".env 文件密钥验证通过"
     else
         print_yellow "注意: .env 文件已存在，使用现有配置"
         source .env 2>/dev/null || :
@@ -288,7 +291,7 @@ EOF
                 return
             fi
         done
-        print_green "✓ 现有 .env 文件密钥验证通过"
+        print_green "现有 .env 文件密钥验证通过"
     fi
     
     mkdir -p ./configs/nginx/conf.d
