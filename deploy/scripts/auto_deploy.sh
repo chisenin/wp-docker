@@ -569,6 +569,7 @@ fi
             print_red "错误: .env 文件不存在!"
             exit 1
         fi
+    fi
     set +a
     
     print_blue "启动 Docker 容器..."
