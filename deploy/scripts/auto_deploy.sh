@@ -35,6 +35,10 @@ COMPOSE_FILE="${DEPLOY_DIR}/docker-compose.yml"
 BACKUP_DIR="${DEPLOY_DIR}/backups"
 SCRIPTS_DIR="${DEPLOY_DIR}/scripts"
 
+# ===== 全局变量 =====
+# 镜像前缀，在任何函数中都会使用，因此放在全局定义
+MIRROR_PREFIX=wordpress-main-branch
+
 # ===== 基础函数 =====
 generate_password() {
     local length=${1:-32}
@@ -99,7 +103,7 @@ generate_env_file() {
 DOCKERHUB_USERNAME=library
 PHP_VERSION=8.3
 # 使用main分支重构的镜像前缀
-MIRROR_PREFIX=wordpress-main-branch
+# MIRROR_PREFIX 已在全局定义
 NGINX_VERSION=1.27.2
 MARIADB_VERSION=11.3.2
 REDIS_VERSION=7.4.0
