@@ -246,12 +246,24 @@ start_stack() {
     # 确保环境变量文件正确生成
     if [ ! -f "${ENV_DECODED}" ]; then
         print_red "❌ 环境变量文件未生成：${ENV_DECODED}"
+        print_yellow "环境变量文件路径: ${ENV_DECODED}"
+        print_yellow "当前目录: $(pwd)"
+        print_yellow "目录内容: $(ls -la)"
         exit 1
     fi
+    
+    # 调试信息
+    print_yellow "环境变量文件路径: ${ENV_DECODED}"
+    print_yellow "文件大小: $(du -h "${ENV_DECODED}" | cut -f1)"
+    print_yellow "文件权限: $(ls -la "${ENV_DECODED}")"
+    print_yellow "文件内容预览:"
+    head -n 20 "${ENV_DECODED}"
     
     # 验证关键环境变量是否存在
     if ! grep -q "WORDPRESS_DB_HOST=" "${ENV_DECODED}"; then
         print_red "❌ 关键环境变量缺失，请重新生成配置文件"
+        print_yellow "检查原始.env文件中的变量:"
+        grep "WORDPRESS_DB_HOST" "${ENV_FILE}" || print_red "原始文件中也未找到WORDPRESS_DB_HOST"
         exit 1
     fi
     
