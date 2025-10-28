@@ -1,11 +1,11 @@
 #!/bin/bash
 # ==================================================
-# WordPress Docker 全栈自动部署脚本 - 生产环境优化版
-# 修正版 v2025.10.29
-# 改进：
-# - WordPress 密钥使用 Base64 存储，防止 Python-dotenv 解析失败
-# - 自动 Base64 解码后注入环境变量
-# - 强化 CPU_LIMIT 验证输出
+# WordPress Docker 全栈自动部署脚本 - Base64 修正版（无 ANSI 污染）
+# 修正版 v2025.10.29-fix
+# 变更：
+# - 修复 .env 写入 ANSI 转义字符问题
+# - 自动清理 .env 中的非键值行
+# - 强化安全性与容错性
 # ==================================================
 
 set -e
@@ -107,23 +107,23 @@ UPLOAD_MAX_FILESIZE=64M
 PHP_INI_PATH=./deploy/configs/php.ini
 EOF
 
-    generate_wordpress_keys_b64 >> .env
+    # --- 仅保留键值对输出，过滤掉颜色提示行 ---
+    generate_wordpress_keys_b64 | grep -E '^[A-Z_]+=.*' >> .env
 
-    if grep -q $'\r' .env; then
-        sed -i 's/\r$//' .env
-    fi
+    # 清理控制符和回车符
+    sed -i 's/\x1b\[[0-9;]*m//g' .env || true
+    sed -i 's/\r$//' .env || true
 
     chmod 600 .env
-    print_green ".env 文件已生成（Base64 安全格式）"
+    print_green ".env 文件已生成（Base64 安全格式，ANSI 已过滤）"
 }
 
 # ---------- 部署 ----------
 deploy_wordpress_stack() {
     print_blue "[步骤5] 部署 WordPress Docker 栈..."
 
-    if grep -q $'\r' .env; then
-        sed -i 's/\r$//' .env
-    fi
+    sed -i 's/\x1b\[[0-9;]*m//g' .env || true
+    sed -i 's/\r$//' .env || true
 
     export $(grep -E '^[A-Z_][A-Z0-9_]*=' .env | xargs) 2>/dev/null
 
@@ -173,7 +173,7 @@ display_deployment_info() {
 
 main() {
     print_blue "=================================================="
-    print_blue "WordPress Docker 全栈自动部署脚本 - Base64 修正版"
+    print_blue "WordPress Docker 全栈自动部署脚本 - Base64 修正版（无 ANSI 污染）"
     print_blue "=================================================="
 
     prepare_host_environment
