@@ -396,7 +396,29 @@ deploy_wordpress_stack() {
             print_green "html 目录已包含 WordPress 文件"
         fi
     else
-        print_green "WordPress 配置文件已存在"
+        sed_cmd="sed -i"
+        if ! sed --version >/dev/null 2>&1; then
+            sed_cmd="sed -i ''"
+        fi
+
+        # 删除所有旧的 define('KEY', ...)
+        for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT WP_TABLE_PREFIX; do
+            $sed_cmd "/define([[:space:]]*'$key'[[:space:]]*,/d" html/wp-config.php 2>/dev/null || true
+        done
+
+        # 删除错误行
+        $sed_cmd '/^wp_ = /d' html/wp-config.php 2>/dev/null || true
+
+        # 追加表前缀
+        echo "define('WP_TABLE_PREFIX', '${WORDPRESS_TABLE_PREFIX:-wp_}');" >> html/wp-config.php
+
+        # 追加密钥
+        for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
+            escaped_value=$(printf '%s' "${!key}" | sed 's/[\/&]/\\&/g')
+            echo "define('$key', '$escaped_value');" >> html/wp-config.php
+        done
+
+        print_green "WordPress 密钥更新完成"
     fi
     
     print_blue "加载 .env 文件变量..."
