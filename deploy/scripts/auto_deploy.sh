@@ -107,18 +107,18 @@ UPLOAD_MAX_FILESIZE=64M
 PHP_INI_PATH=./deploy/configs/php.ini
 EOF
 
-    # 写入 WordPress 密钥（确保一行一个键值）
-    generate_wordpress_keys_b64 >> .env
+    # 只把纯净键值写入 .env；提示输出写到终端，不进入文件
+    generate_wordpress_keys_b64 1>/dev/tty 2>/dev/null | grep -E '^[A-Z_]+=.*' >> .env
 
-    # 清理所有隐藏字符
+    # 确保无控制符
     sed -i 's/\x1b\[[0-9;]*m//g' .env || true
     sed -i 's/\r//g' .env || true
     sed -i 's/\\n//g' .env || true
-    sed -i 's/\\\"//g' .env || true
 
     chmod 600 .env
-    print_green ".env 文件已生成（无转义、无引号、Base64 安全格式）"
+    print_green ".env 文件已生成（安全无污染）"
 }
+
 
 # ---------- 部署 ----------
 deploy_wordpress_stack() {
