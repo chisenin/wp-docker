@@ -282,13 +282,63 @@ start_stack() {
         exit 1
     fi
     
-    # 使用正确的Docker Compose命令
-    if ! ${DOCKER_COMPOSE_CMD} --env-file "${ENV_DECODED}" -f "${COMPOSE_FILE}" up -d --build; then
-        print_red "❌ 启动失败，打印日志："
-        ${DOCKER_COMPOSE_CMD} --env-file "${ENV_DECODED}" -f "${COMPOSE_FILE}" logs --tail=50 || true
+    # 网络连接重试机制
+    local MAX_RETRIES=3
+    local RETRY_COUNT=0
+    local SLEEP_TIME=5
+    local SUCCESS=false
+    
+    # 预先尝试拉取镜像，提高成功率
+    print_yellow "🔄 预先拉取镜像..."
+    docker pull ${MIRROR_PREFIX}/wordpress:latest || true
+    docker pull ${MIRROR_PREFIX}/mariadb:latest || true
+    docker pull ${MIRROR_PREFIX}/redis:latest || true
+    docker pull ${MIRROR_PREFIX}/nginx:latest || true
+    
+    # 添加网络超时设置
+    export DOCKER_CLIENT_TIMEOUT=300
+    export COMPOSE_HTTP_TIMEOUT=300
+    
+    # 重试循环
+    while [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; do
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        print_yellow "⏱️  部署尝试 ${RETRY_COUNT}/${MAX_RETRIES}..."
+        
+        # 使用正确的Docker Compose命令，添加--no-color避免颜色代码问题
+        if ${DOCKER_COMPOSE_CMD} --env-file "${ENV_DECODED}" -f "${COMPOSE_FILE}" up -d --build --no-color; then
+            SUCCESS=true
+            break
+        else
+            print_yellow "⚠️  部署失败，${SLEEP_TIME}秒后重试..."
+            print_red "错误详情:"
+            ${DOCKER_COMPOSE_CMD} --env-file "${ENV_DECODED}" -f "${COMPOSE_FILE}" logs --tail=20 --no-color || true
+            
+            # 清理可能的部分启动的容器
+            ${DOCKER_COMPOSE_CMD} --env-file "${ENV_DECODED}" -f "${COMPOSE_FILE}" down -v || true
+            sleep "$SLEEP_TIME"
+            SLEEP_TIME=$((SLEEP_TIME * 2))  # 指数退避
+        fi
+    done
+    
+    if [ "$SUCCESS" = true ]; then
+        print_green "✅ WordPress 栈启动成功"
+        
+        # 等待几秒钟让服务稳定
+        print_yellow "⏳ 等待服务稳定..."
+        sleep 5
+        
+        # 检查服务状态
+        print_yellow "📊 检查服务状态:"
+        ${DOCKER_COMPOSE_CMD} --env-file "${ENV_DECODED}" -f "${COMPOSE_FILE}" ps
+    else
+        print_red "❌ 部署失败，已达到最大重试次数"
+        print_yellow "💡 建议检查："
+        print_yellow "1. 网络连接是否正常"
+        print_yellow "2. Docker Hub是否可访问"
+        print_yellow "3. 服务器防火墙设置"
+        print_yellow "4. 磁盘空间是否充足: $(df -h /)"
         exit 1
     fi
-    print_green "✅ WordPress 栈启动成功"
 }
 
 # ===== 备份脚本 =====
