@@ -147,10 +147,16 @@ generate_env_decoded() {
     # 清空目标文件
     > "${ENV_DECODED}" || true
     
+    # 首先添加MIRROR_PREFIX变量，确保Docker Compose能读取到
+    echo "MIRROR_PREFIX=${MIRROR_PREFIX}" >> "${ENV_DECODED}"
+    
     # 逐行处理原始env文件
     while IFS= read -r line; do
         # 跳过空行和注释
         [[ -z "$line" || "$line" =~ ^# ]] && continue
+        
+        # 跳过MIRROR_PREFIX行，避免重复
+        [[ "$line" =~ ^MIRROR_PREFIX= ]] && continue
         
         # 检查是否是需要Base64解码的WordPress密钥
         if [[ "$line" =~ ^WORDPRESS_(AUTH_KEY|SECURE_AUTH_KEY|LOGGED_IN_KEY|NONCE_KEY|AUTH_SALT|SECURE_AUTH_SALT|LOGGED_IN_SALT|NONCE_SALT)=(.*)$ ]]; then
@@ -171,6 +177,12 @@ generate_env_decoded() {
         print_yellow "警告：WORDPRESS_DB_HOST未在处理后文件中找到，手动添加默认值"
         echo "WORDPRESS_DB_HOST=mariadb:3306" >> "${ENV_DECODED}"
     fi
+    
+    # 确保PHP_VERSION存在
+    if ! grep -q "^PHP_VERSION=" "${ENV_DECODED}"; then
+        echo "PHP_VERSION=8.3" >> "${ENV_DECODED}"
+    fi
+    
     chmod 600 "${ENV_DECODED}"
     print_green "✅ 已生成 ${ENV_DECODED}"
 }
