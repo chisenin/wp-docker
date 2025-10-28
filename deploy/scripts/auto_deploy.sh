@@ -139,19 +139,34 @@ EOF
 # ===== 解码 env =====
 generate_env_decoded() {
     print_blue "[步骤2] 生成 ${ENV_DECODED}（解码后供 Docker Compose 使用）..."
-    # 复制所有非WordPress密钥的环境变量（包括WORDPRESS_DB_HOST等）
-    grep -E -v '^WORDPRESS_(AUTH_KEY|SECURE_AUTH_KEY|LOGGED_IN_KEY|NONCE_KEY|AUTH_SALT|SECURE_AUTH_SALT|LOGGED_IN_SALT|NONCE_SALT)=' "${ENV_FILE}" > "${ENV_DECODED}" || true
     
-    # 单独处理需要Base64解码的WordPress密钥
-    for key in WORDPRESS_AUTH_KEY WORDPRESS_SECURE_AUTH_KEY WORDPRESS_LOGGED_IN_KEY WORDPRESS_NONCE_KEY \
-               WORDPRESS_AUTH_SALT WORDPRESS_SECURE_AUTH_SALT WORDPRESS_LOGGED_IN_SALT WORDPRESS_NONCE_SALT; do
-        b64val=$(grep -E "^${key}=" "${ENV_FILE}" | sed -E "s/^${key}=(.*)$/\1/")
-        [ -n "$b64val" ] && {
+    # 清空目标文件
+    > "${ENV_DECODED}" || true
+    
+    # 逐行处理原始env文件
+    while IFS= read -r line; do
+        # 跳过空行和注释
+        [[ -z "$line" || "$line" =~ ^# ]] && continue
+        
+        # 检查是否是需要Base64解码的WordPress密钥
+        if [[ "$line" =~ ^WORDPRESS_(AUTH_KEY|SECURE_AUTH_KEY|LOGGED_IN_KEY|NONCE_KEY|AUTH_SALT|SECURE_AUTH_SALT|LOGGED_IN_SALT|NONCE_SALT)=(.*)$ ]]; then
+            key="${BASH_REMATCH[1]}"
+            b64val="${BASH_REMATCH[2]}"
+            # 解码Base64值
             decoded=$(echo "$b64val" | base64 --decode 2>/dev/null || echo "$b64val")
             decoded=$(printf "%s" "$decoded" | tr -d '\r\n')
-            printf "%s=%s\n" "$key" "$decoded" >> "${ENV_DECODED}"
-        }
-    done
+            printf "WORDPRESS_%s=%s\n" "$key" "$decoded" >> "${ENV_DECODED}"
+        else
+            # 直接复制其他所有环境变量（包括WORDPRESS_DB_HOST等）
+            echo "$line" >> "${ENV_DECODED}"
+        fi
+    done < "${ENV_FILE}"
+    
+    # 确保WORDPRESS_DB_HOST变量存在于文件中
+    if ! grep -q "^WORDPRESS_DB_HOST=" "${ENV_DECODED}"; then
+        print_yellow "警告：WORDPRESS_DB_HOST未在处理后文件中找到，手动添加默认值"
+        echo "WORDPRESS_DB_HOST=mariadb:3306" >> "${ENV_DECODED}"
+    fi
     chmod 600 "${ENV_DECODED}"
     print_green "✅ 已生成 ${ENV_DECODED}"
 }
