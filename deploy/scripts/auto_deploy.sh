@@ -434,24 +434,31 @@ print_blue "加载 .env 文件变量..."
     done
     print_green "环境变量密钥验证通过"
     
-    print_blue "更新 WordPress 密钥..."
-    if [ ! -f "html/wp-config.php" ]; then
-        print_yellow "警告: html/wp-config.php 文件不存在，正在创建文件..."
-        
-        mkdir -p "html"
-        
-        db_name=${MYSQL_DATABASE:-wordpress}
-        db_user=${MYSQL_USER:-wordpress}
-        db_password=${MYSQL_PASSWORD:-wordpresspassword}
-        db_host=${WORDPRESS_DB_HOST:-mariadb:3306}
-        table_prefix=${WORDPRESS_TABLE_PREFIX:-wp_}
-        
-        wp_keys=""
-        for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
-            wp_keys="$wp_keys\ndefine('$key', '${!key}');"
-        done
-        
-        cat > html/wp-config.php << EOF
+print_blue "更新 WordPress 密钥..."
+if [ ! -f "html/wp-config.php" ]; then
+    print_yellow "警告: html/wp-config.php 文件不存在，正在创建文件..."
+    
+    mkdir -p "html"
+    
+    db_name=${MYSQL_DATABASE:-wordpress}
+    db_user=${MYSQL_USER:-wordpress}
+    db_password=${MYSQL_PASSWORD:-wordpresspassword}
+    db_host=${WORDPRESS_DB_HOST:-mariadb:3306}
+    table_prefix=${WORDPRESS_TABLE_PREFIX:-wp_}
+    
+    # 安全构建密钥行
+    wp_keys=""
+    for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
+        if [ -z "${!key}" ]; then
+            print_red "错误: 密钥 $key 未定义"
+            exit 1
+        fi
+        # 使用 printf 避免特殊字符转义问题
+        printf -v key_line "define('%s', '%s');\n" "$key" "${!key}"
+        wp_keys+="$key_line"
+    done
+    
+    cat > html/wp-config.php << EOF
 <?php
 /**
  * WordPress 配置文件
@@ -478,29 +485,28 @@ if ( !defined('ABSPATH') )
     define('ABSPATH', dirname(__FILE__) . '/');
 require_once(ABSPATH . 'wp-settings.php');
 EOF
-        
-        print_green "wp-config.php 文件创建成功"
-    else
-        sed_cmd="sed -i"
-        if ! sed --version >/dev/null 2>&1; then
-            sed_cmd="sed -i ''"
-        fi
-        
-        for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
-            if [ -n "${!key}" ]; then
-                $sed_cmd "s|define('$key',.*);|define('$key', '${!key}');|g" html/wp-config.php
-            else
-                print_red "错误: 缺失密钥 $key，无法更新 wp-config.php"
-                print_yellow ".env 文件内容（屏蔽敏感信息）："
-                sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' .env
-                print_yellow "当前环境变量（屏蔽敏感信息）："
-                env | grep -E '^[A-Z_][A-Z0-9_]*=' | grep -vE '^(MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD|REDIS_PASSWORD)=' | sort || true
-                exit 1
-            fi
-        done
-        
-        print_green "WordPress 密钥更新完成"
+    
+    print_green "wp-config.php 文件创建成功"
+else
+    # 更新现有文件
+    sed_cmd="sed -i"
+    if ! sed --version >/dev/null 2>&1; then
+        sed_cmd="sed -i ''"
     fi
+    
+    for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
+        if [ -n "${!key}" ]; then
+            # 转义特殊字符
+            escaped_value=$(printf '%s\n' "${!key}" | sed -e 's/[\/&]/\\&/g')
+            $sed_cmd "s/define('$key',.*/define('$key', '$escaped_value');/g" html/wp-config.php
+        fi
+    done
+    
+    # 修复表前缀
+    $sed_cmd "s/define('WP_TABLE_PREFIX',.*/define('WP_TABLE_PREFIX', '$table_prefix');/g" html/wp-config.php
+    
+    print_green "WordPress 密钥更新完成"
+fi
     
     print_blue "验证 wp-config.php 语法..."
     if $DOCKER_CMD run --rm -v "$(pwd)/html:/var/www/html" php:${PHP_VERSION:-8.3.26}-fpm php -l /var/www/html/wp-config.php 2>/dev/null; then
@@ -549,12 +555,20 @@ EOF
             fi
         done
         print_green "✓ 成功加载 .env 文件变量"
-        print_yellow "加载的 .env 变量："
-        grep -E '^[A-Z_][A-Z0-9_]*=' .env | sed 's/\(MYSQL_ROOT_PASSWORD\|MYSQL_PASSWORD\|REDIS_PASSWORD\)=.*/\1=[HIDDEN]/' || true
-    else
-        print_red "错误: .env 文件不存在!"
-        exit 1
-    fi
+        print_blue "加载 .env 文件变量..."
+        if [ -f ".env" ]; then
+            export $(grep -E '^[A-Z_][A-Z0-9_]*=' .env | xargs) 2>/dev/null
+            
+            if [ -z "$AUTH_KEY" ]; then
+                print_red "错误: .env 加载失败，AUTH_KEY 未定义"
+                exit 1
+            fi
+            
+            print_green "成功加载 .env 文件变量"
+        else
+            print_red "错误: .env 文件不存在!"
+            exit 1
+        fi
     set +a
     
     print_blue "启动 Docker 容器..."
