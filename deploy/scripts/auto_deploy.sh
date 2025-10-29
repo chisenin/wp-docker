@@ -211,8 +211,10 @@ download_wordpress() {
 # ===== 写入 Compose 模板（修正版） =====
 generate_compose_file() {
     print_blue "[步骤3] 生成 ${COMPOSE_FILE}..."
-    # 使用双引号的here文档，允许shell变量展开
-    cat > "${COMPOSE_FILE}" <<YAML
+    
+    # 使用单引号here文档避免shell展开Docker Compose变量
+    # 然后使用sed命令替换镜像前缀和PHP版本
+    cat > "${COMPOSE_FILE}" <<'YAML'
 services:
   mariadb:
     image: mariadb:11.3
@@ -253,7 +255,7 @@ services:
           memory: '${MEMORY_PER_SERVICE:-256m}'
 
   wordpress:
-    image: ${MIRROR_PREFIX}/wordpress-php:${PHP_VERSION}.26
+    image: MIRROR_PLACEHOLDER/wordpress-php:PHP_VERSION_PLACEHOLDER.26
     restart: unless-stopped
     depends_on:
       mariadb:
@@ -290,7 +292,7 @@ services:
           memory: '${MEMORY_PER_SERVICE:-1024m}'
 
   nginx:
-    image: ${MIRROR_PREFIX}/wordpress-nginx:1.27.2
+    image: MIRROR_PLACEHOLDER/wordpress-nginx:1.27.2
     restart: unless-stopped
     ports:
       - "80:80"
@@ -310,6 +312,11 @@ volumes:
   mysql:
   redis:
 YAML
+    
+    # 使用sed命令替换占位符为实际值
+    sed -i "s/MIRROR_PLACEHOLDER/${MIRROR_PREFIX}/g" "${COMPOSE_FILE}"
+    sed -i "s/PHP_VERSION_PLACEHOLDER/${PHP_VERSION}/g" "${COMPOSE_FILE}"
+    
     print_green "✅ 已生成 ${COMPOSE_FILE}"
 }
 
