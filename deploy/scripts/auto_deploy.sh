@@ -36,8 +36,8 @@ BACKUP_DIR="${DEPLOY_DIR}/backups"
 SCRIPTS_DIR="${DEPLOY_DIR}/scripts"
 
 # ===== 全局变量 =====
-# 镜像前缀，在任何函数中都会使用，因此放在全局定义
-MIRROR_PREFIX=wordpress-main-branch
+# 镜像前缀，使用实际的Docker Hub用户名
+MIRROR_PREFIX=chisenin
 # PHP版本，确保在镜像拉取时已定义
 PHP_VERSION=8.3
 
@@ -195,7 +195,7 @@ generate_compose_file() {
     cat > "${COMPOSE_FILE}" <<'YAML'
 services:
   mariadb:
-    image: ${MIRROR_PREFIX}/mariadb:latest
+    image: ${MIRROR_PREFIX}/wordpress-mariadb:11.3.2
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
@@ -211,7 +211,7 @@ services:
       retries: 5
 
   redis:
-    image: ${MIRROR_PREFIX}/redis:latest
+    image: ${MIRROR_PREFIX}/wordpress-redis:7.4.0
     restart: unless-stopped
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--maxmemory", "${REDIS_MAXMEMORY}", "--maxmemory-policy", "allkeys-lru"]
     volumes:
@@ -223,7 +223,7 @@ services:
       retries: 5
 
   wordpress:
-    image: ${MIRROR_PREFIX}/wordpress:${PHP_VERSION}-fpm
+    image: ${MIRROR_PREFIX}/wordpress-php:${PHP_VERSION}.26
     restart: unless-stopped
     depends_on:
       mariadb:
@@ -251,7 +251,7 @@ services:
       - ./deploy/configs/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
 
   nginx:
-    image: ${MIRROR_PREFIX}/nginx:latest
+    image: ${MIRROR_PREFIX}/wordpress-nginx:1.27.2
     restart: unless-stopped
     ports:
       - "80:80"
@@ -307,13 +307,12 @@ start_stack() {
     # 预先尝试拉取镜像，提高成功率
     print_yellow "🔄 预先拉取镜像..."
     
-    # 定义需要拉取的镜像列表
+    # 定义需要拉取的镜像列表（使用正确的Docker Hub镜像名称和标签）
     local images=(
-        "${MIRROR_PREFIX}/wordpress:latest"
-        "${MIRROR_PREFIX}/wordpress:${PHP_VERSION}-fpm"
-        "${MIRROR_PREFIX}/mariadb:latest"
-        "${MIRROR_PREFIX}/redis:latest"
-        "${MIRROR_PREFIX}/nginx:latest"
+        "${MIRROR_PREFIX}/wordpress-php:${PHP_VERSION}.26"
+        "${MIRROR_PREFIX}/wordpress-mariadb:11.3.2"
+        "${MIRROR_PREFIX}/wordpress-redis:7.4.0"
+        "${MIRROR_PREFIX}/wordpress-nginx:1.27.2"
     )
     
     # 为每个镜像添加拉取重试机制
