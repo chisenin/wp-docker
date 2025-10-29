@@ -214,6 +214,9 @@ services:
     image: ${MIRROR_PREFIX}/wordpress-redis:7.4.0
     restart: unless-stopped
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--maxmemory", "${REDIS_MAXMEMORY}", "--maxmemory-policy", "allkeys-lru"]
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_MAXMEMORY=${REDIS_MAXMEMORY}
     volumes:
       - ./redis:/data
     healthcheck:
@@ -323,7 +326,7 @@ start_stack() {
         
         for ((i=1; i<=pull_retries; i++)); do
             print_yellow "  拉取镜像 ${image} (尝试 ${i}/${pull_retries})..."
-            if docker pull "$image" --no-color; then
+            if docker pull "$image"; then
                 pull_success=true
                 break
             else
@@ -350,13 +353,13 @@ start_stack() {
         print_yellow "⏱️  部署尝试 ${RETRY_COUNT}/${MAX_RETRIES}..."
         
         # 使用正确的Docker Compose命令，添加--no-color避免颜色代码问题
-        if ${DOCKER_COMPOSE_CMD} --env-file "${ENV_DECODED}" -f "${COMPOSE_FILE}" up -d --build --no-color; then
+        if ${DOCKER_COMPOSE_CMD} --env-file "${ENV_DECODED}" -f "${COMPOSE_FILE}" up -d --build; then
             SUCCESS=true
             break
         else
             print_yellow "⚠️  部署失败，${SLEEP_TIME}秒后重试..."
             print_red "错误详情:"
-            ${DOCKER_COMPOSE_CMD} --env-file "${ENV_DECODED}" -f "${COMPOSE_FILE}" logs --tail=20 --no-color || true
+            ${DOCKER_COMPOSE_CMD} --env-file "${ENV_DECODED}" -f "${COMPOSE_FILE}" logs --tail=20 || true
             
             # 清理可能的部分启动的容器
             ${DOCKER_COMPOSE_CMD} --env-file "${ENV_DECODED}" -f "${COMPOSE_FILE}" down -v || true
