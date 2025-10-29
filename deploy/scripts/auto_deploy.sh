@@ -169,9 +169,16 @@ generate_env_decoded() {
         # 跳过MIRROR_PREFIX行，避免重复
         [[ "$line" =~ ^MIRROR_PREFIX= ]] && continue
         
-            # 注意：不再处理WordPress密钥，它们将直接在docker-compose.yml中生成
-        # 直接复制其他所有环境变量（包括WORDPRESS_DB_HOST等）
-        echo "$line" >> "${ENV_DECODED}"
+        # 为MEMORY_PER_SERVICE添加m单位（MB）
+        if [[ "$line" =~ ^MEMORY_PER_SERVICE= ]]; then
+            # 提取数值部分
+            local memory_value=$(echo "$line" | cut -d'=' -f2)
+            # 添加m单位并写入
+            echo "MEMORY_PER_SERVICE=${memory_value}m" >> "${ENV_DECODED}"
+        else
+            # 直接复制其他所有环境变量
+            echo "$line" >> "${ENV_DECODED}"
+        fi
     done < "${ENV_FILE}"
     
     # 确保WORDPRESS_DB_HOST变量存在于文件中
