@@ -53,14 +53,12 @@ generate_password() {
     fi
 }
 
-generate_wordpress_keys_b64() {
-    local key_names=("WORDPRESS_AUTH_KEY" "WORDPRESS_SECURE_AUTH_KEY" "WORDPRESS_LOGGED_IN_KEY" "WORDPRESS_NONCE_KEY" \
-                     "WORDPRESS_AUTH_SALT" "WORDPRESS_SECURE_AUTH_SALT" "WORDPRESS_LOGGED_IN_SALT" "WORDPRESS_NONCE_SALT")
-    for key in "${key_names[@]}"; do
-        val=$(generate_password 64 | base64 | tr -d '\n' | tr -d '\r')
-        printf "%s=%s\n" "${key}" "${val}"
-    done
-}
+# 注意：WordPress密钥不再存储在.env文件中，而是直接在docker-compose.yml中生成
+# 此函数已弃用，但保留用于兼容性
+# generate_wordpress_keys_b64() {
+#     ...
+# }
+
 
 cleanup_root_env() {
     if [ -f "/.env" ]; then
@@ -131,7 +129,7 @@ UPLOAD_MAX_FILESIZE=64M
 PHP_INI_PATH=./deploy/configs/php.ini
 EOF
 
-    generate_wordpress_keys_b64 >> "${ENV_FILE}"
+    # 不再向.env文件添加WordPress密钥，改为直接在docker-compose.yml中生成
 
     sed -i 's/\x1b\[[0-9;]*m//g' "${ENV_FILE}" || true
     sed -i 's/\r//g' "${ENV_FILE}" || true
@@ -160,15 +158,9 @@ generate_env_decoded() {
         # 跳过MIRROR_PREFIX行，避免重复
         [[ "$line" =~ ^MIRROR_PREFIX= ]] && continue
         
-        # 检查是否是需要Base64解码的WordPress密钥
-        if [[ "$line" =~ ^WORDPRESS_(AUTH_KEY|SECURE_AUTH_KEY|LOGGED_IN_KEY|NONCE_KEY|AUTH_SALT|SECURE_AUTH_SALT|LOGGED_IN_SALT|NONCE_SALT)=(.*)$ ]]; then
-            key="${BASH_REMATCH[1]}"
-            b64val="${BASH_REMATCH[2]}"
-            # 解码Base64值
-            decoded=$(echo "$b64val" | base64 --decode 2>/dev/null || echo "$b64val")
-            decoded=$(printf "%s" "$decoded" | tr -d '\r\n')
-            printf "WORDPRESS_%s=%s\n" "$key" "$decoded" >> "${ENV_DECODED}"
-        else
+            # 注意：不再处理WordPress密钥，它们将直接在docker-compose.yml中生成
+        # 复制其他所有环境变量
+        
             # 直接复制其他所有环境变量（包括WORDPRESS_DB_HOST等）
             echo "$line" >> "${ENV_DECODED}"
         fi
@@ -237,14 +229,15 @@ services:
       WORDPRESS_REDIS_HOST: "${WORDPRESS_REDIS_HOST}"
       WORDPRESS_REDIS_PORT: "${WORDPRESS_REDIS_PORT}"
       WORDPRESS_TABLE_PREFIX: "${WORDPRESS_TABLE_PREFIX}"
-      WORDPRESS_AUTH_KEY: "${WORDPRESS_AUTH_KEY}"
-      WORDPRESS_SECURE_AUTH_KEY: "${WORDPRESS_SECURE_AUTH_KEY}"
-      WORDPRESS_LOGGED_IN_KEY: "${WORDPRESS_LOGGED_IN_KEY}"
-      WORDPRESS_NONCE_KEY: "${WORDPRESS_NONCE_KEY}"
-      WORDPRESS_AUTH_SALT: "${WORDPRESS_AUTH_SALT}"
-      WORDPRESS_SECURE_AUTH_SALT: "${WORDPRESS_SECURE_AUTH_SALT}"
-      WORDPRESS_LOGGED_IN_SALT: "${WORDPRESS_LOGGED_IN_SALT}"
-      WORDPRESS_NONCE_SALT: "${WORDPRESS_NONCE_SALT}"
+      # WordPress安全密钥 - 直接在docker-compose.yml中生成随机值
+      WORDPRESS_AUTH_KEY: "${AUTH_KEY:-$(openssl rand -hex 64)}"
+      WORDPRESS_SECURE_AUTH_KEY: "${SECURE_AUTH_KEY:-$(openssl rand -hex 64)}"
+      WORDPRESS_LOGGED_IN_KEY: "${LOGGED_IN_KEY:-$(openssl rand -hex 64)}"
+      WORDPRESS_NONCE_KEY: "${NONCE_KEY:-$(openssl rand -hex 64)}"
+      WORDPRESS_AUTH_SALT: "${AUTH_SALT:-$(openssl rand -hex 64)}"
+      WORDPRESS_SECURE_AUTH_SALT: "${SECURE_AUTH_SALT:-$(openssl rand -hex 64)}"
+      WORDPRESS_LOGGED_IN_SALT: "${LOGGED_IN_SALT:-$(openssl rand -hex 64)}"
+      WORDPRESS_NONCE_SALT: "${NONCE_SALT:-$(openssl rand -hex 64)}"
     volumes:
       - ./html:/var/www/html
       - ./deploy/configs/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
