@@ -191,8 +191,6 @@ generate_env_decoded() {
 generate_compose_file() {
     print_blue "[步骤3] 生成 ${COMPOSE_FILE}..."
     cat > "${COMPOSE_FILE}" <<'YAML'
-version: "3.9"
-
 services:
   mariadb:
     image: ${MIRROR_PREFIX}/mariadb:latest
@@ -306,10 +304,40 @@ start_stack() {
     
     # 预先尝试拉取镜像，提高成功率
     print_yellow "🔄 预先拉取镜像..."
-    docker pull ${MIRROR_PREFIX}/wordpress:latest || true
-    docker pull ${MIRROR_PREFIX}/mariadb:latest || true
-    docker pull ${MIRROR_PREFIX}/redis:latest || true
-    docker pull ${MIRROR_PREFIX}/nginx:latest || true
+    
+    # 定义需要拉取的镜像列表
+    local images=(
+        "${MIRROR_PREFIX}/wordpress:latest"
+        "${MIRROR_PREFIX}/wordpress:${PHP_VERSION}-fpm"
+        "${MIRROR_PREFIX}/mariadb:latest"
+        "${MIRROR_PREFIX}/redis:latest"
+        "${MIRROR_PREFIX}/nginx:latest"
+    )
+    
+    # 为每个镜像添加拉取重试机制
+    for image in "${images[@]}"; do
+        local pull_retries=3
+        local pull_success=false
+        local pull_sleep=3
+        
+        for ((i=1; i<=pull_retries; i++)); do
+            print_yellow "  拉取镜像 ${image} (尝试 ${i}/${pull_retries})..."
+            if docker pull "$image" --no-color; then
+                pull_success=true
+                break
+            else
+                print_yellow "  镜像拉取失败，${pull_sleep}秒后重试..."
+                sleep "$pull_sleep"
+                pull_sleep=$((pull_sleep * 2))
+            fi
+        done
+        
+        if [ "$pull_success" = true ]; then
+            print_green "  ✅ 镜像 ${image} 拉取成功"
+        else
+            print_yellow "  ⚠️  镜像 ${image} 拉取失败，将在启动时尝试"
+        fi
+    done
     
     # 添加网络超时设置
     export DOCKER_CLIENT_TIMEOUT=300
