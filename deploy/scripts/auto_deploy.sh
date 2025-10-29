@@ -38,6 +38,8 @@ SCRIPTS_DIR="${DEPLOY_DIR}/scripts"
 # ===== 全局变量 =====
 # 镜像前缀，在任何函数中都会使用，因此放在全局定义
 MIRROR_PREFIX=wordpress-main-branch
+# PHP版本，确保在镜像拉取时已定义
+PHP_VERSION=8.3
 
 # ===== 基础函数 =====
 generate_password() {
