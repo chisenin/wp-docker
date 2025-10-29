@@ -195,30 +195,28 @@ generate_compose_file() {
     cat > "${COMPOSE_FILE}" <<'YAML'
 services:
   mariadb:
-    image: ${MIRROR_PREFIX}/wordpress-mariadb:11.3.2
+    image: mariadb:11.3
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
-      MYSQL_DATABASE: "${MYSQL_DATABASE}"
-      MYSQL_USER: "${MYSQL_USER}"
-      MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
+      MARIADB_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+      MARIADB_DATABASE: "${MYSQL_DATABASE}"
+      MARIADB_USER: "${MYSQL_USER}"
+      MARIADB_PASSWORD: "${MYSQL_PASSWORD}"
     volumes:
       - ./mysql:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=${MYSQL_ROOT_PASSWORD}"]
+      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
-    image: ${MIRROR_PREFIX}/wordpress-redis:7.4.0
+    image: redis:7.4
     restart: unless-stopped
-    environment:
-      - ALLOW_EMPTY_PASSWORD=yes
     volumes:
       - ./redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "PING"]
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -311,8 +309,8 @@ start_stack() {
     # 定义需要拉取的镜像列表（使用正确的Docker Hub镜像名称和标签）
     local images=(
         "${MIRROR_PREFIX}/wordpress-php:${PHP_VERSION}.26"
-        "${MIRROR_PREFIX}/wordpress-mariadb:11.3.2"
-        "${MIRROR_PREFIX}/wordpress-redis:7.4.0"
+        "mariadb:11.3"
+        "redis:7.4"
         "${MIRROR_PREFIX}/wordpress-nginx:1.27.2"
     )
     
