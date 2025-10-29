@@ -205,7 +205,7 @@ services:
     volumes:
       - ./mysql:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysql -u root -p'${MYSQL_ROOT_PASSWORD}' -e 'SELECT 1' || exit 1"]
+      test: ["CMD-SHELL", "timeout 1 bash -c 'cat < /dev/null > /dev/tcp/localhost/3306' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
