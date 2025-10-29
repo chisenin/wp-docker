@@ -178,6 +178,36 @@ generate_env_decoded() {
     print_green "✅ 已生成 ${ENV_DECODED}"
 }
 
+# ===== 下载 WordPress =====
+download_wordpress() {
+    print_blue "[步骤3.1] 下载并解压 WordPress..."
+    mkdir -p "${DEPLOY_DIR}/html"
+    cd "${DEPLOY_DIR}/html" || exit 1
+    
+    # 如果html目录为空，下载WordPress
+    if [ -z "$(ls -A . 2>/dev/null)" ]; then
+        print_yellow "正在下载最新版 WordPress..."
+        if command -v wget &> /dev/null; then
+            wget https://wordpress.org/latest.tar.gz
+        elif command -v curl &> /dev/null; then
+            curl -O https://wordpress.org/latest.tar.gz
+        else
+            print_red "错误：未找到 wget 或 curl 命令"
+            exit 1
+        fi
+        
+        print_yellow "正在解压 WordPress..."
+        tar -xvzf latest.tar.gz --strip-components=1
+        rm -f latest.tar.gz
+        
+        # 创建uploads目录并设置权限
+        mkdir -p wp-content/uploads
+        print_green "✅ WordPress 下载完成"
+    else
+        print_yellow "⚠️  html 目录不为空，跳过下载"
+    fi
+}
+
 # ===== 写入 Compose 模板（修正版） =====
 generate_compose_file() {
     print_blue "[步骤3] 生成 ${COMPOSE_FILE}..."
@@ -198,17 +228,28 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '${CPU_LIMIT:-1}'
+          memory: '${MEMORY_PER_SERVICE:-512m}'
 
   redis:
     image: redis:7.4
     restart: unless-stopped
+    command: redis-server --requirepass "${REDIS_PASSWORD}" --maxmemory "${REDIS_MAXMEMORY:-256mb}" --maxmemory-policy allkeys-lru
     volumes:
       - ./redis:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '${CPU_LIMIT:-1}'
+          memory: '${MEMORY_PER_SERVICE:-256m}'
 
   wordpress:
     image: ${MIRROR_PREFIX}/wordpress-php:${PHP_VERSION}.26
@@ -225,7 +266,10 @@ services:
       WORDPRESS_DB_NAME: "${WORDPRESS_DB_NAME}"
       WORDPRESS_REDIS_HOST: "${WORDPRESS_REDIS_HOST}"
       WORDPRESS_REDIS_PORT: "${WORDPRESS_REDIS_PORT}"
+      WORDPRESS_REDIS_PASSWORD: "${REDIS_PASSWORD}"
       WORDPRESS_TABLE_PREFIX: "${WORDPRESS_TABLE_PREFIX}"
+      PHP_MEMORY_LIMIT: "${PHP_MEMORY_LIMIT:-256M}"
+      UPLOAD_MAX_FILESIZE: "${UPLOAD_MAX_FILESIZE:-64M}"
       # WordPress安全密钥 - 直接在docker-compose.yml中生成随机值
       WORDPRESS_AUTH_KEY: "${AUTH_KEY:-$(openssl rand -hex 64)}"
       WORDPRESS_SECURE_AUTH_KEY: "${SECURE_AUTH_KEY:-$(openssl rand -hex 64)}"
@@ -238,6 +282,11 @@ services:
     volumes:
       - ./html:/var/www/html
       - ./deploy/configs/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '${CPU_LIMIT:-1}'
+          memory: '${MEMORY_PER_SERVICE:-1024m}'
 
   nginx:
     image: ${MIRROR_PREFIX}/wordpress-nginx:1.27.2
@@ -250,6 +299,11 @@ services:
     depends_on:
       wordpress:
         condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: '${CPU_LIMIT:-1}'
+          memory: '${MEMORY_PER_SERVICE:-512m}'
 
 volumes:
   mysql:
@@ -377,16 +431,87 @@ start_stack() {
 
 # ===== 备份脚本 =====
 setup_auto_backup() {
+    print_blue "[步骤5] 设置自动备份和磁盘监控..."
     mkdir -p "${SCRIPTS_DIR}" "${BACKUP_DIR}"
+    
+    # 创建备份脚本
     cat > "${SCRIPTS_DIR}/backup.sh" <<'EOF'
 #!/bin/bash
 BACKUP_DIR="/opt/backups"
 TIMESTAMP=$(date +%F_%H-%M-%S)
 mkdir -p "$BACKUP_DIR"
-tar -czf "$BACKUP_DIR/wordpress_backup_$TIMESTAMP.tar.gz" -C /opt html mysql
+
+# 备份数据库
+docker exec wp_db mariadb-dump -u root -p${MYSQL_ROOT_PASSWORD} wordpress > "$BACKUP_DIR/wordpress_db_$TIMESTAMP.sql"
+
+# 备份文件
+tar -czf "$BACKUP_DIR/wordpress_files_$TIMESTAMP.tar.gz" -C /opt html
+
+# 合并备份
+tar -czf "$BACKUP_DIR/wordpress_backup_$TIMESTAMP.tar.gz" -C "$BACKUP_DIR" "wordpress_db_$TIMESTAMP.sql" "wordpress_files_$TIMESTAMP.tar.gz"
+
+# 清理临时文件
+rm -f "$BACKUP_DIR/wordpress_db_$TIMESTAMP.sql" "$BACKUP_DIR/wordpress_files_$TIMESTAMP.tar.gz"
+
+# 保留最近7天的备份
+find "$BACKUP_DIR" -name "wordpress_backup_*.tar.gz" -type f -mtime +7 -delete
+
 echo "✅ 备份完成: $BACKUP_DIR/wordpress_backup_$TIMESTAMP.tar.gz"
 EOF
     chmod +x "${SCRIPTS_DIR}/backup.sh"
+    
+    # 创建磁盘监控脚本
+    cat > "${SCRIPTS_DIR}/disk_monitor.sh" <<'EOF'
+#!/bin/bash
+THRESHOLD=80
+DISK_USAGE=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
+
+if [ "$DISK_USAGE" -ge "$THRESHOLD" ]; then
+    echo "⚠️  磁盘使用率达到 ${DISK_USAGE}%，超过阈值 ${THRESHOLD}%，正在清理..."
+    
+    # 清理Docker无用镜像
+    docker image prune -af
+    
+    # 清理Docker无用卷
+    docker volume prune -f
+    
+    # 清理Docker无用容器
+    docker container prune -f
+    
+    echo "✅ 清理完成，当前磁盘使用率: $(df -h / | awk 'NR==2 {print $5}')"
+fi
+EOF
+    chmod +x "${SCRIPTS_DIR}/disk_monitor.sh"
+    
+    # 设置定时任务（如果在Linux环境）
+    if [[ "$OSTYPE" != "msys"* ]] && [[ "$OSTYPE" != "win32"* ]] && [[ "$(uname -a)" != *"CYGWIN"* ]] && [[ "$(uname -a)" != *"MINGW"* ]]; then
+        # 检查crontab是否存在
+        if command -v crontab >/dev/null 2>&1; then
+            # 备份当前crontab
+            crontab -l > /tmp/current_crontab 2>/dev/null || touch /tmp/current_crontab
+            
+            # 添加备份任务（每天3点执行）
+            if ! grep -q "${SCRIPTS_DIR}/backup.sh" /tmp/current_crontab; then
+                echo "0 3 * * * ${SCRIPTS_DIR}/backup.sh >> ${BACKUP_DIR}/backup.log 2>&1" >> /tmp/current_crontab
+            fi
+            
+            # 添加磁盘监控任务（每小时执行）
+            if ! grep -q "${SCRIPTS_DIR}/disk_monitor.sh" /tmp/current_crontab; then
+                echo "0 * * * * ${SCRIPTS_DIR}/disk_monitor.sh >> ${BACKUP_DIR}/disk_monitor.log 2>&1" >> /tmp/current_crontab
+            fi
+            
+            # 应用新的crontab
+            crontab /tmp/current_crontab
+            rm -f /tmp/current_crontab
+            print_green "✅ 已设置定时备份（每天3点）和磁盘监控（每小时）"
+        else
+            print_yellow "⚠️  未找到crontab命令，无法设置定时任务"
+        fi
+    else
+        print_yellow "⚠️  Windows环境下不设置定时任务"
+    fi
+    
+    print_green "✅ 自动备份和磁盘监控设置完成"
 }
 
 display_info() {
@@ -399,6 +524,104 @@ display_info() {
     print_green "备份脚本: ${SCRIPTS_DIR}/backup.sh"
 }
 
+# ===== 检测并适配操作系统 =====
+detect_os_and_optimize() {
+    print_blue "[步骤0.5] 检测操作系统并优化配置..."
+    
+    if [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "win32"* ]] || [[ "$(uname -a)" == *"CYGWIN"* ]] || [[ "$(uname -a)" == *"MINGW"* ]]; then
+        print_yellow "Windows环境，使用基础配置"
+        return
+    fi
+    
+    # Linux环境检测
+    if [ -f "/etc/os-release" ]; then
+        source /etc/os-release
+        OS_NAME="$ID"
+        OS_VERSION="$VERSION_ID"
+        
+        print_green "检测到操作系统: $OS_NAME $OS_VERSION"
+        
+        # 根据不同Linux发行版进行优化
+        case "$OS_NAME" in
+            ubuntu|debian)
+                print_yellow "Ubuntu/Debian环境，应用apt优化"
+                # 尝试优化Docker存储驱动
+                if grep -q "overlay2" /proc/filesystems; then
+                    print_green "已支持overlay2存储驱动"
+                fi
+                ;;
+            centos|rhel)
+                print_yellow "CentOS/RHEL环境，应用yum优化"
+                # 检查并设置overcommit_memory
+                if [ -f "/proc/sys/vm/overcommit_memory" ]; then
+                    current_value=$(cat /proc/sys/vm/overcommit_memory)
+                    if [ "$current_value" -ne "1" ]; then
+                        print_yellow "尝试设置vm.overcommit_memory=1以优化Redis性能"
+                        echo 1 > /proc/sys/vm/overcommit_memory 2>/dev/null || print_yellow "⚠️  无权限设置overcommit_memory，Redis性能可能受限"
+                    fi
+                fi
+                ;;
+            alpine)
+                print_yellow "Alpine环境，应用apk优化"
+                ;;
+            *)
+                print_yellow "未知Linux发行版，使用通用配置"
+                ;;
+        esac
+    fi
+    
+    # 创建必要的配置目录
+    mkdir -p "${DEPLOY_DIR}/deploy/configs" "${DEPLOY_DIR}/deploy/nginx/conf.d"
+    
+    # 创建默认PHP配置
+    cat > "${DEPLOY_DIR}/deploy/configs/php.ini" <<'EOF'
+memory_limit = 512M
+upload_max_filesize = 64M
+post_max_size = 64M
+max_execution_time = 300
+date.timezone = Asia/Shanghai
+opcache.enable = 1
+opcache.memory_consumption = 128
+opcache.interned_strings_buffer = 8
+opcache.max_accelerated_files = 10000
+opcache.revalidate_freq = 1
+EOF
+    
+    # 创建默认Nginx配置
+    cat > "${DEPLOY_DIR}/deploy/nginx/conf.d/default.conf" <<'EOF'
+server {
+    listen 80;
+    server_name localhost;
+    
+    root /var/www/html;
+    index index.php index.html index.htm;
+    
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+    
+    location ~ \.php$ {
+        fastcgi_pass wordpress:9000;
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+    
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js)$ {
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+    }
+    
+    # 禁止访问敏感文件
+    location ~* \.(txt|md|json|log)$ {
+        deny all;
+    }
+}
+EOF
+    
+    print_green "✅ 操作系统适配和配置准备完成"
+}
+
 # ===== 主程序 =====
 main() {
     print_blue "=============================================="
@@ -407,9 +630,11 @@ main() {
 
     cleanup_root_env
     prepare_host_environment
+    detect_os_and_optimize
     generate_env_file
     generate_env_decoded
     generate_compose_file
+    download_wordpress
     setup_auto_backup
     start_stack
     display_info
