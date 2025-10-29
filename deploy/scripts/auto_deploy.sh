@@ -86,8 +86,19 @@ generate_env_file() {
     cd "$DEPLOY_DIR" || exit 1
 
     CPU_CORES=$(nproc 2>/dev/null || echo 1)
-    AVAILABLE_RAM=$(free -m | awk '/^Mem:/{print $7}' || echo 1024)
+    # 在Windows环境下，使用更可靠的内存检测方法
+    if [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "win32"* ]] || [[ "$(uname -a)" == *"CYGWIN"* ]] || [[ "$(uname -a)" == *"MINGW"* ]]; then
+        # Windows环境默认值，确保足够大
+        AVAILABLE_RAM=2048
+    else
+        # Linux环境尝试使用free命令
+        AVAILABLE_RAM=$(free -m 2>/dev/null | awk '/^Mem:/{print $7}' || echo 1024)
+    fi
     MEMORY_PER_SERVICE=$((AVAILABLE_RAM * 2 / 7))
+    # 确保MEMORY_PER_SERVICE不小于Docker要求的最小6MB
+    if [ "$MEMORY_PER_SERVICE" -lt 6 ]; then
+        MEMORY_PER_SERVICE=512
+    fi
     CPU_LIMIT=$((CPU_CORES / 2))
     [ "$CPU_LIMIT" -lt 1 ] && CPU_LIMIT=1
     PHP_MEMORY_LIMIT="384M"
