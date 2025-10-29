@@ -1,10 +1,10 @@
 # WordPress + Docker Compose 项目 (GitHub Actions 自动化版)
 ---
-本项目使用 Docker Compose 部署 WordPress 生产环境，采用多阶段构建优化镜像，并集成 GitHub Actions 实现 CI/CD 自动化，确保环境一致性、稳定性和部署效率。
+本项目使用 Docker Compose 部署 WordPress 生产环境，结合官方数据库镜像与自定义应用镜像，并集成 GitHub Actions 实现 CI/CD 自动化，确保环境一致性、稳定性和部署效率。
 
 **注意**: 详细指南文档已移至 `guides/` 目录，包含从介绍到部署的完整步骤说明。
 
-**主要特性**: 动态版本锁定、共享Base镜像、配置即代码、全栈自定义、自动版本监控与构建、自动化部署脚本、安全实践集成
+**主要特性**: 动态版本锁定、共享Base镜像、配置即代码、混合镜像策略（官方+自定义）、自动版本监控与构建、自动化部署脚本、安全实践集成
 ---
 ## 项目结构
 
@@ -25,8 +25,8 @@ wp-docker/
 │   │   ├── base/                  # 共享 Alpine Base 镜像
 │   │   ├── php/                   # PHP-FPM Dockerfile
 │   │   ├── nginx/                 # Nginx Dockerfile
-│   │   ├── mariadb/               # MariaDB Dockerfile
-│   │   └── redis/                 # Redis Dockerfile
+│   │   ├── mariadb/               # MariaDB Dockerfile（已弃用，现使用官方镜像）
+│   │   └── redis/                 # Redis Dockerfile（已弃用，现使用官方镜像）
 │   ├── deploy_configs/            # 部署配置目录
 │   │   ├── php/                   # PHP 配置
 │   │   ├── nginx/                 # Nginx 配置
@@ -76,8 +76,7 @@ wp-docker/
 - **服务配置文件**：
   - Nginx 配置位于 `build/deploy_configs/nginx/` 目录
   - PHP 配置位于 `build/deploy_configs/php/php.ini` 文件
-  - MariaDB 配置位于 `build/deploy_configs/mariadb/my.cnf` 文件
-  - Redis 配置位于 `build/deploy_configs/redis/redis.conf` 文件
+  - MariaDB 和 Redis 配置：现使用官方镜像，配置通过环境变量传递
 
 这些配置文件会被 GitHub Actions 用于构建镜像，并在生产环境中通过 `auto_deploy.sh` 脚本自动应用。在 Windows 本地开发环境中，您只需关注代码修改和配置文件的编辑，无需本地运行 Docker 容器。
 

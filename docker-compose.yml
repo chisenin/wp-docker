@@ -1,41 +1,43 @@
-﻿version: '3.8'
+version: '3.8'
 
 services:
-  # --- MariaDB 数据库服务 ---
+  # 数据库服务 (MariaDB) - 使用官方镜像
   mariadb:
-    # 构建配置（用于GitHub Actions）
-    build:
-      context: .
-      dockerfile: build/Dockerfiles/mariadb/Dockerfile
-    image: chisenin/wordpress-mariadb:11.3.2
-    # 注意：此配置仅用于构建参考，生产环境配置由auto_deploy.sh脚本生成
+    image: mariadb:11.3
+    container_name: opt-mariadb-1
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    environment:
+      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD:-default_password}
+      - MARIADB_DATABASE=${MARIADB_DATABASE:-wordpress}
+      - MARIADB_USER=${MARIADB_USER:-wordpress}
+      - MARIADB_PASSWORD=${MARIADB_PASSWORD:-default_password}
+    healthcheck:
+      test: ["CMD", "timeout", "1", "bash", "-c", "cat < /dev/null > /dev/tcp/localhost/3306"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
     networks:
       - app-network
-    volumes:
-      - ./build/deploy_configs/mariadb/my.cnf:/etc/my.cnf:ro
-    environment:
-      # 构建参考环境变量，生产环境将使用随机生成的值
-      MYSQL_ROOT_PASSWORD: build_reference_only
-      MYSQL_DATABASE: wordpress
-      MYSQL_USER: wordpress
-      MYSQL_PASSWORD: build_reference_only
+    restart: always
 
-  # --- Redis 缓存服务 ---
+  # Redis 缓存服务 - 使用官方镜像
   redis:
-    # 构建配置（用于GitHub Actions）
-    build:
-      context: .
-      dockerfile: build/Dockerfiles/redis/Dockerfile
-    image: chisenin/wordpress-redis:7.4.0
-    # 注意：此配置仅用于构建参考，生产环境配置由auto_deploy.sh脚本生成
+    image: redis:7.4
+    container_name: opt-redis-1
+    volumes:
+      - redis_data:/data
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     networks:
       - app-network
-    volumes:
-      - ./build/deploy_configs/redis/redis.conf:/etc/redis/redis.conf:ro
-    environment:
-      # 构建参考环境变量，生产环境将使用随机生成的值
-      REDIS_PASSWORD: build_reference_only
-      REDIS_MAXMEMORY: 256mb
+    restart: always
 
   # --- PHP-FPM 服务 ---
   php:

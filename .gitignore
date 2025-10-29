@@ -2,6 +2,16 @@
 # 忽略所有容器、镜像、网络、数据卷这些"环境"产物
 .dockerignore
 *.log
+*.docker
+container-logs/
+
+# --- 临时文件 ---
+tmp/
+temp/
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
 
 # --- WordPress 相关 ---
 # WordPress 自动生成的核心配置文件

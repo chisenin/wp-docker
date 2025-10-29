@@ -129,23 +129,20 @@ jobs:
             MODULES_TO_REBUILD="base php nginx mariadb redis"
           else
             # 检查各模块版本
-            MODULES_TO_REBUILD=""
-            
-            if [[ "$CURRENT_PHP" != "$LATEST_PHP" ]]; then
-              MODULES_TO_REBUILD="${MODULES_TO_REBUILD} php"
-            fi
-            
-            if [[ "$CURRENT_NGINX" != "$LATEST_NGINX" ]]; then
-              MODULES_TO_REBUILD="${MODULES_TO_REBUILD} nginx"
-            fi
-            
-            if [[ "$CURRENT_MARIADB" != "$LATEST_MARIADB" ]]; then
-              MODULES_TO_REBUILD="${MODULES_TO_REBUILD} mariadb"
-            fi
-            
-            if [[ "$CURRENT_REDIS" != "$LATEST_REDIS" ]]; then
-              MODULES_TO_REBUILD="${MODULES_TO_REBUILD} redis"
-            fi
+          MODULES_TO_REBUILD=""
+          
+          if [[ "$CURRENT_PHP" != "$LATEST_PHP" ]]; then
+            MODULES_TO_REBUILD="${MODULES_TO_REBUILD} php"
+          fi
+          
+          if [[ "$CURRENT_NGINX" != "$LATEST_NGINX" ]]; then
+            MODULES_TO_REBUILD="${MODULES_TO_REBUILD} nginx"
+          fi
+          
+          # 注意：MariaDB和Redis已切换为使用官方镜像，不再构建自定义镜像
+          # 保存版本信息用于后续引用
+          echo "$LATEST_MARIADB" > build/Dockerfiles/mariadb/mariadb_version.txt
+          echo "$LATEST_REDIS" > build/Dockerfiles/redis/redis_version.txt
             
             # 去除前后空格
             MODULES_TO_REBUILD=$(echo "$MODULES_TO_REBUILD" | xargs)
@@ -298,35 +295,9 @@ jobs:
             echo "::endgroup::"
           fi
           
-          # 构建MariaDB镜像
-          if [[ "$MODULES" == *"mariadb"* ]]; then
-            echo "::group::构建MariaDB镜像"
-            docker buildx build --platform linux/amd64,linux/arm64 \
-              -f ./build/Dockerfiles/mariadb/Dockerfile \
-              --build-arg BASE_IMAGE=alpine:$ALPINE_VERSION \
-              --build-arg MARIADB_VERSION=$MARIADB_VERSION \
-              -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-mariadb:$MARIADB_VERSION \
-              --push . || {
-                echo "::error::MariaDB镜像构建失败"
-                exit 1
-              }
-            echo "::endgroup::"
-          fi
-          
-          # 构建Redis镜像
-          if [[ "$MODULES" == *"redis"* ]]; then
-            echo "::group::构建Redis镜像"
-            docker buildx build --platform linux/amd64,linux/arm64 \
-              -f ./build/Dockerfiles/redis/Dockerfile \
-              --build-arg BASE_IMAGE=alpine:$ALPINE_VERSION \
-              --build-arg REDIS_VERSION=$REDIS_VERSION \
-              -t ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-redis:$REDIS_VERSION \
-              --push . || {
-                echo "::error::Redis镜像构建失败"
-                exit 1
-              }
-            echo "::endgroup::"
-          fi
+          # 注意：MariaDB和Redis已切换为使用官方镜像，不再构建自定义镜像
+          # 保存版本信息用于后续引用
+          echo "已切换为使用官方MariaDB和Redis镜像，跳过自定义镜像构建"
           
           # 如果所有构建都成功
           SUCCESS=true
@@ -381,11 +352,11 @@ jobs:
           # 安装Trivy
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
           
-          # 扫描镜像
+          # 扫描自定义镜像
           trivy image --severity HIGH,CRITICAL ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:$PHP_VERSION
           trivy image --severity HIGH,CRITICAL ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:$NGINX_VERSION
-          trivy image --severity HIGH,CRITICAL ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-mariadb:$MARIADB_VERSION
-          trivy image --severity HIGH,CRITICAL ${{ secrets.DOCKERHUB_USERNAME }}/wordpress-redis:$REDIS_VERSION
+          
+          # 注意：MariaDB和Redis使用官方镜像，不再扫描自定义镜像
           
           # 测试成功
           SUCCESS=true
