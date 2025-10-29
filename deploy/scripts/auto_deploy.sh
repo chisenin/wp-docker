@@ -159,11 +159,8 @@ generate_env_decoded() {
         [[ "$line" =~ ^MIRROR_PREFIX= ]] && continue
         
             # 注意：不再处理WordPress密钥，它们将直接在docker-compose.yml中生成
-        # 复制其他所有环境变量
-        
-            # 直接复制其他所有环境变量（包括WORDPRESS_DB_HOST等）
-            echo "$line" >> "${ENV_DECODED}"
-        fi
+        # 直接复制其他所有环境变量（包括WORDPRESS_DB_HOST等）
+        echo "$line" >> "${ENV_DECODED}"
     done < "${ENV_FILE}"
     
     # 确保WORDPRESS_DB_HOST变量存在于文件中
