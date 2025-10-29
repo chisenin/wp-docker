@@ -211,7 +211,8 @@ download_wordpress() {
 # ===== 写入 Compose 模板（修正版） =====
 generate_compose_file() {
     print_blue "[步骤3] 生成 ${COMPOSE_FILE}..."
-    cat > "${COMPOSE_FILE}" <<'YAML'
+    # 使用双引号的here文档，允许shell变量展开
+    cat > "${COMPOSE_FILE}" <<YAML
 services:
   mariadb:
     image: mariadb:11.3
