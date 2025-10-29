@@ -205,7 +205,7 @@ services:
     volumes:
       - ./mysql:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -213,10 +213,8 @@ services:
   redis:
     image: ${MIRROR_PREFIX}/wordpress-redis:7.4.0
     restart: unless-stopped
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--maxmemory", "${REDIS_MAXMEMORY}", "--maxmemory-policy", "allkeys-lru"]
     environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - REDIS_MAXMEMORY=${REDIS_MAXMEMORY}
+      - ALLOW_EMPTY_PASSWORD=yes
     volumes:
       - ./redis:/data
     healthcheck:
