@@ -205,7 +205,7 @@ services:
     volumes:
       - ./mysql:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
+      test: ["CMD-SHELL", "mysql -u root -p'${MYSQL_ROOT_PASSWORD}' -e 'SELECT 1' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
