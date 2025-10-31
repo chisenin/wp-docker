@@ -2,17 +2,20 @@
 # ==================================================
 # auto_deploy_production.sh
 # WordPress Docker 全栈最终正式版部署脚本（v2025.10.30）
-# - Base64 存储 WordPress 密钥（.env）
 # - 自动生成 .env.decoded（供 Docker Compose 使用）
 # - 自动生成 docker-compose.yml（无重复 depends_on）
 # - 自动清理 /.env 防止 Docker Compose 误读
 # - 一键启动完整 WordPress 栈（Nginx+PHP-FPM+MariaDB+Redis）
 # ==================================================
 
-set -eu pipefail
+# 移除set -eu pipefail以提高兼容性
+set -e
 
 # ===== 输出函数 =====
-print_blue()   { echo -e "\033[34m$1\033[0m" >&2; }
+# 修复print_blue函数定义，确保没有语法错误
+print_blue() {
+    echo -e "\033[34m$1\033[0m" >&2
+}
 print_green()  { echo -e "\033[32m$1\033[0m" >&2; }
 print_yellow() { echo -e "\033[33m$1\033[0m" >&2; }
 print_red()    { echo -e "\033[31m$1\033[0m" >&2; }
@@ -81,7 +84,8 @@ prepare_host_environment() {
 
 # ===== 生成 .env =====
 generate_env_file() {
-    print_blue "[步骤1] 生成 ${ENV_FILE}（Base64 安全格式）..."
+    # 修复print_blue调用，避免特殊字符导致的语法错误
+    print_blue "生成环境文件 ${ENV_FILE}..."
     mkdir -p "$DEPLOY_DIR"
     cd "$DEPLOY_DIR" || exit 1
 
@@ -153,7 +157,7 @@ EOF
 
 # ===== 解码 env =====
 generate_env_decoded() {
-    print_blue "[步骤2] 生成 ${ENV_DECODED}（解码后供 Docker Compose 使用）..."
+    print_blue "生成解码文件 ${ENV_DECODED}..."
     
     # 清空目标文件
     > "${ENV_DECODED}" || true
@@ -193,12 +197,12 @@ generate_env_decoded() {
     fi
     
     chmod 600 "${ENV_DECODED}"
-    print_green "✅ 已生成 ${ENV_DECODED}"
+    print_green "已生成 ${ENV_DECODED}"
 }
 
 # ===== 下载 WordPress =====
 download_wordpress() {
-    print_blue "[步骤3.1] 下载并解压 WordPress..."
+    print_blue "下载 WordPress..."
     mkdir -p "${DEPLOY_DIR}/html"
     cd "${DEPLOY_DIR}/html" || exit 1
     
@@ -220,15 +224,16 @@ download_wordpress() {
         
         # 创建uploads目录并设置权限
         mkdir -p wp-content/uploads
-        print_green "✅ WordPress 下载完成"
+        print_green "WordPress 下载完成"
     else
-        print_yellow "⚠️  html 目录不为空，跳过下载"
+        print_yellow "html 目录不为空，跳过下载"
     fi
 }
 
 # ===== 写入 Compose 模板（修正版） =====
 generate_compose_file() {
-    print_blue "[步骤3] 生成 ${COMPOSE_FILE}..."
+    # 简化print_blue调用，避免潜在的语法问题
+    print_blue "生成 ${COMPOSE_FILE}..."
     
     # 使用单引号here文档避免shell展开Docker Compose变量
     # 然后使用sed命令替换镜像前缀和PHP版本
@@ -335,12 +340,12 @@ YAML
     sed -i "s/MIRROR_PLACEHOLDER/${MIRROR_PREFIX}/g" "${COMPOSE_FILE}"
     sed -i "s/PHP_VERSION_PLACEHOLDER/${PHP_VERSION}/g" "${COMPOSE_FILE}"
     
-    print_green "✅ 已生成 ${COMPOSE_FILE}"
+    print_green "已生成 ${COMPOSE_FILE}"
 }
 
 # ===== 启动 =====
 start_stack() {
-    print_blue "[步骤4] 启动 Docker Compose 栈..."
+    print_blue "启动服务栈..."
     cd "${DEPLOY_DIR}"
     
     # 确保环境变量文件正确生成
@@ -435,7 +440,7 @@ start_stack() {
     done
     
     if [ "$SUCCESS" = true ]; then
-        print_green "✅ WordPress 栈启动成功"
+        print_green "WordPress 栈启动成功"
         
         # 等待几秒钟让服务稳定
         print_yellow "⏳ 等待服务稳定..."
@@ -457,7 +462,7 @@ start_stack() {
 
 # ===== 备份脚本 =====
 setup_auto_backup() {
-    print_blue "[步骤5] 设置自动备份和磁盘监控..."
+    print_blue "设置备份和监控..."
     mkdir -p "${SCRIPTS_DIR}" "${BACKUP_DIR}"
     
     # 创建备份脚本
@@ -531,17 +536,17 @@ EOF
             rm -f /tmp/current_crontab
             print_green "✅ 已设置定时备份（每天3点）和磁盘监控（每小时）"
         else
-            print_yellow "⚠️  未找到crontab命令，无法设置定时任务"
+            print_yellow "未找到crontab命令，无法设置定时任务"
         fi
     else
-        print_yellow "⚠️  Windows环境下不设置定时任务"
+        print_yellow "Windows环境下不设置定时任务"
     fi
     
-    print_green "✅ 自动备份和磁盘监控设置完成"
+    print_green "自动备份和磁盘监控设置完成"
 }
 
 display_info() {
-    print_blue "📋 部署信息："
+    print_blue "部署信息"
     print_green "访问地址: http://<server-ip>"
     print_green "部署目录: ${DEPLOY_DIR}"
     print_green "env文件: ${ENV_FILE}"
@@ -552,7 +557,7 @@ display_info() {
 
 # ===== 检测并适配操作系统 =====
 detect_os_and_optimize() {
-    print_blue "[步骤0.5] 检测操作系统并优化配置..."
+    print_blue "检测系统配置..."
     
     if [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "win32"* ]] || [[ "$(uname -a)" == *"CYGWIN"* ]] || [[ "$(uname -a)" == *"MINGW"* ]]; then
         print_yellow "Windows环境，使用基础配置"
@@ -583,7 +588,7 @@ detect_os_and_optimize() {
                     current_value=$(cat /proc/sys/vm/overcommit_memory)
                     if [ "$current_value" -ne "1" ]; then
                         print_yellow "尝试设置vm.overcommit_memory=1以优化Redis性能"
-                        echo 1 > /proc/sys/vm/overcommit_memory 2>/dev/null || print_yellow "⚠️  无权限设置overcommit_memory，Redis性能可能受限"
+                        echo 1 > /proc/sys/vm/overcommit_memory 2>/dev/null || print_yellow "无权限设置overcommit_memory，Redis性能可能受限"
                     fi
                 fi
                 ;;
@@ -645,13 +650,13 @@ server {
 }
 EOF
     
-    print_green "✅ 操作系统适配和配置准备完成"
+    print_green "操作系统适配和配置准备完成"
 }
 
 # ===== 主程序 =====
 main() {
     print_blue "=============================================="
-    print_blue "WordPress Docker 全栈部署 - 最终正式版（修正 compose）"
+    print_blue "WordPress Docker 部署"
     print_blue "=============================================="
 
     cleanup_root_env
@@ -664,7 +669,7 @@ main() {
     setup_auto_backup
     start_stack
     display_info
-    print_green "🎉 部署完成 ✅"
+    print_green "部署完成"
 }
 
 main "$@"
