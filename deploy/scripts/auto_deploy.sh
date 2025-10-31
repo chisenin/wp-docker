@@ -16,9 +16,16 @@ set -e
 print_blue() {
     echo -e "\033[34m$1\033[0m" >&2
 }
-print_green()  { echo -e "\033[32m$1\033[0m" >&2; }
-print_yellow() { echo -e "\033[33m$1\033[0m" >&2; }
-print_red()    { echo -e "\033[31m$1\033[0m" >&2; }
+# 修复输出函数定义，提高兼容性和一致性
+print_green() {
+    echo -e "\033[32m$1\033[0m" >&2
+}
+print_yellow() {
+    echo -e "\033[33m$1\033[0m" >&2
+}
+print_red() {
+    echo -e "\033[31m$1\033[0m" >&2
+}
 
 # ===== 目录设置 =====
 # 自动检测操作系统，适配Windows和Linux环境
@@ -47,12 +54,12 @@ PHP_VERSION=8.3
 # ===== 基础函数 =====
 generate_password() {
     local length=${1:-32}
-    # 兼容Windows和Linux的密码生成
+    # 简化密码生成逻辑，避免特殊字符导致的语法问题
     if command -v openssl &> /dev/null; then
-        openssl rand -base64 48 | tr -dc 'A-Za-z0-9!@#$%^&*()_+=' | head -c "$length"
+        openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c "$length"
     else
-        # 备用方法
-        echo "$RANDOM$RANDOM$RANDOM$RANDOM$RANDOM$RANDOM" | tr -dc 'A-Za-z0-9!@#$%^&*()_+=' | head -c "$length"
+        # 备用方法，只使用字母和数字
+        echo "$RANDOM$RANDOM$RANDOM$RANDOM$RANDOM$RANDOM" | tr -dc 'A-Za-z0-9' | head -c "$length"
     fi
 }
 
