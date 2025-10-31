@@ -29,8 +29,8 @@ print_red() {
 
 # ===== 目录设置 =====
 # 自动检测操作系统，适配Windows和Linux环境
-# 使用更可靠的方法检测Windows环境
-if [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "win32"* ]] || [[ "$(uname -a)" == *"CYGWIN"* ]] || [[ "$(uname -a)" == *"MINGW"* ]]; then
+# 使用ash shell兼容的语法检测Windows环境
+if [ "x${OSTYPE}" = "xmsys"* ] || [ "x${OSTYPE}" = "xwin32"* ] || echo "$(uname -a)" | grep -q "CYGWIN" || echo "$(uname -a)" | grep -q "MINGW"; then
     # Windows环境
     DEPLOY_DIR="$(pwd)"
     print_green "Windows环境检测成功，使用当前目录: ${DEPLOY_DIR}"
@@ -98,7 +98,7 @@ generate_env_file() {
 
     CPU_CORES=$(nproc 2>/dev/null || echo 1)
     # 在Windows环境下，使用更可靠的内存检测方法
-    if [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "win32"* ]] || [[ "$(uname -a)" == *"CYGWIN"* ]] || [[ "$(uname -a)" == *"MINGW"* ]]; then
+    if [ "x${OSTYPE}" = "xmsys"* ] || [ "x${OSTYPE}" = "xwin32"* ] || echo "$(uname -a)" | grep -q "CYGWIN" || echo "$(uname -a)" | grep -q "MINGW"; then
         # Windows环境默认值，确保足够大
         AVAILABLE_RAM=2048
     else
@@ -175,13 +175,13 @@ generate_env_decoded() {
     # 逐行处理原始env文件
     while IFS= read -r line; do
         # 跳过空行和注释
-        [[ -z "$line" || "$line" =~ ^# ]] && continue
+        [ -z "$line" ] || echo "$line" | grep -q "^#" && continue
         
         # 跳过MIRROR_PREFIX行，避免重复
-        [[ "$line" =~ ^MIRROR_PREFIX= ]] && continue
+        echo "$line" | grep -q "^MIRROR_PREFIX=" && continue
         
         # 为MEMORY_PER_SERVICE添加m单位（MB）
-        if [[ "$line" =~ ^MEMORY_PER_SERVICE= ]]; then
+        if echo "$line" | grep -q "^MEMORY_PER_SERVICE="; then
             # 提取数值部分
             local memory_value=$(echo "$line" | cut -d'=' -f2)
             # 添加m单位并写入
@@ -379,47 +379,24 @@ start_stack() {
         exit 1
     fi
     
-    # 网络连接重试机制
-    local MAX_RETRIES=3
-    local RETRY_COUNT=0
-    local SLEEP_TIME=5
-    local SUCCESS=false
+    # 网络连接重试机制 - 使用普通变量替代local变量以兼容ash shell
+    MAX_RETRIES=3
+    RETRY_COUNT=0
+    SLEEP_TIME=5
+    SUCCESS=false
     
     # 预先尝试拉取镜像，提高成功率
     print_yellow "🔄 预先拉取镜像..."
     
-    # 定义需要拉取的镜像列表（使用正确的Docker Hub镜像名称和标签）
-    local images=(
-        "${MIRROR_PREFIX}/wordpress-php:${PHP_VERSION}.26"
-        "mariadb:11.3"
-        "redis:7.4"
-        "${MIRROR_PREFIX}/wordpress-nginx:1.27.2"
-    )
+    # 定义需要拉取的镜像列表（使用ash shell兼容的方式）
+    # 逐个拉取镜像，避免使用数组语法
+    docker pull "${MIRROR_PREFIX}/wordpress-php:${PHP_VERSION}.26" || print_yellow "拉取PHP镜像失败，将继续尝试其他镜像"
+    docker pull "mariadb:11.3" || print_yellow "拉取MariaDB镜像失败，将继续尝试其他镜像"
+    docker pull "redis:7.4" || print_yellow "拉取Redis镜像失败，将继续尝试其他镜像"
+    docker pull "${MIRROR_PREFIX}/wordpress-nginx:1.27.2" || print_yellow "拉取Nginx镜像失败，将继续尝试其他镜像"
     
-    # 为每个镜像添加拉取重试机制
-    for image in "${images[@]}"; do
-        local pull_retries=3
-        local pull_success=false
-        local pull_sleep=3
-        
-        for ((i=1; i<=pull_retries; i++)); do
-            print_yellow "  拉取镜像 ${image} (尝试 ${i}/${pull_retries})..."
-            if docker pull "$image"; then
-                pull_success=true
-                break
-            else
-                print_yellow "  镜像拉取失败，${pull_sleep}秒后重试..."
-                sleep "$pull_sleep"
-                pull_sleep=$((pull_sleep * 2))
-            fi
-        done
-        
-        if [ "$pull_success" = true ]; then
-            print_green "  ✅ 镜像 ${image} 拉取成功"
-        else
-            print_yellow "  ⚠️  镜像 ${image} 拉取失败，将在启动时尝试"
-        fi
-    done
+    # 镜像已直接拉取完成
+    print_green "✅ 镜像拉取阶段完成"
     
     # 添加网络超时设置
     export DOCKER_CLIENT_TIMEOUT=300
@@ -522,7 +499,7 @@ EOF
     chmod +x "${SCRIPTS_DIR}/disk_monitor.sh"
     
     # 设置定时任务（如果在Linux环境）
-    if [[ "$OSTYPE" != "msys"* ]] && [[ "$OSTYPE" != "win32"* ]] && [[ "$(uname -a)" != *"CYGWIN"* ]] && [[ "$(uname -a)" != *"MINGW"* ]]; then
+    if ! ([ "x${OSTYPE}" = "xmsys"* ] || [ "x${OSTYPE}" = "xwin32"* ] || echo "$(uname -a)" | grep -q "CYGWIN" || echo "$(uname -a)" | grep -q "MINGW"); then
         # 检查crontab是否存在
         if command -v crontab >/dev/null 2>&1; then
             # 备份当前crontab
