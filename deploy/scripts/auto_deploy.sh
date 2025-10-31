@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # ==================================================
 # auto_deploy_production.sh
 # WordPress Docker 全栈最终正式版部署脚本（v2025.10.30）
@@ -566,20 +566,21 @@ display_info() {
 detect_os_and_optimize() {
     print_blue "检测系统配置..."
     
-    if [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "win32"* ]] || [[ "$(uname -a)" == *"CYGWIN"* ]] || [[ "$(uname -a)" == *"MINGW"* ]]; then
+    # 使用更兼容的if语句格式
+    if [ "$OSTYPE" = "msys"* ] || [ "$OSTYPE" = "win32"* ] || echo "$(uname -a)" | grep -q "CYGWIN" || echo "$(uname -a)" | grep -q "MINGW"; then
         print_yellow "Windows环境，使用基础配置"
         return
     fi
     
     # Linux环境检测
     if [ -f "/etc/os-release" ]; then
-        source /etc/os-release
+        . /etc/os-release # 使用.代替source，更兼容
         OS_NAME="$ID"
         OS_VERSION="$VERSION_ID"
         
         print_green "检测到操作系统: $OS_NAME $OS_VERSION"
         
-        # 根据不同Linux发行版进行优化
+        # 根据不同Linux发行版进行优化 - 使用Alpine兼容的case语法
         case "$OS_NAME" in
             ubuntu|debian)
                 print_yellow "Ubuntu/Debian环境，应用apt优化"
@@ -601,6 +602,10 @@ detect_os_and_optimize() {
                 ;;
             alpine)
                 print_yellow "Alpine环境，应用apk优化"
+                # 针对Alpine环境的特殊优化
+                if command -v apk >/dev/null 2>&1; then
+                    print_green "Alpine包管理器可用"
+                fi
                 ;;
             *)
                 print_yellow "未知Linux发行版，使用通用配置"
