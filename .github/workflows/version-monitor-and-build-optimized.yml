@@ -388,7 +388,13 @@ jobs:
   # 并行构建：构建基础镜像
   build-base-image:
     needs: version-check
-    if: needs.version-check.outputs.base_need_rebuild == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.force_rebuild == 'true' && (github.event.inputs.rebuild_target == 'all' || github.event.inputs.rebuild_target == 'base'))
+    if: |
+      needs.version-check.outputs.base_need_rebuild == 'true' || 
+      (github.event_name == 'workflow_dispatch' && 
+       ((github.event.inputs.force_rebuild == 'true' && 
+         (github.event.inputs.rebuild_target == 'all' || github.event.inputs.rebuild_target == 'base')) ||
+        github.event.inputs.rebuild_target == 'php' ||
+        github.event.inputs.rebuild_target == 'nginx'))
     runs-on: ubuntu-latest
     outputs:
       success: 'true'
@@ -424,13 +430,16 @@ jobs:
           fi
           
           if [ -z "$ALPINE_VERSION" ]; then
-            echo "::error::Alpine版本未获取，请检查version-check作业"
-            exit 1
+            # 如果没有获取到版本，使用默认值
+            echo "警告: 未获取到Alpine版本，使用默认值3.19"
+            ALPINE_VERSION="3.19"
           fi
           
           # 生成时间戳确保标签唯一性
           TIMESTAMP=$(date +'%Y%m%d%H%M%S')
           BASE_IMAGE_NAME="$DOCKERHUB_USERNAME/wordpress-base:$ALPINE_VERSION-$TIMESTAMP"
+          
+          echo "准备构建基础镜像: $BASE_IMAGE_NAME"
           
           # 构建基础镜像
           docker buildx build --platform linux/amd64,linux/arm64 \
