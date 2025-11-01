@@ -28,25 +28,32 @@ print_red() {
 }
 
 # ===== 目录设置 =====
-# 自动检测操作系统，适配Windows和Linux环境
-# 使用ash shell兼容的语法检测Windows环境
-if [ "x${OSTYPE}" = "xmsys"* ] || [ "x${OSTYPE}" = "xwin32"* ] || echo "$(uname -a)" | grep -q "CYGWIN" || echo "$(uname -a)" | grep -q "MINGW"; then
-    # Windows环境
-    DEPLOY_DIR="$(pwd)"
-    print_green "Windows环境检测成功，使用当前目录: ${DEPLOY_DIR}"
-else
-    # Linux环境
-    # 提供交互式目录名称设置
+# 统一使用当前目录作为基础目录，确保脚本在任何位置运行都能正确工作
+BASE_DIR="$(pwd)"
+
+# 提供交互式子目录选择，允许用户选择在当前目录下创建子目录或直接使用当前目录
+print_yellow "请选择部署方式："
+print_yellow "1. 在当前目录直接部署"
+print_yellow "2. 在当前目录下创建子目录部署"
+read -p "请选择 [1]: " DEPLOY_CHOICE
+DEPLOY_CHOICE=${DEPLOY_CHOICE:-1}
+
+if [ "$DEPLOY_CHOICE" = "2" ]; then
     DEFAULT_PROJECT_DIR="wp-docker"
-    read -p "请输入项目子目录名称 [${DEFAULT_PROJECT_DIR}]: " PROJECT_DIR
+    read -p "请输入子目录名称 [${DEFAULT_PROJECT_DIR}]: " PROJECT_DIR
     PROJECT_DIR=${PROJECT_DIR:-$DEFAULT_PROJECT_DIR}
-    
-    # 设置完整部署目录路径
-    DEPLOY_DIR="/opt/${PROJECT_DIR}"
-    print_green "Linux环境检测成功，使用目录: ${DEPLOY_DIR}"
+    DEPLOY_DIR="${BASE_DIR}/${PROJECT_DIR}"
+    print_green "将在子目录中部署: ${DEPLOY_DIR}"
     
     # 创建部署目录（如果不存在）
     mkdir -p "${DEPLOY_DIR}"
+    
+    # 切换到部署目录
+    cd "${DEPLOY_DIR}" || { print_red "无法切换到部署目录"; exit 1; }
+    DEPLOY_DIR="$(pwd)"  # 更新为绝对路径
+else
+    DEPLOY_DIR="${BASE_DIR}"
+    print_green "将在当前目录直接部署: ${DEPLOY_DIR}"
 fi
 ENV_FILE="${DEPLOY_DIR}/.env"
 ENV_DECODED="${DEPLOY_DIR}/.env.decoded"
