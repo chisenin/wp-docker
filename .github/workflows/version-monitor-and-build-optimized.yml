@@ -10,13 +10,32 @@ on:
   schedule:
     - cron: '0 0 * * 1'  # 每周一00:00 UTC运行
   workflow_dispatch:
-    # 允许手动触发，用于测试
+    # 允许手动触发，用于测试所有功能
     inputs:
       test_mode:
         description: '测试模式（true/false）'
         required: true
         default: 'false'
         type: string
+      force_rebuild:
+        description: '强制重构所有镜像（即使没有版本更新）'
+        required: false
+        default: 'false'
+        type: boolean
+      rebuild_target:
+        description: '指定重构目标（all/base/php/nginx）'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - base
+          - php
+          - nginx
+      publish_release:
+        description: '是否发布GitHub Release（测试模式下默认为false）'
+        required: false
+        type: boolean
 
 permissions:
   contents: write
@@ -56,7 +75,7 @@ jobs:
   # 快速发布 - 仅更新脚本
   quick-script-release:
     needs: detect-changes
-    if: needs.detect-changes.outputs.only_script_changed == 'true'
+    if: needs.detect-changes.outputs.only_script_changed == 'true' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
@@ -170,7 +189,7 @@ jobs:
   # 阶段2：检查版本并确定重构策略
   version-check:
     needs: setup
-    if: always() && needs.setup.result == 'success'
+    if: always() && (needs.setup.result == 'success' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     outputs:
       need_rebuild: ${{ steps.check-versions.outputs.need_rebuild }}
@@ -194,6 +213,11 @@ jobs:
         run: |
           echo "::group::版本检查与兼容性验证"
           
+          # 处理手动触发参数
+          FORCE_REBUILD=${{ github.event.inputs.force_rebuild || 'false' }}
+          REBUILD_TARGET=${{ github.event.inputs.rebuild_target || 'all' }}
+          echo "手动触发参数 - force_rebuild: $FORCE_REBUILD, rebuild_target: $REBUILD_TARGET"
+          
           # 创建版本文件目录（如果不存在）
           mkdir -p build/Dockerfiles/php
           mkdir -p build/Dockerfiles/nginx
@@ -209,11 +233,12 @@ jobs:
           CURRENT_ALPINE=$(cat build/Dockerfiles/base/alpine_version.txt 2>/dev/null || echo "0.0")
           
           # 获取最新版本
-          LATEST_PHP=${{ needs.setup.outputs.php_versions }}
-          LATEST_NGINX=${{ needs.setup.outputs.nginx_versions }}
-          LATEST_MARIADB=${{ needs.setup.outputs.mariadb_versions }}
-          LATEST_REDIS=${{ needs.setup.outputs.redis_versions }}
-          LATEST_ALPINE=${{ needs.setup.outputs.alpine_latest }}
+          # 手动触发时可能没有setup输出，使用默认值
+          LATEST_PHP=${{ needs.setup.outputs.php_versions || '8.3' }}
+          LATEST_NGINX=${{ needs.setup.outputs.nginx_versions || '1.25' }}
+          LATEST_MARIADB=${{ needs.setup.outputs.mariadb_versions || '11.2' }}
+          LATEST_REDIS=${{ needs.setup.outputs.redis_versions || '7.0' }}
+          LATEST_ALPINE=${{ needs.setup.outputs.alpine_latest || '3.19' }}
           
           echo "当前版本 - PHP: $CURRENT_PHP, Nginx: $CURRENT_NGINX, MariaDB: $CURRENT_MARIADB, Redis: $CURRENT_REDIS, Alpine: $CURRENT_ALPINE"
           echo "最新版本 - PHP: $LATEST_PHP, Nginx: $LATEST_NGINX, MariaDB: $LATEST_MARIADB, Redis: $LATEST_REDIS, Alpine: $LATEST_ALPINE"
@@ -227,44 +252,87 @@ jobs:
           NGINX_NEED_REBUILD=false
           BASE_NEED_REBUILD=false
           
-          # 检查基础OS版本
-          if [[ "$CURRENT_ALPINE" != "$LATEST_ALPINE" ]]; then
-            echo "Alpine版本不匹配，需要重构基础镜像和所有模块"
+          # 如果是手动触发且强制重构
+          if [[ "$FORCE_REBUILD" == "true" ]]; then
+            echo "手动触发强制重构"
             NEED_REBUILD=true
-            REBUILD_TYPE="base"
-            MODULES_TO_REBUILD="base php nginx"
-            BASE_NEED_REBUILD=true
-            PHP_NEED_REBUILD=true
-            NGINX_NEED_REBUILD=true
+            
+            # 根据目标确定重构类型
+            case "$REBUILD_TARGET" in
+              "all")
+                REBUILD_TYPE="base"
+                MODULES_TO_REBUILD="base php nginx"
+                BASE_NEED_REBUILD=true
+                PHP_NEED_REBUILD=true
+                NGINX_NEED_REBUILD=true
+                ;;
+              "base")
+                REBUILD_TYPE="base"
+                MODULES_TO_REBUILD="base php nginx"
+                BASE_NEED_REBUILD=true
+                PHP_NEED_REBUILD=true
+                NGINX_NEED_REBUILD=true
+                ;;
+              "php")
+                REBUILD_TYPE="modules"
+                MODULES_TO_REBUILD="php"
+                PHP_NEED_REBUILD=true
+                ;;
+              "nginx")
+                REBUILD_TYPE="modules"
+                MODULES_TO_REBUILD="nginx"
+                NGINX_NEED_REBUILD=true
+                ;;
+              *)
+                echo "无效的重构目标，默认为全部"
+                REBUILD_TYPE="base"
+                MODULES_TO_REBUILD="base php nginx"
+                BASE_NEED_REBUILD=true
+                PHP_NEED_REBUILD=true
+                NGINX_NEED_REBUILD=true
+                ;;
+            esac
           else
-            # 检查各模块版本
-            MODULES_TO_REBUILD=""
-          
-            if [[ "$CURRENT_PHP" != "$LATEST_PHP" ]]; then
-              MODULES_TO_REBUILD="${MODULES_TO_REBUILD} php"
+            # 正常版本检查逻辑
+            # 检查基础OS版本
+            if [[ "$CURRENT_ALPINE" != "$LATEST_ALPINE" ]]; then
+              echo "Alpine版本不匹配，需要重构基础镜像和所有模块"
+              NEED_REBUILD=true
+              REBUILD_TYPE="base"
+              MODULES_TO_REBUILD="base php nginx"
+              BASE_NEED_REBUILD=true
               PHP_NEED_REBUILD=true
-            fi
-          
-            if [[ "$CURRENT_NGINX" != "$LATEST_NGINX" ]]; then
-              MODULES_TO_REBUILD="${MODULES_TO_REBUILD} nginx"
               NGINX_NEED_REBUILD=true
-            fi
+            else
+              # 检查各模块版本
+              MODULES_TO_REBUILD=""
+            
+              if [[ "$CURRENT_PHP" != "$LATEST_PHP" ]]; then
+                MODULES_TO_REBUILD="${MODULES_TO_REBUILD} php"
+                PHP_NEED_REBUILD=true
+              fi
+            
+              if [[ "$CURRENT_NGINX" != "$LATEST_NGINX" ]]; then
+                MODULES_TO_REBUILD="${MODULES_TO_REBUILD} nginx"
+                NGINX_NEED_REBUILD=true
+              fi
           
             # 注意：MariaDB和Redis已切换为使用官方镜像，不再构建自定义镜像
-            # 保存版本信息用于后续引用
-            echo "$LATEST_MARIADB" > build/Dockerfiles/mariadb/mariadb_version.txt
-            echo "$LATEST_REDIS" > build/Dockerfiles/redis/redis_version.txt
-            
-            # 去除前后空格
-            MODULES_TO_REBUILD=$(echo "$MODULES_TO_REBUILD" | xargs)
-            
-            if [[ -n "$MODULES_TO_REBUILD" ]]; then
-              echo "检测到模块版本更新，需要重构: $MODULES_TO_REBUILD"
-              NEED_REBUILD=true
-              REBUILD_TYPE="modules"
-            else
-              echo "所有模块版本已是最新，使用官方镜像"
-              USE_OFFICIAL=true
+              # 保存版本信息用于后续引用
+              echo "$LATEST_MARIADB" > build/Dockerfiles/mariadb/mariadb_version.txt
+              echo "$LATEST_REDIS" > build/Dockerfiles/redis/redis_version.txt
+              
+              # 去除前后空格
+              MODULES_TO_REBUILD=$(echo "$MODULES_TO_REBUILD" | xargs)
+              
+              if [[ -n "$MODULES_TO_REBUILD" ]]; then
+                echo "检测到模块版本更新，需要重构: $MODULES_TO_REBUILD"
+                NEED_REBUILD=true
+                REBUILD_TYPE="modules"
+              else
+                echo "所有模块版本已是最新，使用官方镜像"
+                USE_OFFICIAL=true
+              fi
             fi
           fi
           
@@ -549,7 +617,8 @@ jobs:
       always() && 
       (needs.version-check.outputs.use_official == 'true' || 
        (needs.test-php-image.result == 'success' || needs.test-php-image.result == 'skipped') && 
-       (needs.test-nginx-image.result == 'success' || needs.test-nginx-image.result == 'skipped'))
+       (needs.test-nginx-image.result == 'success' || needs.test-nginx-image.result == 'skipped')) &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.publish_release == 'true')
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
