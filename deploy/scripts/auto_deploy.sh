@@ -368,8 +368,9 @@ volumes:
   redis:
 YAML
     
-    # 跳过MIRROR_PLACEHOLDER的替换，因为已经在镜像选择逻辑中处理
-    # 但仍然需要替换PHP_VERSION_PLACEHOLDER
+    # 替换镜像占位符
+    sed -i "s/MIRROR_PLACEHOLDER/${MAIN_MIRROR_PREFIX}/g" "${COMPOSE_FILE}"
+    # 替换PHP版本占位符
     sed -i "s/PHP_VERSION_PLACEHOLDER/${PHP_VERSION}/g" "${COMPOSE_FILE}"
     
     print_green "已生成 ${COMPOSE_FILE}"
@@ -420,9 +421,7 @@ start_stack() {
         docker pull "${MAIN_MIRROR_PREFIX}/wordpress-php:${PHP_VERSION}.26" || print_yellow "拉取Main分支PHP镜像失败，将尝试官方镜像"
         docker pull "${MAIN_MIRROR_PREFIX}/wordpress-nginx:1.27.2" || print_yellow "拉取Main分支Nginx镜像失败，将尝试官方镜像"
         
-        # 使用Main分支镜像更新docker-compose.yml
-        sed -i "s|MIRROR_PLACEHOLDER/wordpress-php:PHP_VERSION_PLACEHOLDER.26|${MAIN_MIRROR_PREFIX}/wordpress-php:${PHP_VERSION}.26|g" "${COMPOSE_FILE}"
-        sed -i "s|MIRROR_PLACEHOLDER/wordpress-nginx:1.27.2|${MAIN_MIRROR_PREFIX}/wordpress-nginx:1.27.2|g" "${COMPOSE_FILE}"
+        # 镜像已在生成docker-compose.yml时更新
     else
         # 拉取官方镜像
         print_yellow "📥 拉取官方镜像..."
@@ -430,8 +429,8 @@ start_stack() {
         docker pull "${OFFICIAL_NGINX_IMAGE}:1.27" || print_yellow "拉取官方Nginx镜像失败，将尝试Main分支镜像"
         
         # 使用官方镜像更新docker-compose.yml
-        sed -i "s|MIRROR_PLACEHOLDER/wordpress-php:PHP_VERSION_PLACEHOLDER.26|${OFFICIAL_PHP_IMAGE}:${PHP_VERSION}-fpm|g" "${COMPOSE_FILE}"
-        sed -i "s|MIRROR_PLACEHOLDER/wordpress-nginx:1.27.2|${OFFICIAL_NGINX_IMAGE}:1.27|g" "${COMPOSE_FILE}"
+        sed -i "s|${MAIN_MIRROR_PREFIX}/wordpress-php:${PHP_VERSION}.26|${OFFICIAL_PHP_IMAGE}:${PHP_VERSION}-fpm|g" "${COMPOSE_FILE}"
+        sed -i "s|${MAIN_MIRROR_PREFIX}/wordpress-nginx:1.27.2|${OFFICIAL_NGINX_IMAGE}:1.27|g" "${COMPOSE_FILE}"
     fi
     
     # 拉取数据库相关镜像（这些通常是官方的）
