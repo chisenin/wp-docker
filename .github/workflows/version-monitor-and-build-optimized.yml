@@ -127,10 +127,10 @@ jobs:
           echo "::group::发送脚本更新通知"
           echo "auto_deploy.sh脚本已更新并发布成功"
 
-  # 阶段1：初始化和准备（仅在代码变更时执行）
+  # 阶段1：初始化和准备
   setup:
     needs: detect-changes
-    if: needs.detect-changes.outputs.code_changed == 'true'
+    if: needs.detect-changes.outputs.code_changed == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       alpine_latest: ${{ steps.get-alpine-version.outputs.latest }}
@@ -388,7 +388,7 @@ jobs:
   # 并行构建：构建基础镜像
   build-base-image:
     needs: version-check
-    if: needs.version-check.outputs.base_need_rebuild == 'true'
+    if: needs.version-check.outputs.base_need_rebuild == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.force_rebuild == 'true' && (github.event.inputs.rebuild_target == 'all' || github.event.inputs.rebuild_target == 'base'))
     runs-on: ubuntu-latest
     outputs:
       success: 'true'
@@ -437,7 +437,7 @@ jobs:
   # 并行构建：构建PHP镜像
   build-php-image:
     needs: [version-check, build-base-image]
-    if: needs.version-check.outputs.php_need_rebuild == 'true'
+    if: needs.version-check.outputs.php_need_rebuild == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.force_rebuild == 'true' && (github.event.inputs.rebuild_target == 'all' || github.event.inputs.rebuild_target == 'php'))
     runs-on: ubuntu-latest
     outputs:
       success: 'true'
@@ -496,7 +496,7 @@ jobs:
   # 并行构建：构建Nginx镜像
   build-nginx-image:
     needs: [version-check, build-base-image]
-    if: needs.version-check.outputs.nginx_need_rebuild == 'true'
+    if: needs.version-check.outputs.nginx_need_rebuild == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.force_rebuild == 'true' && (github.event.inputs.rebuild_target == 'all' || github.event.inputs.rebuild_target == 'nginx'))
     runs-on: ubuntu-latest
     outputs:
       success: 'true'
@@ -697,7 +697,7 @@ jobs:
           echo "版本哈希已生成并保存: $VERSION_HASH"
       
       - name: 创建GitHub Release
-        if: steps.get-test-mode.outputs.test_mode == 'false'
+        if: steps.get-test-mode.outputs.test_mode == 'false' && github.event_name != 'workflow_dispatch'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ env.TODAY }}
@@ -722,21 +722,26 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: 创建测试Release
-        if: steps.get-test-mode.outputs.test_mode == 'true'
+        if: steps.get-test-mode.outputs.test_mode == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true')
         uses: softprops/action-gh-release@v1
         with:
           tag_name: test-v${{ env.TIMESTAMP }}
-          name: Test Release ${{ env.TIMESTAMP_FULL }}
+          name: 测试版本 ${{ env.TIMESTAMP_FULL }}
           body: |
-            测试版本
+            **测试版本 - 手动触发构建**
             - PHP: ${{ env.PHP_VERSION }}
             - Nginx: ${{ env.NGINX_VERSION }}
             - MariaDB: ${{ env.MARIADB_VERSION }}
             - Redis: ${{ env.REDIS_VERSION }}
             
+            ## 构建信息
+            - 构建时间: ${{ env.TIMESTAMP_FULL }}
+            - 提交哈希: ${{ github.sha }}
+            - 测试模式: ${{ steps.get-test-mode.outputs.test_mode }}
+            
             ## 版本哈希（用于验证完整性）
             ${{ env.VERSION_HASH }}
-          draft: true
+          draft: false
           prerelease: true
           files: |
             /tmp/version-hash.txt
