@@ -396,8 +396,8 @@ jobs:
         run: |
           echo "::group::构建PHP镜像"
           PHP_VERSION=${{ needs.version-check.outputs.php_version }}
-          ALPINE_VERSION=${{ needs.version-check.outputs.alpine_version }}
-          BASE_IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:$ALPINE_VERSION"
+          # 使用带时间戳的基础镜像
+          BASE_IMAGE="${{ needs.build-base-image.outputs.image_name }}"
           PHP_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:$PHP_VERSION"
           
           # 确保基础镜像存在
@@ -455,8 +455,8 @@ jobs:
         run: |
           echo "::group::构建Nginx镜像"
           NGINX_VERSION=${{ needs.version-check.outputs.nginx_version }}
-          ALPINE_VERSION=${{ needs.version-check.outputs.alpine_version }}
-          BASE_IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:$ALPINE_VERSION"
+          # 使用带时间戳的基础镜像
+          BASE_IMAGE="${{ needs.build-base-image.outputs.image_name }}"
           NGINX_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:$NGINX_VERSION"
           
           # 确保基础镜像存在
