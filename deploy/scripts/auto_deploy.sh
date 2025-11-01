@@ -36,8 +36,17 @@ if [ "x${OSTYPE}" = "xmsys"* ] || [ "x${OSTYPE}" = "xwin32"* ] || echo "$(uname 
     print_green "Windows环境检测成功，使用当前目录: ${DEPLOY_DIR}"
 else
     # Linux环境
-    DEPLOY_DIR="/opt"
+    # 提供交互式目录名称设置
+    DEFAULT_PROJECT_DIR="wp-docker"
+    read -p "请输入项目子目录名称 [${DEFAULT_PROJECT_DIR}]: " PROJECT_DIR
+    PROJECT_DIR=${PROJECT_DIR:-$DEFAULT_PROJECT_DIR}
+    
+    # 设置完整部署目录路径
+    DEPLOY_DIR="/opt/${PROJECT_DIR}"
     print_green "Linux环境检测成功，使用目录: ${DEPLOY_DIR}"
+    
+    # 创建部署目录（如果不存在）
+    mkdir -p "${DEPLOY_DIR}"
 fi
 ENV_FILE="${DEPLOY_DIR}/.env"
 ENV_DECODED="${DEPLOY_DIR}/.env.decoded"
@@ -450,9 +459,11 @@ setup_auto_backup() {
     mkdir -p "${SCRIPTS_DIR}" "${BACKUP_DIR}"
     
     # 创建备份脚本
-    cat > "${SCRIPTS_DIR}/backup.sh" <<'EOF'
+    cat > "${SCRIPTS_DIR}/backup.sh" <<EOF
 #!/bin/bash
-BACKUP_DIR="/opt/backups"
+# 使用环境变量中的备份目录路径
+BACKUP_DIR="${BACKUP_DIR}"
+DEPLOY_DIR="${DEPLOY_DIR}"
 TIMESTAMP=$(date +%F_%H-%M-%S)
 mkdir -p "$BACKUP_DIR"
 
@@ -460,7 +471,7 @@ mkdir -p "$BACKUP_DIR"
 docker exec wp_db mariadb-dump -u root -p${MYSQL_ROOT_PASSWORD} wordpress > "$BACKUP_DIR/wordpress_db_$TIMESTAMP.sql"
 
 # 备份文件
-tar -czf "$BACKUP_DIR/wordpress_files_$TIMESTAMP.tar.gz" -C /opt html
+tar -czf "$BACKUP_DIR/wordpress_files_$TIMESTAMP.tar.gz" -C "$DEPLOY_DIR" html
 
 # 合并备份
 tar -czf "$BACKUP_DIR/wordpress_backup_$TIMESTAMP.tar.gz" -C "$BACKUP_DIR" "wordpress_db_$TIMESTAMP.sql" "wordpress_files_$TIMESTAMP.tar.gz"
