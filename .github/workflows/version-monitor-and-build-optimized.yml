@@ -415,11 +415,22 @@ jobs:
         run: |
           echo "::group::构建基础镜像"
           ALPINE_VERSION=${{ needs.version-check.outputs.alpine_version }}
-          BASE_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:$ALPINE_VERSION"
+          DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+          
+          # 检查必要变量是否存在
+          if [ -z "$DOCKERHUB_USERNAME" ]; then
+            echo "::error::Docker Hub用户名未设置，请检查secrets配置"
+            exit 1
+          fi
+          
+          if [ -z "$ALPINE_VERSION" ]; then
+            echo "::error::Alpine版本未获取，请检查version-check作业"
+            exit 1
+          fi
           
           # 生成时间戳确保标签唯一性
           TIMESTAMP=$(date +'%Y%m%d%H%M%S')
-          BASE_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/wordpress-base:$ALPINE_VERSION-$TIMESTAMP"
+          BASE_IMAGE_NAME="$DOCKERHUB_USERNAME/wordpress-base:$ALPINE_VERSION-$TIMESTAMP"
           
           # 构建基础镜像
           docker buildx build --platform linux/amd64,linux/arm64 \
@@ -437,7 +448,12 @@ jobs:
   # 并行构建：构建PHP镜像
   build-php-image:
     needs: [version-check, build-base-image]
-    if: needs.version-check.outputs.php_need_rebuild == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.force_rebuild == 'true' && (github.event.inputs.rebuild_target == 'all' || github.event.inputs.rebuild_target == 'php'))
+    if: |
+      always() && 
+      needs.build-base-image.result == 'success' &&
+      (needs.version-check.outputs.php_need_rebuild == 'true' || 
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.force_rebuild == 'true' && 
+        (github.event.inputs.rebuild_target == 'all' || github.event.inputs.rebuild_target == 'php')))
     runs-on: ubuntu-latest
     outputs:
       success: 'true'
@@ -466,12 +482,18 @@ jobs:
           PHP_VERSION=${{ needs.version-check.outputs.php_version }}
           # 使用带时间戳的基础镜像
           BASE_IMAGE="${{ needs.build-base-image.outputs.image_name }}"
-          PHP_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/wordpress-php:$PHP_VERSION"
+          DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+          
+          # 检查基础镜像变量是否存在
+          if [ -z "$BASE_IMAGE" ]; then
+            echo "::error::基础镜像名称为空，请检查build-base-image作业的输出"
+            exit 1
+          fi
           
           # 确保基础镜像存在
           echo "拉取基础镜像: $BASE_IMAGE"
           docker pull $BASE_IMAGE || {
-            echo "::error::无法拉取基础镜像，请先构建基础镜像"
+            echo "::error::无法拉取基础镜像: $BASE_IMAGE，请确保基础镜像构建成功"
             exit 1
           }
           
@@ -496,7 +518,12 @@ jobs:
   # 并行构建：构建Nginx镜像
   build-nginx-image:
     needs: [version-check, build-base-image]
-    if: needs.version-check.outputs.nginx_need_rebuild == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.force_rebuild == 'true' && (github.event.inputs.rebuild_target == 'all' || github.event.inputs.rebuild_target == 'nginx'))
+    if: |
+      always() && 
+      needs.build-base-image.result == 'success' &&
+      (needs.version-check.outputs.nginx_need_rebuild == 'true' || 
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.force_rebuild == 'true' && 
+        (github.event.inputs.rebuild_target == 'all' || github.event.inputs.rebuild_target == 'nginx')))
     runs-on: ubuntu-latest
     outputs:
       success: 'true'
@@ -525,12 +552,18 @@ jobs:
           NGINX_VERSION=${{ needs.version-check.outputs.nginx_version }}
           # 使用带时间戳的基础镜像
           BASE_IMAGE="${{ needs.build-base-image.outputs.image_name }}"
-          NGINX_IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/wordpress-nginx:$NGINX_VERSION"
+          DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+          
+          # 检查基础镜像变量是否存在
+          if [ -z "$BASE_IMAGE" ]; then
+            echo "::error::基础镜像名称为空，请检查build-base-image作业的输出"
+            exit 1
+          fi
           
           # 确保基础镜像存在
           echo "拉取基础镜像: $BASE_IMAGE"
           docker pull $BASE_IMAGE || {
-            echo "::error::无法拉取基础镜像，请先构建基础镜像"
+            echo "::error::无法拉取基础镜像: $BASE_IMAGE，请确保基础镜像构建成功"
             exit 1
           }
           
