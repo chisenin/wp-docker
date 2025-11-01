@@ -310,7 +310,7 @@ services:
           memory: '${MEMORY_PER_SERVICE:-256m}'
 
   wordpress:
-    image: MIRROR_PLACEHOLDER/wordpress-php:PHP_VERSION_PLACEHOLDER.26
+    image: MIRROR_PLACEHOLDER/wordpress-php:PHP_VERSION_PLACEHOLDER-latest
     restart: unless-stopped
     depends_on:
       mariadb:
