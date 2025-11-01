@@ -397,13 +397,25 @@ jobs:
         github.event.inputs.rebuild_target == 'nginx'))
     runs-on: ubuntu-latest
     outputs:
-      success: 'true'
-      image_name: ${{ steps.build-base.outputs.image_name }}
+      success: ${{ steps.set-outputs.outputs.success }}
+      image_name: ${{ steps.set-outputs.outputs.image_name }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 预先设置默认输出变量
+        id: set-outputs
+        run: |
+          # 即使在作业早期就设置默认的输出变量
+          DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME || 'default' }}
+          ALPINE_VERSION=${{ needs.version-check.outputs.alpine_version || '3.19' }}
+          TIMESTAMP=$(date +'%Y%m%d%H%M%S')
+          DEFAULT_IMAGE_NAME="$DOCKERHUB_USERNAME/wordpress-base:$ALPINE_VERSION-$TIMESTAMP"
+          echo "image_name=$DEFAULT_IMAGE_NAME" >> $GITHUB_OUTPUT
+          echo "success=false" >> $GITHUB_OUTPUT
+          echo "默认基础镜像名称: $DEFAULT_IMAGE_NAME"
 
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -439,7 +451,7 @@ jobs:
           TIMESTAMP=$(date +'%Y%m%d%H%M%S')
           BASE_IMAGE_NAME="$DOCKERHUB_USERNAME/wordpress-base:$ALPINE_VERSION-$TIMESTAMP"
           
-          # 提前设置输出变量，确保即使构建失败也能传递给后续作业
+          # 更新输出变量
           echo "image_name=$BASE_IMAGE_NAME" >> $GITHUB_OUTPUT
           echo "准备构建基础镜像: $BASE_IMAGE_NAME"
           
@@ -453,14 +465,14 @@ jobs:
               exit 1
             }
           
+          # 构建成功后更新success状态
+          echo "success=true" >> $GITHUB_OUTPUT
           echo "基础镜像构建成功: $BASE_IMAGE_NAME"
 
   # 并行构建：构建PHP镜像
   build-php-image:
     needs: [version-check, build-base-image]
     if: |
-      always() && 
-      needs.build-base-image.result == 'success' &&
       (needs.version-check.outputs.php_need_rebuild == 'true' || 
        (github.event_name == 'workflow_dispatch' && github.event.inputs.force_rebuild == 'true' && 
         (github.event.inputs.rebuild_target == 'all' || github.event.inputs.rebuild_target == 'php')))
@@ -532,8 +544,6 @@ jobs:
   build-nginx-image:
     needs: [version-check, build-base-image]
     if: |
-      always() && 
-      needs.build-base-image.result == 'success' &&
       (needs.version-check.outputs.nginx_need_rebuild == 'true' || 
        (github.event_name == 'workflow_dispatch' && github.event.inputs.force_rebuild == 'true' && 
         (github.event.inputs.rebuild_target == 'all' || github.event.inputs.rebuild_target == 'nginx')))
