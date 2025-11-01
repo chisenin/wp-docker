@@ -63,7 +63,11 @@ SCRIPTS_DIR="${DEPLOY_DIR}/scripts"
 
 # ===== 全局变量 =====
 # 镜像前缀，使用实际的Docker Hub用户名
-MIRROR_PREFIX=chisenin
+MAIN_MIRROR_PREFIX=chisenin  # main分支重构的镜像前缀
+OFFICIAL_PHP_IMAGE=php  # 官方PHP镜像名称
+OFFICIAL_NGINX_IMAGE=nginx  # 官方Nginx镜像名称
+MIRROR_PREFIX=${MAIN_MIRROR_PREFIX}  # 默认使用main分支镜像
+USE_MAIN_BRANCH=true  # 默认使用main分支镜像
 # PHP版本，确保在镜像拉取时已定义
 PHP_VERSION=8.3
 
@@ -186,15 +190,20 @@ generate_env_decoded() {
     > "${ENV_DECODED}" || true
     
     # 首先添加MIRROR_PREFIX变量，确保Docker Compose能读取到
-    echo "MIRROR_PREFIX=${MIRROR_PREFIX}" >> "${ENV_DECODED}"
+    # 添加镜像相关环境变量
+echo "MIRROR_PREFIX=${MIRROR_PREFIX}" >> "${ENV_DECODED}"
+echo "USE_MAIN_BRANCH=${USE_MAIN_BRANCH}" >> "${ENV_DECODED}"
+echo "MAIN_MIRROR_PREFIX=${MAIN_MIRROR_PREFIX}" >> "${ENV_DECODED}"
+echo "OFFICIAL_PHP_IMAGE=${OFFICIAL_PHP_IMAGE}" >> "${ENV_DECODED}"
+echo "OFFICIAL_NGINX_IMAGE=${OFFICIAL_NGINX_IMAGE}" >> "${ENV_DECODED}"
     
     # 逐行处理原始env文件
     while IFS= read -r line; do
         # 跳过空行和注释
         [ -z "$line" ] || echo "$line" | grep -q "^#" && continue
         
-        # 跳过MIRROR_PREFIX行，避免重复
-        echo "$line" | grep -q "^MIRROR_PREFIX=" && continue
+        # 跳过环境变量行，避免重复
+        echo "$line" | grep -q "^\(MIRROR_PREFIX\|USE_MAIN_BRANCH\|MAIN_MIRROR_PREFIX\|OFFICIAL_PHP_IMAGE\|OFFICIAL_NGINX_IMAGE\)=" && continue
         
         # 为MEMORY_PER_SERVICE添加m单位（MB）
         if echo "$line" | grep -q "^MEMORY_PER_SERVICE="; then
@@ -359,8 +368,8 @@ volumes:
   redis:
 YAML
     
-    # 使用sed命令替换占位符为实际值
-    sed -i "s/MIRROR_PLACEHOLDER/${MIRROR_PREFIX}/g" "${COMPOSE_FILE}"
+    # 跳过MIRROR_PLACEHOLDER的替换，因为已经在镜像选择逻辑中处理
+    # 但仍然需要替换PHP_VERSION_PLACEHOLDER
     sed -i "s/PHP_VERSION_PLACEHOLDER/${PHP_VERSION}/g" "${COMPOSE_FILE}"
     
     print_green "已生成 ${COMPOSE_FILE}"
@@ -404,12 +413,30 @@ start_stack() {
     # 预先尝试拉取镜像，提高成功率
     print_yellow "🔄 预先拉取镜像..."
     
-    # 定义需要拉取的镜像列表（使用ash shell兼容的方式）
-    # 逐个拉取镜像，避免使用数组语法
-    docker pull "${MIRROR_PREFIX}/wordpress-php:${PHP_VERSION}.26" || print_yellow "拉取PHP镜像失败，将继续尝试其他镜像"
+    # 根据选择的镜像源拉取对应的镜像并更新docker-compose.yml中的镜像引用
+    if [ "$USE_MAIN_BRANCH" = true ]; then
+        # 拉取Main分支重构的镜像
+        print_yellow "📥 拉取Main分支重构镜像..."
+        docker pull "${MAIN_MIRROR_PREFIX}/wordpress-php:${PHP_VERSION}.26" || print_yellow "拉取Main分支PHP镜像失败，将尝试官方镜像"
+        docker pull "${MAIN_MIRROR_PREFIX}/wordpress-nginx:1.27.2" || print_yellow "拉取Main分支Nginx镜像失败，将尝试官方镜像"
+        
+        # 使用Main分支镜像更新docker-compose.yml
+        sed -i "s|MIRROR_PLACEHOLDER/wordpress-php:PHP_VERSION_PLACEHOLDER.26|${MAIN_MIRROR_PREFIX}/wordpress-php:${PHP_VERSION}.26|g" "${COMPOSE_FILE}"
+        sed -i "s|MIRROR_PLACEHOLDER/wordpress-nginx:1.27.2|${MAIN_MIRROR_PREFIX}/wordpress-nginx:1.27.2|g" "${COMPOSE_FILE}"
+    else
+        # 拉取官方镜像
+        print_yellow "📥 拉取官方镜像..."
+        docker pull "${OFFICIAL_PHP_IMAGE}:${PHP_VERSION}-fpm" || print_yellow "拉取官方PHP镜像失败，将尝试Main分支镜像"
+        docker pull "${OFFICIAL_NGINX_IMAGE}:1.27" || print_yellow "拉取官方Nginx镜像失败，将尝试Main分支镜像"
+        
+        # 使用官方镜像更新docker-compose.yml
+        sed -i "s|MIRROR_PLACEHOLDER/wordpress-php:PHP_VERSION_PLACEHOLDER.26|${OFFICIAL_PHP_IMAGE}:${PHP_VERSION}-fpm|g" "${COMPOSE_FILE}"
+        sed -i "s|MIRROR_PLACEHOLDER/wordpress-nginx:1.27.2|${OFFICIAL_NGINX_IMAGE}:1.27|g" "${COMPOSE_FILE}"
+    fi
+    
+    # 拉取数据库相关镜像（这些通常是官方的）
     docker pull "mariadb:11.3" || print_yellow "拉取MariaDB镜像失败，将继续尝试其他镜像"
     docker pull "redis:7.4" || print_yellow "拉取Redis镜像失败，将继续尝试其他镜像"
-    docker pull "${MIRROR_PREFIX}/wordpress-nginx:1.27.2" || print_yellow "拉取Nginx镜像失败，将继续尝试其他镜像"
     
     # 镜像已直接拉取完成
     print_green "✅ 镜像拉取阶段完成"
@@ -660,6 +687,33 @@ EOF
     print_green "操作系统适配和配置准备完成"
 }
 
+# ===== 镜像选择功能 =====
+select_image_source() {
+    print_yellow "📦 请选择要使用的镜像源："
+    print_yellow "1. Main分支重构镜像 (默认)"
+    print_yellow "2. 官方镜像"
+    
+    local choice
+    read -p "请输入选择 [1-2]，默认使用1: " choice
+    
+    case "${choice:-1}" in
+        1)
+            USE_MAIN_BRANCH=true
+            MIRROR_PREFIX=${MAIN_MIRROR_PREFIX}
+            print_green "✅ 将使用Main分支重构镜像: ${MAIN_MIRROR_PREFIX}/*"
+            ;;
+        2)
+            USE_MAIN_BRANCH=false
+            print_green "✅ 将使用官方镜像: ${OFFICIAL_PHP_IMAGE}:${PHP_VERSION}-fpm 和 ${OFFICIAL_NGINX_IMAGE}:1.27"
+            ;;
+        *)
+            USE_MAIN_BRANCH=true
+            MIRROR_PREFIX=${MAIN_MIRROR_PREFIX}
+            print_green "✅ 使用默认的Main分支重构镜像: ${MAIN_MIRROR_PREFIX}/*"
+            ;;
+    esac
+}
+
 # ===== 主程序 =====
 main() {
     print_blue "=============================================="
@@ -668,6 +722,9 @@ main() {
 
     cleanup_root_env
     prepare_host_environment
+    
+    # 调用镜像选择功能
+    select_image_source
     detect_os_and_optimize
     generate_env_file
     generate_env_decoded
