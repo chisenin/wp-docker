@@ -439,6 +439,8 @@ jobs:
           TIMESTAMP=$(date +'%Y%m%d%H%M%S')
           BASE_IMAGE_NAME="$DOCKERHUB_USERNAME/wordpress-base:$ALPINE_VERSION-$TIMESTAMP"
           
+          # 提前设置输出变量，确保即使构建失败也能传递给后续作业
+          echo "image_name=$BASE_IMAGE_NAME" >> $GITHUB_OUTPUT
           echo "准备构建基础镜像: $BASE_IMAGE_NAME"
           
           # 构建基础镜像
@@ -451,7 +453,6 @@ jobs:
               exit 1
             }
           
-          echo "image_name=$BASE_IMAGE_NAME" >> $GITHUB_OUTPUT
           echo "基础镜像构建成功: $BASE_IMAGE_NAME"
 
   # 并行构建：构建PHP镜像
@@ -492,6 +493,9 @@ jobs:
           # 使用带时间戳的基础镜像
           BASE_IMAGE="${{ needs.build-base-image.outputs.image_name }}"
           DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+          
+          # 显式打印基础镜像名称以帮助调试
+          echo "尝试使用基础镜像: $BASE_IMAGE"
           
           # 检查基础镜像变量是否存在
           if [ -z "$BASE_IMAGE" ]; then
@@ -562,6 +566,9 @@ jobs:
           # 使用带时间戳的基础镜像
           BASE_IMAGE="${{ needs.build-base-image.outputs.image_name }}"
           DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}
+          
+          # 显式打印基础镜像名称以帮助调试
+          echo "尝试使用基础镜像: $BASE_IMAGE"
           
           # 检查基础镜像变量是否存在
           if [ -z "$BASE_IMAGE" ]; then
