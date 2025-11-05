@@ -1,0 +1,207 @@
+name: 版本监控与决策工作流
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * 1'  # 每周一运行
+  workflow_dispatch:
+    # 允许手动触发
+    inputs:
+      test_mode:
+        description: '测试模式（true/false）'
+        required: false
+        default: 'false'
+        type: string
+
+jobs:
+  # 设置环境并获取最新版本信息
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      php_version: ${{ steps.get-versions.outputs.php_version }}
+      nginx_version: ${{ steps.get-versions.outputs.nginx_version }}
+      mariadb_version: ${{ steps.get-versions.outputs.mariadb_version }}
+      redis_version: ${{ steps.get-versions.outputs.redis_version }}
+      alpine_version: ${{ steps.get-versions.outputs.alpine_version }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 获取最新版本信息
+        id: get-versions
+        run: |
+          # 获取最新的PHP版本（使用8.3作为基础）
+          PHP_VERSION=$(curl -s https://www.php.net/releases/index.php?json | jq -r '.version[0]' || echo "8.3")
+          # 获取最新的Nginx稳定版本
+          NGINX_VERSION=$(curl -s http://nginx.org/en/download.html | grep -oP 'nginx-\K[0-9.]+(?=\.tar\.gz)' | sort -V | tail -n1 || echo "1.27.2")
+          # 获取最新的MariaDB稳定版本
+          MARIADB_VERSION=$(curl -s https://downloads.mariadb.org/mariadb/repositories/json/ | grep -oP '"version":"\K[0-9.]+(?=")' | sort -V | tail -n1 || echo "11.3.2")
+          # 获取最新的Redis稳定版本
+          REDIS_VERSION=$(curl -s https://raw.githubusercontent.com/redis/redis/unstable/00-RELEASENOTES | grep -oP '^Redis \K[0-9.]+' | head -n1 || echo "7.4.0")
+          # 获取最新的Alpine稳定版本
+          ALPINE_VERSION=$(curl -s https://www.alpinelinux.org/releases/ | grep -oP 'Alpine Linux \K[0-9.]+(?=\s+stable)' | sort -V | tail -n1 || echo "3.20")
+          
+          echo "PHP_VERSION=$PHP_VERSION"
+          echo "NGINX_VERSION=$NGINX_VERSION"
+          echo "MARIADB_VERSION=$MARIADB_VERSION"
+          echo "REDIS_VERSION=$REDIS_VERSION"
+          echo "ALPINE_VERSION=$ALPINE_VERSION"
+          
+          # 设置输出
+          echo "php_version=$PHP_VERSION" >> $GITHUB_OUTPUT
+          echo "nginx_version=$NGINX_VERSION" >> $GITHUB_OUTPUT
+          echo "mariadb_version=$MARIADB_VERSION" >> $GITHUB_OUTPUT
+          echo "redis_version=$REDIS_VERSION" >> $GITHUB_OUTPUT
+          echo "alpine_version=$ALPINE_VERSION" >> $GITHUB_OUTPUT
+          
+          # 保存版本信息到文件
+          mkdir -p build/Dockerfiles/php build/Dockerfiles/nginx build/Dockerfiles/mariadb build/Dockerfiles/redis
+          echo "$PHP_VERSION" > build/Dockerfiles/php/php_version.txt
+          echo "$NGINX_VERSION" > build/Dockerfiles/nginx/nginx_version.txt
+          echo "$MARIADB_VERSION" > build/Dockerfiles/mariadb/mariadb_version.txt
+          echo "$REDIS_VERSION" > build/Dockerfiles/redis/redis_version.txt
+          echo "$ALPINE_VERSION" > build/Dockerfiles/base/alpine_version.txt 2>/dev/null || echo "$ALPINE_VERSION" > build/Dockerfiles/alpine_version.txt
+
+  # 检查版本差异并决定重构策略
+  version-check:
+    needs: setup
+    runs-on: ubuntu-latest
+    outputs:
+      need_rebuild: ${{ steps.decide-rebuild.outputs.need_rebuild }}
+      rebuild_type: ${{ steps.decide-rebuild.outputs.rebuild_type }}
+      modules_to_rebuild: ${{ steps.decide-rebuild.outputs.modules_to_rebuild }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 读取当前版本
+        id: read-versions
+        run: |
+          # 读取当前版本信息（如果存在）
+          CURRENT_PHP=$(cat build/Dockerfiles/php/php_version.txt 2>/dev/null || echo "")
+          CURRENT_NGINX=$(cat build/Dockerfiles/nginx/nginx_version.txt 2>/dev/null || echo "")
+          CURRENT_MARIADB=$(cat build/Dockerfiles/mariadb/mariadb_version.txt 2>/dev/null || echo "")
+          CURRENT_REDIS=$(cat build/Dockerfiles/redis/redis_version.txt 2>/dev/null || echo "")
+          CURRENT_ALPINE=$(cat build/Dockerfiles/base/alpine_version.txt 2>/dev/null || cat build/Dockerfiles/alpine_version.txt 2>/dev/null || echo "")
+          
+          echo "当前版本信息："
+          echo "- PHP: $CURRENT_PHP (最新: ${{ needs.setup.outputs.php_version }})"
+          echo "- Nginx: $CURRENT_NGINX (最新: ${{ needs.setup.outputs.nginx_version }})"
+          echo "- MariaDB: $CURRENT_MARIADB (最新: ${{ needs.setup.outputs.mariadb_version }})"
+          echo "- Redis: $CURRENT_REDIS (最新: ${{ needs.setup.outputs.redis_version }})"
+          echo "- Alpine: $CURRENT_ALPINE (最新: ${{ needs.setup.outputs.alpine_version }})"
+          
+          # 设置当前版本输出
+          echo "current_php=$CURRENT_PHP" >> $GITHUB_OUTPUT
+          echo "current_nginx=$CURRENT_NGINX" >> $GITHUB_OUTPUT
+          echo "current_mariadb=$CURRENT_MARIADB" >> $GITHUB_OUTPUT
+          echo "current_redis=$CURRENT_REDIS" >> $GITHUB_OUTPUT
+          echo "current_alpine=$CURRENT_ALPINE" >> $GITHUB_OUTPUT
+
+      - name: 决定重构策略
+        id: decide-rebuild
+        run: |
+          # 比较版本并决定是否需要重构
+          NEED_REBUILD=false
+          REBUILD_TYPE="none"
+          MODULES_TO_REBUILD=""
+          
+          # 检查Alpine基础镜像是否有更新
+          if [ "${{ needs.setup.outputs.alpine_version }}" != "${{ steps.read-versions.outputs.current_alpine }}" ] && [ -n "${{ steps.read-versions.outputs.current_alpine }}" ]; then
+            NEED_REBUILD=true
+            REBUILD_TYPE="full"
+            MODULES_TO_REBUILD="base,php,nginx"
+            echo "✅ Alpine基础镜像有更新，需要全量重构"
+          fi
+          
+          # 检查PHP是否有更新
+          if [ "${{ needs.setup.outputs.php_version }}" != "${{ steps.read-versions.outputs.current_php }}" ] && [ -n "${{ steps.read-versions.outputs.current_php }}" ]; then
+            NEED_REBUILD=true
+            if [ "$REBUILD_TYPE" != "full" ]; then
+              REBUILD_TYPE="partial"
+              MODULES_TO_REBUILD="php"
+            else
+              MODULES_TO_REBUILD="$MODULES_TO_REBUILD"
+            fi
+            echo "✅ PHP有更新，需要重构PHP模块"
+          fi
+          
+          # 检查Nginx是否有更新
+          if [ "${{ needs.setup.outputs.nginx_version }}" != "${{ steps.read-versions.outputs.current_nginx }}" ] && [ -n "${{ steps.read-versions.outputs.current_nginx }}" ]; then
+            NEED_REBUILD=true
+            if [ "$REBUILD_TYPE" != "full" ]; then
+              REBUILD_TYPE="partial"
+              if [ -n "$MODULES_TO_REBUILD" ]; then
+                MODULES_TO_REBUILD="$MODULES_TO_REBUILD,nginx"
+              else
+                MODULES_TO_REBUILD="nginx"
+              fi
+            else
+              MODULES_TO_REBUILD="$MODULES_TO_REBUILD"
+            fi
+            echo "✅ Nginx有更新，需要重构Nginx模块"
+          fi
+          
+          # 注意：MariaDB和Redis使用官方镜像，不需要重构
+          if [ "${{ needs.setup.outputs.mariadb_version }}" != "${{ steps.read-versions.outputs.current_mariadb }}" ] && [ -n "${{ steps.read-versions.outputs.current_mariadb }}" ]; then
+            echo "✅ MariaDB有更新，将更新docker-compose.yml使用新版本官方镜像"
+            NEED_REBUILD=true
+            REBUILD_TYPE="official_images"
+          fi
+          
+          if [ "${{ needs.setup.outputs.redis_version }}" != "${{ steps.read-versions.outputs.current_redis }}" ] && [ -n "${{ steps.read-versions.outputs.current_redis }}" ]; then
+            echo "✅ Redis有更新，将更新docker-compose.yml使用新版本官方镜像"
+            NEED_REBUILD=true
+            REBUILD_TYPE="official_images"
+          fi
+          
+          # 如果是新仓库（没有当前版本信息），也需要重构
+          if [ -z "${{ steps.read-versions.outputs.current_php }}" ] || [ -z "${{ steps.read-versions.outputs.current_nginx }}" ]; then
+            NEED_REBUILD=true
+            REBUILD_TYPE="full"
+            MODULES_TO_REBUILD="base,php,nginx"
+            echo "✅ 首次运行，需要全量重构"
+          fi
+          
+          echo "重构决策："
+          echo "- 是否重构: $NEED_REBUILD"
+          echo "- 重构类型: $REBUILD_TYPE"
+          echo "- 重构模块: $MODULES_TO_REBUILD"
+          
+          # 设置输出
+          echo "need_rebuild=$NEED_REBUILD" >> $GITHUB_OUTPUT
+          echo "rebuild_type=$REBUILD_TYPE" >> $GITHUB_OUTPUT
+          echo "modules_to_rebuild=$MODULES_TO_REBUILD" >> $GITHUB_OUTPUT
+
+  # 触发相应的工作流
+  trigger-workflows:
+    needs: [setup, version-check]
+    runs-on: ubuntu-latest
+    if: ${{ needs.version-check.outputs.need_rebuild == 'true' }}
+    steps:
+      - name: 触发镜像构建工作流
+        if: ${{ needs.version-check.outputs.rebuild_type == 'full' || needs.version-check.outputs.rebuild_type == 'partial' }}
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: build-images
+          client-payload: '{"php_version": "${{ needs.setup.outputs.php_version }}", "nginx_version": "${{ needs.setup.outputs.nginx_version }}", "mariadb_version": "${{ needs.setup.outputs.mariadb_version }}", "redis_version": "${{ needs.setup.outputs.redis_version }}", "alpine_version": "${{ needs.setup.outputs.alpine_version }}", "modules": "${{ needs.version-check.outputs.modules_to_rebuild }}", "rebuild_type": "${{ needs.version-check.outputs.rebuild_type }}"}'
+
+      - name: 触发使用官方镜像工作流
+        if: ${{ needs.version-check.outputs.rebuild_type == 'official_images' }}
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: use-official-images
+          client-payload: '{"php_version": "${{ needs.setup.outputs.php_version }}", "nginx_version": "${{ needs.setup.outputs.nginx_version }}", "mariadb_version": "${{ needs.setup.outputs.mariadb_version }}", "redis_version": "${{ needs.setup.outputs.redis_version }}"}'
+
+      - name: 发送通知
+        run: |
+          echo "✅ 已触发相应工作流"
+          echo "重构类型: ${{ needs.version-check.outputs.rebuild_type }}"
+          echo "重构模块: ${{ needs.version-check.outputs.modules_to_rebuild }}"
