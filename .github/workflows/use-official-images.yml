@@ -1,0 +1,171 @@
+name: 使用官方镜像工作流
+
+on:
+  repository_dispatch:
+    types: [use-official-images]
+  workflow_dispatch:
+    # 允许手动触发
+    inputs:
+      mariadb_version:
+        description: 'MariaDB版本'
+        required: false
+        default: '11.3.2'
+        type: string
+      redis_version:
+        description: 'Redis版本'
+        required: false
+        default: '7.4.0'
+        type: string
+
+jobs:
+  # 准备环境和设置参数
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      mariadb_version: ${{ steps.prepare-params.outputs.mariadb_version }}
+      redis_version: ${{ steps.prepare-params.outputs.redis_version }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0  # 获取完整历史以便提交更改
+
+      - name: 准备参数
+        id: prepare-params
+        run: |
+          # 从client_payload或workflow_dispatch输入获取参数
+          if [ -n "${{ github.event.client_payload.mariadb_version }}" ]; then
+            MARIADB_VERSION="${{ github.event.client_payload.mariadb_version }}"
+          else
+            MARIADB_VERSION="${{ github.event.inputs.mariadb_version }}"
+          fi
+          
+          if [ -n "${{ github.event.client_payload.redis_version }}" ]; then
+            REDIS_VERSION="${{ github.event.client_payload.redis_version }}"
+          else
+            REDIS_VERSION="${{ github.event.inputs.redis_version }}"
+          fi
+          
+          echo "更新参数："
+          echo "- MariaDB版本: $MARIADB_VERSION"
+          echo "- Redis版本: $REDIS_VERSION"
+          
+          # 设置输出
+          echo "mariadb_version=$MARIADB_VERSION" >> $GITHUB_OUTPUT
+          echo "redis_version=$REDIS_VERSION" >> $GITHUB_OUTPUT
+          
+          # 保存版本信息
+          mkdir -p build/Dockerfiles/mariadb build/Dockerfiles/redis
+          echo "$MARIADB_VERSION" > build/Dockerfiles/mariadb/mariadb_version.txt
+          echo "$REDIS_VERSION" > build/Dockerfiles/redis/redis_version.txt
+
+  # 更新docker-compose.yml使用最新的官方镜像
+  update-compose-file:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: 更新docker-compose.yml
+        run: |
+          # 备份原文件
+          cp docker-compose.yml docker-compose.yml.bak
+          
+          # 更新MariaDB镜像版本
+          echo "更新MariaDB镜像版本为 ${{ needs.setup.outputs.mariadb_version }}"
+          sed -i "s|image: mariadb:[0-9.]\+|image: mariadb:${{ needs.setup.outputs.mariadb_version }}|g" docker-compose.yml
+          
+          # 更新Redis镜像版本
+          echo "更新Redis镜像版本为 ${{ needs.setup.outputs.redis_version }}"
+          sed -i "s|image: redis:[0-9.]\+|image: redis:${{ needs.setup.outputs.redis_version }}|g" docker-compose.yml
+          
+          # 显示更新后的差异
+          echo "更新差异："
+          diff docker-compose.yml.bak docker-compose.yml || echo "没有检测到差异（可能文件中没有匹配的模式）"
+          
+          # 清理备份文件
+          rm docker-compose.yml.bak
+
+  # 提交并推送更改
+  commit-and-push:
+    needs: [setup, update-compose-file]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          ref: ${{ github.head_ref || github.ref }}
+
+      - name: 设置Git用户信息
+        run: |
+          git config --global user.name 'GitHub Actions Bot'
+          git config --global user.email 'actions@github.com'
+
+      - name: 提交版本更新
+        run: |
+          # 检查是否有更改
+          if git diff --exit-code > /dev/null; then
+            echo "没有需要提交的更改"
+            exit 0
+          fi
+          
+          # 添加并提交更改
+          git add docker-compose.yml build/Dockerfiles/mariadb/mariadb_version.txt build/Dockerfiles/redis/redis_version.txt
+          git commit -m "更新官方镜像版本: MariaDB ${{ needs.setup.outputs.mariadb_version }}, Redis ${{ needs.setup.outputs.redis_version }}"
+          
+          # 推送更改
+          git push origin ${{ github.head_ref || github.ref }} 2>/dev/null || {
+            echo "推送失败，尝试拉取最新代码后重试..."
+            git pull --rebase origin ${{ github.head_ref || github.ref }}
+            git push origin ${{ github.head_ref || github.ref }}
+          }
+
+  # 验证更新
+  verify-update:
+    needs: commit-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出更新后的代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 验证docker-compose.yml中的版本
+        run: |
+          echo "验证docker-compose.yml中的镜像版本..."
+          
+          # 验证MariaDB版本
+          MARIADB_FOUND=$(grep "image: mariadb:" docker-compose.yml | cut -d':' -f2)
+          echo "docker-compose.yml中的MariaDB版本: $MARIADB_FOUND"
+          echo "期望的MariaDB版本: ${{ needs.setup.outputs.mariadb_version }}"
+          
+          # 验证Redis版本
+          REDIS_FOUND=$(grep "image: redis:" docker-compose.yml | cut -d':' -f2)
+          echo "docker-compose.yml中的Redis版本: $REDIS_FOUND"
+          echo "期望的Redis版本: ${{ needs.setup.outputs.redis_version }}"
+          
+          # 检查版本文件
+          echo "验证版本文件..."
+          cat build/Dockerfiles/mariadb/mariadb_version.txt
+          cat build/Dockerfiles/redis/redis_version.txt
+
+  # 总结
+  summary:
+    needs: [setup, verify-update]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: 工作流总结
+        run: |
+          echo "✅ 使用官方镜像工作流执行完成"
+          echo "- MariaDB版本: ${{ needs.setup.outputs.mariadb_version }}"
+          echo "- Redis版本: ${{ needs.setup.outputs.redis_version }}"
+          echo "- 已更新docker-compose.yml使用最新的官方镜像"
+          echo "- 已提交版本信息到版本文件"
