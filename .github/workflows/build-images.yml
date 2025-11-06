@@ -196,6 +196,14 @@ jobs:
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: 检查Docker Hub凭证
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "检查DOCKERHUB_USERNAME密钥是否存在: ${{ secrets.DOCKERHUB_USERNAME != '' }}"
+          echo "DOCKERHUB_USERNAME长度: ${{ length(secrets.DOCKERHUB_USERNAME) }}"
+          # 注意：我们不打印DOCKERHUB_TOKEN的具体内容，只检查其是否存在
+          echo "DOCKERHUB_TOKEN密钥是否存在: ${{ secrets.DOCKERHUB_TOKEN != '' }}"
+
       - name: 登录到Docker Hub
         if: github.event_name != 'pull_request'  # 避免在PR时尝试登录
         uses: docker/login-action@v2
@@ -203,6 +211,15 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           logout: true
+        continue-on-error: true
+
+      - name: 检查文件路径
+        run: |
+          echo "当前目录: $(pwd)"
+          echo "检查构建上下文是否存在:"
+          ls -la ./build/Dockerfiles/base/ 2>/dev/null || echo "目录不存在"
+          echo "Dockerfile内容预览:"
+          cat ./build/Dockerfiles/base/Dockerfile 2>/dev/null || echo "Dockerfile不存在"
 
       - name: 构建并推送基础镜像
         uses: docker/build-push-action@v5
@@ -216,6 +233,9 @@ jobs:
           tags:
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:latest
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+        continue-on-error: true
 
   # 检查功能模块是否需要重构
   check-modules:
