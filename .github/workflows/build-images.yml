@@ -213,8 +213,8 @@ jobs:
           build-args:
             ALPINE_VERSION=${{ needs.setup.outputs.alpine_version }}
           tags:
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:latest
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
 
   # 检查功能模块是否需要重构
   check-modules:
@@ -327,9 +327,9 @@ jobs:
             PHP_VERSION=${{ needs.setup.outputs.php_version }}
             BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
           tags:
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}-${{ github.sha }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}-${{ github.sha }}
 
   # 测试PHP镜像
   test-php-image:
@@ -392,9 +392,9 @@ jobs:
             NGINX_VERSION=${{ needs.setup.outputs.nginx_version }}
             BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
           tags:
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}-${{ github.sha }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}-${{ github.sha }}
 
   # 测试Nginx镜像
   test-nginx-image:
@@ -457,9 +457,9 @@ jobs:
             MARIADB_VERSION=${{ needs.setup.outputs.mariadb_version }}
             BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
           tags:
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}-${{ github.sha }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}-${{ github.sha }}
 
   # 测试MariaDB镜像
   test-mariadb-image:
@@ -513,9 +513,9 @@ jobs:
             REDIS_VERSION=${{ needs.setup.outputs.redis_version }}
             BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
           tags:
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}-${{ github.sha }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:latest
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}-${{ github.sha }}
 
   # 测试Redis镜像
   test-redis-image:
