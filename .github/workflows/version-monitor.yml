@@ -1,5 +1,9 @@
 name: 版本监控与决策工作流
 
+permissions:
+  contents: write
+  actions: write
+
 on:
   push:
     branches: [ main ]

@@ -1,5 +1,9 @@
 name: 使用官方镜像工作流
 
+permissions:
+  contents: write
+  actions: write
+
 on:
   repository_dispatch:
     types: [use-official-images]

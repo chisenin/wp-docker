@@ -1,5 +1,10 @@
 name: 镜像构建工作流
 
+permissions:
+  contents: write
+  actions: write
+  packages: write
+
 on:
   repository_dispatch:
     types: [build-images]
