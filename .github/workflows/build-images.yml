@@ -213,8 +213,8 @@ jobs:
           build-args:
             ALPINE_VERSION=${{ needs.setup.outputs.alpine_version }}
           tags:
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-base:latest
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:latest
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
 
   # 检查功能模块是否需要重构
   check-modules:
@@ -325,11 +325,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args:
             PHP_VERSION=${{ needs.setup.outputs.php_version }}
-            BASE_IMAGE=${{ secrets.DOCKER_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+            BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
           tags:
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-php:latest
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}-${{ github.sha }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}-${{ github.sha }}
 
   # 测试PHP镜像
   test-php-image:
@@ -342,16 +342,16 @@ jobs:
       - name: 运行PHP镜像测试
         run: |
           # 拉取构建的镜像
-          docker pull ${{ secrets.DOCKER_USERNAME }}/wp-docker-php:latest
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest
           
           # 运行简单的测试命令
-          docker run --rm ${{ secrets.DOCKER_USERNAME }}/wp-docker-php:latest php -v
-          docker run --rm ${{ secrets.DOCKER_USERNAME }}/wp-docker-php:latest php -m | grep -E 'curl|gd|mbstring|mysqli|pdo_mysql|redis|zip'
+          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest php -v
+          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest php -m | grep -E 'curl|gd|mbstring|mysqli|pdo_mysql|redis|zip'
           
           # 验证WordPress所需的PHP扩展是否已安装
           EXTENSIONS=("curl" "gd" "mbstring" "mysqli" "pdo_mysql" "redis" "zip" "imagick")
           for ext in "${EXTENSIONS[@]}"; do
-            if docker run --rm ${{ secrets.DOCKER_USERNAME }}/wp-docker-php:latest php -m | grep -q "$ext"; then
+            if docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest php -m | grep -q "$ext"; then
               echo "✅ PHP扩展 $ext 已安装"
             else
               echo "❌ PHP扩展 $ext 未安装"
@@ -390,11 +390,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args:
             NGINX_VERSION=${{ needs.setup.outputs.nginx_version }}
-            BASE_IMAGE=${{ secrets.DOCKER_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+            BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
           tags:
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-nginx:latest
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}-${{ github.sha }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}-${{ github.sha }}
 
   # 测试Nginx镜像
   test-nginx-image:
@@ -407,16 +407,16 @@ jobs:
       - name: 运行Nginx镜像测试
         run: |
           # 拉取构建的镜像
-          docker pull ${{ secrets.DOCKER_USERNAME }}/wp-docker-nginx:latest
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest
           
           # 运行简单的测试命令
-          docker run --rm ${{ secrets.DOCKER_USERNAME }}/wp-docker-nginx:latest nginx -v
+          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest nginx -v
           
           # 验证Nginx配置是否正确
-          docker run --rm ${{ secrets.DOCKER_USERNAME }}/wp-docker-nginx:latest nginx -t
+          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest nginx -t
           
           # 验证是否包含WordPress所需的配置
-          docker run --rm ${{ secrets.DOCKER_USERNAME }}/wp-docker-nginx:latest nginx -T | grep -q "php-fpm"
+          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest nginx -T | grep -q "php-fpm"
           if [ $? -eq 0 ]; then
             echo "✅ WordPress Nginx配置已正确包含"
           else
@@ -455,11 +455,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args:
             MARIADB_VERSION=${{ needs.setup.outputs.mariadb_version }}
-            BASE_IMAGE=${{ secrets.DOCKER_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+            BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
           tags:
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-mariadb:latest
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}-${{ github.sha }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}-${{ github.sha }}
 
   # 测试MariaDB镜像
   test-mariadb-image:
@@ -472,10 +472,10 @@ jobs:
       - name: 运行MariaDB镜像测试
         run: |
           # 拉取构建的镜像
-          docker pull ${{ secrets.DOCKER_USERNAME }}/wp-docker-mariadb:latest
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest
           
           # 运行简单的测试命令
-          docker run --rm --entrypoint=mysql ${{ secrets.DOCKER_USERNAME }}/wp-docker-mariadb:latest --version
+          docker run --rm --entrypoint=mysql ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest --version
           
           # 验证MariaDB配置
           echo "✅ MariaDB镜像测试完成"
@@ -511,11 +511,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args:
             REDIS_VERSION=${{ needs.setup.outputs.redis_version }}
-            BASE_IMAGE=${{ secrets.DOCKER_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+            BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
           tags:
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-redis:latest
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}
-            ${{ secrets.DOCKER_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}-${{ github.sha }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:latest
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}
+            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}-${{ github.sha }}
 
   # 测试Redis镜像
   test-redis-image:
@@ -528,10 +528,10 @@ jobs:
       - name: 运行Redis镜像测试
         run: |
           # 拉取构建的镜像
-          docker pull ${{ secrets.DOCKER_USERNAME }}/wp-docker-redis:latest
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:latest
           
           # 运行简单的测试命令
-          docker run --rm ${{ secrets.DOCKER_USERNAME }}/wp-docker-redis:latest redis-server --version
+          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:latest redis-server --version
           
           # 验证Redis配置
           echo "✅ Redis镜像测试完成"
