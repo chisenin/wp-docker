@@ -12,7 +12,7 @@ on:
     # 允许手动触发
     inputs:
       modules:
-        description: '要构建的模块（base,php,nginx），多个用逗号分隔'
+        description: '要构建的模块（base,php,nginx,mariadb,redis），多个用逗号分隔'
         required: true
         default: 'base,php,nginx'
         type: string
@@ -30,6 +30,16 @@ on:
         description: 'Nginx版本'
         required: false
         default: '1.27.2'
+        type: string
+      mariadb_version:
+        description: 'MariaDB版本'
+        required: false
+        default: '10.11'
+        type: string
+      redis_version:
+        description: 'Redis版本'
+        required: false
+        default: '7.2'
         type: string
       alpine_version:
         description: 'Alpine版本'
@@ -87,16 +97,34 @@ jobs:
             ALPINE_VERSION="${{ github.event.inputs.alpine_version }}"
           fi
           
+          # 获取MariaDB版本
+          if [ -n "${{ github.event.client_payload.mariadb_version }}" ]; then
+            MARIADB_VERSION="${{ github.event.client_payload.mariadb_version }}"
+          else
+            MARIADB_VERSION="${{ github.event.inputs.mariadb_version }}"
+          fi
+          
+          # 获取Redis版本
+          if [ -n "${{ github.event.client_payload.redis_version }}" ]; then
+            REDIS_VERSION="${{ github.event.client_payload.redis_version }}"
+          else
+            REDIS_VERSION="${{ github.event.inputs.redis_version }}"
+          fi
+          
           echo "构建参数："
           echo "- 模块: $MODULES"
           echo "- 重构类型: $REBUILD_TYPE"
           echo "- PHP版本: $PHP_VERSION"
           echo "- Nginx版本: $NGINX_VERSION"
+          echo "- MariaDB版本: $MARIADB_VERSION"
+          echo "- Redis版本: $REDIS_VERSION"
           echo "- Alpine版本: $ALPINE_VERSION"
           
           # 设置输出
           echo "php_version=$PHP_VERSION" >> $GITHUB_OUTPUT
           echo "nginx_version=$NGINX_VERSION" >> $GITHUB_OUTPUT
+          echo "mariadb_version=$MARIADB_VERSION" >> $GITHUB_OUTPUT
+          echo "redis_version=$REDIS_VERSION" >> $GITHUB_OUTPUT
           echo "alpine_version=$ALPINE_VERSION" >> $GITHUB_OUTPUT
           echo "modules=$MODULES" >> $GITHUB_OUTPUT
           echo "rebuild_type=$REBUILD_TYPE" >> $GITHUB_OUTPUT
@@ -105,6 +133,8 @@ jobs:
           mkdir -p build/Dockerfiles/php build/Dockerfiles/nginx build/Dockerfiles/mariadb build/Dockerfiles/redis build/Dockerfiles/base
           echo "$PHP_VERSION" > build/Dockerfiles/php/php_version.txt
           echo "$NGINX_VERSION" > build/Dockerfiles/nginx/nginx_version.txt
+          echo "$MARIADB_VERSION" > build/Dockerfiles/mariadb/mariadb_version.txt
+          echo "$REDIS_VERSION" > build/Dockerfiles/redis/redis_version.txt
           echo "$ALPINE_VERSION" > build/Dockerfiles/base/alpine_version.txt
 
   # 构建基础镜像
@@ -266,9 +296,117 @@ jobs:
             exit 1
           fi
 
+  # 构建MariaDB镜像
+  build-mariadb-image:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ contains(needs.setup.outputs.modules, 'mariadb') || needs.setup.outputs.rebuild_type == 'full' }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录到Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: 构建并推送MariaDB镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: ./build/Dockerfiles/mariadb
+          file: ./build/Dockerfiles/mariadb/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args:
+            MARIADB_VERSION=${{ needs.setup.outputs.mariadb_version }}
+            BASE_IMAGE=${{ secrets.DOCKER_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+          tags:
+            ${{ secrets.DOCKER_USERNAME }}/wp-docker-mariadb:latest
+            ${{ secrets.DOCKER_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}
+            ${{ secrets.DOCKER_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}-${{ github.sha }}
+
+  # 测试MariaDB镜像
+  test-mariadb-image:
+    needs: build-mariadb-image
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 运行MariaDB镜像测试
+        run: |
+          # 拉取构建的镜像
+          docker pull ${{ secrets.DOCKER_USERNAME }}/wp-docker-mariadb:latest
+          
+          # 运行简单的测试命令
+          docker run --rm --entrypoint=mysql ${{ secrets.DOCKER_USERNAME }}/wp-docker-mariadb:latest --version
+          
+          # 验证MariaDB配置
+          echo "✅ MariaDB镜像测试完成"
+
+  # 构建Redis镜像
+  build-redis-image:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ contains(needs.setup.outputs.modules, 'redis') || needs.setup.outputs.rebuild_type == 'full' }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录到Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: 构建并推送Redis镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: ./build/Dockerfiles/redis
+          file: ./build/Dockerfiles/redis/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args:
+            REDIS_VERSION=${{ needs.setup.outputs.redis_version }}
+            BASE_IMAGE=${{ secrets.DOCKER_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+          tags:
+            ${{ secrets.DOCKER_USERNAME }}/wp-docker-redis:latest
+            ${{ secrets.DOCKER_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}
+            ${{ secrets.DOCKER_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}-${{ github.sha }}
+
+  # 测试Redis镜像
+  test-redis-image:
+    needs: build-redis-image
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 运行Redis镜像测试
+        run: |
+          # 拉取构建的镜像
+          docker pull ${{ secrets.DOCKER_USERNAME }}/wp-docker-redis:latest
+          
+          # 运行简单的测试命令
+          docker run --rm ${{ secrets.DOCKER_USERNAME }}/wp-docker-redis:latest redis-server --version
+          
+          # 验证Redis配置
+          echo "✅ Redis镜像测试完成"
+
   # 清理和总结
   cleanup:
-    needs: [test-php-image, test-nginx-image]
+    needs: [test-php-image, test-nginx-image, test-mariadb-image, test-redis-image]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -284,4 +422,6 @@ jobs:
           echo "重构类型: ${{ needs.setup.outputs.rebuild_type }}"
           echo "PHP版本: ${{ needs.setup.outputs.php_version }}"
           echo "Nginx版本: ${{ needs.setup.outputs.nginx_version }}"
+          echo "MariaDB版本: ${{ needs.setup.outputs.mariadb_version }}"
+          echo "Redis版本: ${{ needs.setup.outputs.redis_version }}"
           echo "Alpine版本: ${{ needs.setup.outputs.alpine_version }}"
