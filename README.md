@@ -19,7 +19,10 @@ wp-docker/
 ├── guides/                        # 详细指南文档目录
 │   └── WordPress + Docker Compose 多阶段构建与生产环境最佳实践指南 (GitHub Actions 自动化版).md # 完整集成指南
 ├── .github/                       # GitHub Actions 工作流目录
-│   └── version-monitor-and-build.yml # 版本监控与自动构建工作流
+│   ├── build-images.yml            # 镜像构建工作流
+│   ├── use-official-images.yml     # 官方镜像更新工作流
+│   ├── version-monitor-and-build-optimized.yml # 优化版版本监控与构建工作流
+│   └── version-monitor.yml         # 版本监控与决策工作流
 ├── build/                         # 构建相关文件
 │   ├── Dockerfiles/               # 各服务的 Dockerfile 目录
 │   │   ├── base/                  # 共享 Alpine Base 镜像

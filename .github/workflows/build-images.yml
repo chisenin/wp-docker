@@ -569,75 +569,10 @@ jobs:
             - 功能模块变更: ${{ needs.check-modules.outputs.changed_modules != '' }}
           draft: false
           prerelease: false
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 设置日期变量
-        id: set_date
-        run: |
-          echo "TODAY=$(date +'%Y%m%d')" >> $GITHUB_ENV
-          echo "TIMESTAMP=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
-
-      - name: 创建GitHub Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ env.TIMESTAMP }}
-          release_name: 镜像更新 - ${{ env.TODAY }}
-          body: |
-            ## 镜像更新详情
-            - 构建模块: ${{ needs.setup.outputs.modules }}
-            - 重构类型: ${{ needs.setup.outputs.rebuild_type }}
-            - PHP版本: ${{ needs.setup.outputs.php_version }}
-            - Nginx版本: ${{ needs.setup.outputs.nginx_version }}
-            - MariaDB版本: ${{ needs.setup.outputs.mariadb_version }}
-            - Redis版本: ${{ needs.setup.outputs.redis_version }}
-            - Alpine版本: ${{ needs.setup.outputs.alpine_version }}
-          draft: false
-          prerelease: false
-
-  # 脚本变更快速发布
-  script-release:
-    needs: setup
-    runs-on: ubuntu-latest
-    if: ${{ needs.setup.outputs.is_auto_deploy == 'true' && !contains(needs.setup.outputs.modules, 'base') && needs.setup.outputs.rebuild_type != 'full' && needs.setup.outputs.rebuild_type != 'test' }}
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: 设置日期变量
-        id: set_date
-        run: |
-          echo "TODAY=$(date +'%Y%m%d')" >> $GITHUB_ENV
-          echo "TIMESTAMP=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
-      
-      - name: 创建GitHub Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: script-${{ env.TIMESTAMP }}
-          release_name: 脚本更新 - ${{ env.TODAY }}
-          body: |
-            ## 脚本更新
-            - 更新了 `wp-docker/deploy/scripts/auto_deploy.sh`
-            - 无需重构镜像，仅脚本更新
-          draft: false
-          prerelease: false
-      
-      - name: 通知完成
-        run: |
-          echo "✅ 脚本更新快速发布完成"
 
   # 清理和总结
   cleanup:
-    needs: [setup, check-modules, test-php-image, test-nginx-image, test-mariadb-image, test-redis-image, create-release, script-release]
+    needs: [setup, check-modules, test-php-image, test-nginx-image, test-mariadb-image, test-redis-image, create-release]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -665,11 +600,10 @@ jobs:
             
             echo "\n发布信息："
             if [ "${{ needs.setup.outputs.rebuild_type }}" != "test" ]; then
-              if [ "${{ needs.script-release.result }}" = "success" ]; then
-                echo "✅ 脚本更新快速发布已完成"
-              elif [ "${{ needs.create-release.result }}" = "success" ]; then
+              if [ "${{ needs.create-release.result }}" = "success" ]; then
                 echo "✅ GitHub Release已创建"
               else
                 echo "⚠️ 未创建Release（可能因为没有需要重构的模块）"
               fi
+              echo "💡 注：脚本更新的快速发布由version-monitor.yml工作流处理"
             fi

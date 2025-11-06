@@ -257,7 +257,7 @@ jobs:
   trigger-workflows:
     needs: [setup, version-check]
     runs-on: ubuntu-latest
-    if: ${{ needs.version-check.outputs.rebuild_needed == 'true' }}
+    if: ${{ needs.version-check.outputs.need_rebuild == 'true' }}
     steps:
       - name: 触发镜像构建工作流
         if: ${{ needs.version-check.outputs.rebuild_type == 'full' || needs.version-check.outputs.rebuild_type == 'partial' }}
