@@ -59,15 +59,38 @@ jobs:
     outputs:
       php_version: ${{ steps.prepare-params.outputs.php_version }}
       nginx_version: ${{ steps.prepare-params.outputs.nginx_version }}
+      mariadb_version: ${{ steps.prepare-params.outputs.mariadb_version }}
+      redis_version: ${{ steps.prepare-params.outputs.redis_version }}
       alpine_version: ${{ steps.prepare-params.outputs.alpine_version }}
       modules: ${{ steps.prepare-params.outputs.modules }}
       rebuild_type: ${{ steps.prepare-params.outputs.rebuild_type }}
+      test_mode: ${{ steps.prepare-params.outputs.test_mode }}
+      is_auto_deploy: ${{ steps.check-trigger.outputs.is_auto_deploy }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 检查触发来源
+        id: check-trigger
+        run: |
+          # 检查是否来自自动部署（repository_dispatch）
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "is_auto_deploy=true" >> $GITHUB_OUTPUT
+            echo "触发来源: 自动部署"
+          else
+            echo "is_auto_deploy=false" >> $GITHUB_OUTPUT
+            echo "触发来源: 手动触发"
+          fi
+          
+          # 检查是否包含auto_deploy.sh变更
+          if [ -f "wp-docker/deploy/scripts/auto_deploy.sh" ]; then
+            echo "has_auto_deploy_script=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_auto_deploy_script=false" >> $GITHUB_OUTPUT
+          fi
+      
       - name: 准备构建参数
         id: prepare-params
         run: |
@@ -162,7 +185,7 @@ jobs:
   build-base-image:
     needs: setup
     runs-on: ubuntu-latest
-    if: ${{ contains(needs.setup.outputs.modules, 'base') || needs.setup.outputs.rebuild_type == 'full' }}
+    if: ${{ contains(needs.setup.outputs.modules, 'base') || needs.setup.outputs.rebuild_type == 'full' || needs.setup.outputs.rebuild_type == 'test' }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -191,11 +214,89 @@ jobs:
             ${{ secrets.DOCKER_USERNAME }}/wp-docker-base:latest
             ${{ secrets.DOCKER_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
 
-  # 构建PHP镜像
-  build-php-image:
+  # 检查功能模块是否需要重构
+  check-modules:
     needs: [setup, build-base-image]
     runs-on: ubuntu-latest
-    if: ${{ contains(needs.setup.outputs.modules, 'php') || needs.setup.outputs.rebuild_type == 'full' || needs.setup.outputs.rebuild_type == 'test' }}
+    if: ${{ contains(needs.setup.outputs.modules, 'base') || needs.setup.outputs.rebuild_type == 'full' || needs.setup.outputs.rebuild_type == 'test' }}
+    outputs:
+      rebuild_php: ${{ steps.module-check.outputs.rebuild_php }}
+      rebuild_nginx: ${{ steps.module-check.outputs.rebuild_nginx }}
+      rebuild_mariadb: ${{ steps.module-check.outputs.rebuild_mariadb }}
+      rebuild_redis: ${{ steps.module-check.outputs.rebuild_redis }}
+      changed_modules: ${{ steps.module-check.outputs.changed_modules }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 检查模块是否需要重构
+        id: module-check
+        run: |
+          # 默认为不需要重构
+          REBUILD_PHP="false"
+          REBUILD_NGINX="false"
+          REBUILD_MARIADB="false"
+          REBUILD_REDIS="false"
+          CHANGED_MODULES=""
+          
+          # 全量重构模式或测试模式下所有模块都需要重构
+          if [ "${{ needs.setup.outputs.rebuild_type }}" = "full" ] || [ "${{ needs.setup.outputs.rebuild_type }}" = "test" ]; then
+            REBUILD_PHP="true"
+            REBUILD_NGINX="true"
+            REBUILD_MARIADB="true"
+            REBUILD_REDIS="true"
+            CHANGED_MODULES="php,nginx,mariadb,redis"
+          else
+            # 检查模块特定文件是否有变更
+            if echo "${{ needs.setup.outputs.modules }}" | grep -q "php"; then
+              REBUILD_PHP="true"
+              CHANGED_MODULES="${CHANGED_MODULES},php"
+            fi
+            
+            if echo "${{ needs.setup.outputs.modules }}" | grep -q "nginx"; then
+              REBUILD_NGINX="true"
+              CHANGED_MODULES="${CHANGED_MODULES},nginx"
+            fi
+            
+            if echo "${{ needs.setup.outputs.modules }}" | grep -q "mariadb"; then
+              REBUILD_MARIADB="true"
+              CHANGED_MODULES="${CHANGED_MODULES},mariadb"
+            fi
+            
+            if echo "${{ needs.setup.outputs.modules }}" | grep -q "redis"; then
+              REBUILD_REDIS="true"
+              CHANGED_MODULES="${CHANGED_MODULES},redis"
+            fi
+          fi
+          
+          # 移除开头的逗号
+          CHANGED_MODULES=$(echo "$CHANGED_MODULES" | sed 's/^,//')
+          
+          echo "需要重构的模块: $CHANGED_MODULES"
+          echo "rebuild_php=$REBUILD_PHP" >> $GITHUB_OUTPUT
+          echo "rebuild_nginx=$REBUILD_NGINX" >> $GITHUB_OUTPUT
+          echo "rebuild_mariadb=$REBUILD_MARIADB" >> $GITHUB_OUTPUT
+          echo "rebuild_redis=$REBUILD_REDIS" >> $GITHUB_OUTPUT
+          echo "changed_modules=$CHANGED_MODULES" >> $GITHUB_OUTPUT
+          
+          # 如果没有需要重构的功能模块但有基础镜像重构，设置为所有模块都需要重构
+          if [ -z "$CHANGED_MODULES" ] && (echo "${{ needs.setup.outputs.modules }}" | grep -q "base" || [ "${{ needs.setup.outputs.rebuild_type }}" = "full" ]); then
+            echo "⚠️ 基础镜像变更，所有功能模块都需要重构"
+            echo "rebuild_php=true" >> $GITHUB_OUTPUT
+            echo "rebuild_nginx=true" >> $GITHUB_OUTPUT
+            echo "rebuild_mariadb=true" >> $GITHUB_OUTPUT
+            echo "rebuild_redis=true" >> $GITHUB_OUTPUT
+            echo "changed_modules=php,nginx,mariadb,redis" >> $GITHUB_OUTPUT
+          fi
+  
+  # 构建PHP镜像
+  build-php-image:
+    needs: [setup, build-base-image, check-modules]
+    runs-on: ubuntu-latest
+    if: ${{ needs.check-modules.outputs.rebuild_php == 'true' }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -256,9 +357,9 @@ jobs:
 
   # 构建Nginx镜像
   build-nginx-image:
-    needs: [setup, build-base-image]
+    needs: [setup, build-base-image, check-modules]
     runs-on: ubuntu-latest
-    if: ${{ contains(needs.setup.outputs.modules, 'nginx') || needs.setup.outputs.rebuild_type == 'full' || needs.setup.outputs.rebuild_type == 'test' }}
+    if: ${{ needs.check-modules.outputs.rebuild_nginx == 'true' }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -319,9 +420,9 @@ jobs:
 
   # 构建MariaDB镜像
   build-mariadb-image:
-    needs: setup
+    needs: [setup, check-modules]
     runs-on: ubuntu-latest
-    if: ${{ contains(needs.setup.outputs.modules, 'mariadb') || needs.setup.outputs.rebuild_type == 'full' || needs.setup.outputs.rebuild_type == 'test' }}
+    if: ${{ needs.check-modules.outputs.rebuild_mariadb == 'true' }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -373,9 +474,9 @@ jobs:
 
   # 构建Redis镜像
   build-redis-image:
-    needs: setup
+    needs: [setup, check-modules]
     runs-on: ubuntu-latest
-    if: ${{ contains(needs.setup.outputs.modules, 'redis') || needs.setup.outputs.rebuild_type == 'full' || needs.setup.outputs.rebuild_type == 'test' }}
+    if: ${{ needs.check-modules.outputs.rebuild_redis == 'true' }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -427,9 +528,47 @@ jobs:
 
   # 创建GitHub Release
   create-release:
-    needs: [test-php-image, test-nginx-image, test-mariadb-image, test-redis-image]
+    needs: [setup, check-modules, test-php-image, test-nginx-image, test-mariadb-image, test-redis-image]
     runs-on: ubuntu-latest
-    if: ${{ success() && needs.setup.outputs.rebuild_type != 'test' }}
+    if: ${{ (success() || always()) && needs.setup.outputs.rebuild_type != 'test' && needs.check-modules.outputs.changed_modules != '' }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置日期变量
+        id: set_date
+        run: |
+          echo "TODAY=$(date +'%Y%m%d')" >> $GITHUB_ENV
+          echo "TIMESTAMP=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+
+      - name: 创建GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ env.TIMESTAMP }}
+          release_name: 镜像更新 - ${{ env.TODAY }}
+          body: |
+            ## 构建信息
+            - 构建模块: ${{ needs.setup.outputs.modules }}
+            - 实际重构模块: ${{ needs.check-modules.outputs.changed_modules || '无' }}
+            - 重构类型: ${{ needs.setup.outputs.rebuild_type }}
+            - 自动部署: ${{ needs.setup.outputs.is_auto_deploy }}
+            
+            ## 版本信息
+            - PHP版本: ${{ needs.setup.outputs.php_version }}
+            - Nginx版本: ${{ needs.setup.outputs.nginx_version }}
+            - MariaDB版本: ${{ needs.setup.outputs.mariadb_version }}
+            - Redis版本: ${{ needs.setup.outputs.redis_version }}
+            - Alpine版本: ${{ needs.setup.outputs.alpine_version }}
+            
+            ## 变更详情
+            - 基础镜像变更: ${{ contains(needs.setup.outputs.modules, 'base') || needs.setup.outputs.rebuild_type == 'full' }}
+            - 功能模块变更: ${{ needs.check-modules.outputs.changed_modules != '' }}
+          draft: false
+          prerelease: false
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -461,9 +600,44 @@ jobs:
           draft: false
           prerelease: false
 
+  # 脚本变更快速发布
+  script-release:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ needs.setup.outputs.is_auto_deploy == 'true' && !contains(needs.setup.outputs.modules, 'base') && needs.setup.outputs.rebuild_type != 'full' && needs.setup.outputs.rebuild_type != 'test' }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 设置日期变量
+        id: set_date
+        run: |
+          echo "TODAY=$(date +'%Y%m%d')" >> $GITHUB_ENV
+          echo "TIMESTAMP=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+      
+      - name: 创建GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: script-${{ env.TIMESTAMP }}
+          release_name: 脚本更新 - ${{ env.TODAY }}
+          body: |
+            ## 脚本更新
+            - 更新了 `wp-docker/deploy/scripts/auto_deploy.sh`
+            - 无需重构镜像，仅脚本更新
+          draft: false
+          prerelease: false
+      
+      - name: 通知完成
+        run: |
+          echo "✅ 脚本更新快速发布完成"
+
   # 清理和总结
   cleanup:
-    needs: [test-php-image, test-nginx-image, test-mariadb-image, test-redis-image, create-release]
+    needs: [setup, check-modules, test-php-image, test-nginx-image, test-mariadb-image, test-redis-image, create-release, script-release]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -475,14 +649,27 @@ jobs:
       - name: 总结
         run: |
           echo "✅ 镜像构建工作流执行完成"
-          echo "构建模块: ${{ needs.setup.outputs.modules }}"
-          echo "重构类型: ${{ needs.setup.outputs.rebuild_type }}"
-          echo "测试模式: ${{ needs.setup.outputs.test_mode }}"
-          echo "PHP版本: ${{ needs.setup.outputs.php_version }}"
-          echo "Nginx版本: ${{ needs.setup.outputs.nginx_version }}"
-          echo "MariaDB版本: ${{ needs.setup.outputs.mariadb_version }}"
-          echo "Redis版本: ${{ needs.setup.outputs.redis_version }}"
-          echo "Alpine版本: ${{ needs.setup.outputs.alpine_version }}"
-          if [ "${{ needs.setup.outputs.rebuild_type }}" != "test" ] && [ "${{ needs.create-release.result }}" = "success" ]; then
-            echo "✅ GitHub Release已创建"
-          fi
+          echo "构建参数："
+            echo "- 构建模块: ${{ needs.setup.outputs.modules }}"
+            echo "- 实际重构模块: ${{ needs.check-modules.outputs.changed_modules || '无' }}"
+            echo "- 重构类型: ${{ needs.setup.outputs.rebuild_type }}"
+            echo "- 测试模式: ${{ needs.setup.outputs.test_mode }}"
+            echo "- 自动部署: ${{ needs.setup.outputs.is_auto_deploy }}"
+            
+            echo "\n版本信息："
+            echo "- PHP版本: ${{ needs.setup.outputs.php_version }}"
+            echo "- Nginx版本: ${{ needs.setup.outputs.nginx_version }}"
+            echo "- MariaDB版本: ${{ needs.setup.outputs.mariadb_version }}"
+            echo "- Redis版本: ${{ needs.setup.outputs.redis_version }}"
+            echo "- Alpine版本: ${{ needs.setup.outputs.alpine_version }}"
+            
+            echo "\n发布信息："
+            if [ "${{ needs.setup.outputs.rebuild_type }}" != "test" ]; then
+              if [ "${{ needs.script-release.result }}" = "success" ]; then
+                echo "✅ 脚本更新快速发布已完成"
+              elif [ "${{ needs.create-release.result }}" = "success" ]; then
+                echo "✅ GitHub Release已创建"
+              else
+                echo "⚠️ 未创建Release（可能因为没有需要重构的模块）"
+              fi
+            fi
