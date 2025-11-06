@@ -200,8 +200,7 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           echo "检查DOCKERHUB_USERNAME密钥是否存在: ${{ secrets.DOCKERHUB_USERNAME != '' }}"
-          echo "DOCKERHUB_USERNAME长度: ${{ length(secrets.DOCKERHUB_USERNAME) }}"
-          # 注意：我们不打印DOCKERHUB_TOKEN的具体内容，只检查其是否存在
+          # 注意：我们不打印实际内容，只检查其是否存在
           echo "DOCKERHUB_TOKEN密钥是否存在: ${{ secrets.DOCKERHUB_TOKEN != '' }}"
 
       - name: 登录到Docker Hub
@@ -235,7 +234,7 @@ jobs:
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-        continue-on-error: true
+          continue-on-error: true
 
   # 检查功能模块是否需要重构
   check-modules:
@@ -351,6 +350,9 @@ jobs:
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+        continue-on-error: true
 
   # 测试PHP镜像
   test-php-image:
@@ -416,6 +418,9 @@ jobs:
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+        continue-on-error: true
 
   # 测试Nginx镜像
   test-nginx-image:
@@ -481,6 +486,9 @@ jobs:
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+        continue-on-error: true
 
   # 测试MariaDB镜像
   test-mariadb-image:
@@ -537,6 +545,9 @@ jobs:
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:latest
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}
             - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+        continue-on-error: true
 
   # 测试Redis镜像
   test-redis-image:
