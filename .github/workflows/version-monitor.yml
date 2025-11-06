@@ -7,8 +7,12 @@ permissions:
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - '.github/**'
   schedule:
-    - cron: '0 0 * * 1'  # 每周一运行
+    # 每周一凌晨1点执行
+    - cron: '0 1 * * 1'
   workflow_dispatch:
     # 允许手动触发
     inputs:
@@ -28,11 +32,26 @@ jobs:
       mariadb_version: ${{ steps.get-versions.outputs.mariadb_version }}
       redis_version: ${{ steps.get-versions.outputs.redis_version }}
       alpine_version: ${{ steps.get-versions.outputs.alpine_version }}
+      auto_deploy_changed: ${{ steps.check_script.outputs.auto_deploy_changed || 'false' }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: 检查auto_deploy.sh变更
+        id: check_script
+        run: |
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} || echo "")
+          echo "Changed files: $CHANGED_FILES"
+          
+          if echo "$CHANGED_FILES" | grep -q "wp-docker/deploy/scripts/auto_deploy.sh"; then
+            echo "auto_deploy_changed=true" >> $GITHUB_OUTPUT
+            echo "✅ 检测到auto_deploy.sh变更，将触发快速发布"
+          else
+            echo "auto_deploy_changed=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: 获取最新版本信息
         id: get-versions
@@ -69,12 +88,49 @@ jobs:
           echo "$REDIS_VERSION" > build/Dockerfiles/redis/redis_version.txt
           echo "$ALPINE_VERSION" > build/Dockerfiles/base/alpine_version.txt 2>/dev/null || echo "$ALPINE_VERSION" > build/Dockerfiles/alpine_version.txt
 
+  # 快速脚本发布
+  quick-script-release:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ needs.setup.outputs.auto_deploy_changed == 'true' }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 设置日期变量
+        id: set_date
+        run: |
+          echo "TODAY=$(date +'%Y%m%d')" >> $GITHUB_ENV
+          echo "TIMESTAMP=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+      
+      - name: 创建GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: script-${{ env.TIMESTAMP }}
+          release_name: 脚本更新 - ${{ env.TODAY }}
+          body: |
+            ## 脚本更新
+            - 更新了 `wp-docker/deploy/scripts/auto_deploy.sh`
+            - 自动部署脚本变更
+          draft: false
+          prerelease: false
+      
+      - name: 通知完成
+        run: |
+          echo "✅ 快速脚本发布完成"
+          echo "Release标签: script-${{ env.TIMESTAMP }}"
+  
   # 检查版本差异并决定重构策略
   version-check:
     needs: setup
     runs-on: ubuntu-latest
+    if: ${{ needs.setup.outputs.auto_deploy_changed != 'true' }}
     outputs:
-      need_rebuild: ${{ steps.decide-rebuild.outputs.need_rebuild }}
+      rebuild_needed: ${{ steps.decide-rebuild.outputs.need_rebuild }}
       rebuild_type: ${{ steps.decide-rebuild.outputs.rebuild_type }}
       modules_to_rebuild: ${{ steps.decide-rebuild.outputs.modules_to_rebuild }}
     steps:
@@ -119,8 +175,8 @@ jobs:
           if [ "${{ needs.setup.outputs.alpine_version }}" != "${{ steps.read-versions.outputs.current_alpine }}" ] && [ -n "${{ steps.read-versions.outputs.current_alpine }}" ]; then
             NEED_REBUILD=true
             REBUILD_TYPE="full"
-            MODULES_TO_REBUILD="base,php,nginx"
-            echo "✅ Alpine基础镜像有更新，需要全量重构"
+            MODULES_TO_REBUILD="base,php,nginx,mariadb,redis"
+            echo "✅ Alpine基础镜像有更新，需要全量重构所有模块"
           fi
           
           # 检查PHP是否有更新
@@ -151,25 +207,40 @@ jobs:
             echo "✅ Nginx有更新，需要重构Nginx模块"
           fi
           
-          # 注意：MariaDB和Redis使用官方镜像，不需要重构
+          # 检查MariaDB是否有更新
           if [ "${{ needs.setup.outputs.mariadb_version }}" != "${{ steps.read-versions.outputs.current_mariadb }}" ] && [ -n "${{ steps.read-versions.outputs.current_mariadb }}" ]; then
-            echo "✅ MariaDB有更新，将更新docker-compose.yml使用新版本官方镜像"
             NEED_REBUILD=true
-            REBUILD_TYPE="official_images"
+            if [ "$REBUILD_TYPE" != "full" ]; then
+              REBUILD_TYPE="partial"
+              if [ -n "$MODULES_TO_REBUILD" ]; then
+                MODULES_TO_REBUILD="$MODULES_TO_REBUILD,mariadb"
+              else
+                MODULES_TO_REBUILD="mariadb"
+              fi
+            fi
+            echo "✅ MariaDB有更新，需要重构MariaDB模块"
           fi
           
+          # 检查Redis是否有更新
           if [ "${{ needs.setup.outputs.redis_version }}" != "${{ steps.read-versions.outputs.current_redis }}" ] && [ -n "${{ steps.read-versions.outputs.current_redis }}" ]; then
-            echo "✅ Redis有更新，将更新docker-compose.yml使用新版本官方镜像"
             NEED_REBUILD=true
-            REBUILD_TYPE="official_images"
+            if [ "$REBUILD_TYPE" != "full" ]; then
+              REBUILD_TYPE="partial"
+              if [ -n "$MODULES_TO_REBUILD" ]; then
+                MODULES_TO_REBUILD="$MODULES_TO_REBUILD,redis"
+              else
+                MODULES_TO_REBUILD="redis"
+              fi
+            fi
+            echo "✅ Redis有更新，需要重构Redis模块"
           fi
           
           # 如果是新仓库（没有当前版本信息），也需要重构
           if [ -z "${{ steps.read-versions.outputs.current_php }}" ] || [ -z "${{ steps.read-versions.outputs.current_nginx }}" ]; then
             NEED_REBUILD=true
             REBUILD_TYPE="full"
-            MODULES_TO_REBUILD="base,php,nginx"
-            echo "✅ 首次运行，需要全量重构"
+            MODULES_TO_REBUILD="base,php,nginx,mariadb,redis"
+            echo "✅ 首次运行，需要全量重构所有模块"
           fi
           
           echo "重构决策："
@@ -186,7 +257,7 @@ jobs:
   trigger-workflows:
     needs: [setup, version-check]
     runs-on: ubuntu-latest
-    if: ${{ needs.version-check.outputs.need_rebuild == 'true' }}
+    if: ${{ needs.version-check.outputs.rebuild_needed == 'true' }}
     steps:
       - name: 触发镜像构建工作流
         if: ${{ needs.version-check.outputs.rebuild_type == 'full' || needs.version-check.outputs.rebuild_type == 'partial' }}
@@ -194,15 +265,28 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           event-type: build-images
-          client-payload: '{"php_version": "${{ needs.setup.outputs.php_version }}", "nginx_version": "${{ needs.setup.outputs.nginx_version }}", "mariadb_version": "${{ needs.setup.outputs.mariadb_version }}", "redis_version": "${{ needs.setup.outputs.redis_version }}", "alpine_version": "${{ needs.setup.outputs.alpine_version }}", "modules": "${{ needs.version-check.outputs.modules_to_rebuild }}", "rebuild_type": "${{ needs.version-check.outputs.rebuild_type }}"}'
-
-      - name: 触发使用官方镜像工作流
-        if: ${{ needs.version-check.outputs.rebuild_type == 'official_images' }}
+          client-payload: |
+            {
+              "rebuild_type": "${{ needs.version-check.outputs.rebuild_type }}",
+              "modules": "${{ needs.version-check.outputs.modules_to_rebuild }}",
+              "php_version": "${{ needs.setup.outputs.php_version }}",
+              "nginx_version": "${{ needs.setup.outputs.nginx_version }}",
+              "mariadb_version": "${{ needs.setup.outputs.mariadb_version }}",
+              "redis_version": "${{ needs.setup.outputs.redis_version }}",
+              "alpine_version": "${{ needs.setup.outputs.alpine_version }}"
+            }
+      
+      - name: 触发使用官方镜像工作流（仅当需要更新MariaDB或Redis时）
+        if: ${{ contains(needs.version-check.outputs.modules_to_rebuild, 'mariadb') || contains(needs.version-check.outputs.modules_to_rebuild, 'redis') }}
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           event-type: use-official-images
-          client-payload: '{"php_version": "${{ needs.setup.outputs.php_version }}", "nginx_version": "${{ needs.setup.outputs.nginx_version }}", "mariadb_version": "${{ needs.setup.outputs.mariadb_version }}", "redis_version": "${{ needs.setup.outputs.redis_version }}"}'
+          client-payload: |
+            {
+              "mariadb_version": "${{ needs.setup.outputs.mariadb_version }}",
+              "redis_version": "${{ needs.setup.outputs.redis_version }}"
+            }
 
       - name: 发送通知
         run: |

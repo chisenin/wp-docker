@@ -14,12 +14,17 @@ on:
       modules:
         description: '要构建的模块（base,php,nginx,mariadb,redis），多个用逗号分隔'
         required: true
-        default: 'base,php,nginx'
+        default: 'base,php,nginx,mariadb,redis'
         type: string
       rebuild_type:
-        description: '重构类型（full/partial）'
+        description: '重构类型（full/partial/test）'
         required: false
         default: 'full'
+        type: string
+      test_mode:
+        description: '测试模式（true/false），测试模式下构建所有功能模块'
+        required: false
+        default: 'false'
         type: string
       php_version:
         description: 'PHP版本'
@@ -79,6 +84,13 @@ jobs:
             REBUILD_TYPE="${{ github.event.inputs.rebuild_type }}"
           fi
           
+          # 获取测试模式
+          if [ -n "${{ github.event.client_payload.test_mode }}" ]; then
+            TEST_MODE="${{ github.event.client_payload.test_mode }}"
+          else
+            TEST_MODE="${{ github.event.inputs.test_mode }}"
+          fi
+          
           if [ -n "${{ github.event.client_payload.php_version }}" ]; then
             PHP_VERSION="${{ github.event.client_payload.php_version }}"
           else
@@ -111,9 +123,17 @@ jobs:
             REDIS_VERSION="${{ github.event.inputs.redis_version }}"
           fi
           
+          # 测试模式下强制构建所有功能模块
+          if [ "$TEST_MODE" = "true" ] || [ "$REBUILD_TYPE" = "test" ]; then
+            echo "⚠️ 测试模式：构建所有功能模块"
+            REBUILD_TYPE="test"
+            MODULES="base,php,nginx,mariadb,redis"
+          fi
+          
           echo "构建参数："
           echo "- 模块: $MODULES"
           echo "- 重构类型: $REBUILD_TYPE"
+          echo "- 测试模式: $TEST_MODE"
           echo "- PHP版本: $PHP_VERSION"
           echo "- Nginx版本: $NGINX_VERSION"
           echo "- MariaDB版本: $MARIADB_VERSION"
@@ -128,6 +148,7 @@ jobs:
           echo "alpine_version=$ALPINE_VERSION" >> $GITHUB_OUTPUT
           echo "modules=$MODULES" >> $GITHUB_OUTPUT
           echo "rebuild_type=$REBUILD_TYPE" >> $GITHUB_OUTPUT
+          echo "test_mode=$TEST_MODE" >> $GITHUB_OUTPUT
           
           # 保存版本信息
           mkdir -p build/Dockerfiles/php build/Dockerfiles/nginx build/Dockerfiles/mariadb build/Dockerfiles/redis build/Dockerfiles/base
@@ -174,7 +195,7 @@ jobs:
   build-php-image:
     needs: [setup, build-base-image]
     runs-on: ubuntu-latest
-    if: ${{ contains(needs.setup.outputs.modules, 'php') || needs.setup.outputs.rebuild_type == 'full' }}
+    if: ${{ contains(needs.setup.outputs.modules, 'php') || needs.setup.outputs.rebuild_type == 'full' || needs.setup.outputs.rebuild_type == 'test' }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -237,7 +258,7 @@ jobs:
   build-nginx-image:
     needs: [setup, build-base-image]
     runs-on: ubuntu-latest
-    if: ${{ contains(needs.setup.outputs.modules, 'nginx') || needs.setup.outputs.rebuild_type == 'full' }}
+    if: ${{ contains(needs.setup.outputs.modules, 'nginx') || needs.setup.outputs.rebuild_type == 'full' || needs.setup.outputs.rebuild_type == 'test' }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -300,7 +321,7 @@ jobs:
   build-mariadb-image:
     needs: setup
     runs-on: ubuntu-latest
-    if: ${{ contains(needs.setup.outputs.modules, 'mariadb') || needs.setup.outputs.rebuild_type == 'full' }}
+    if: ${{ contains(needs.setup.outputs.modules, 'mariadb') || needs.setup.outputs.rebuild_type == 'full' || needs.setup.outputs.rebuild_type == 'test' }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -354,7 +375,7 @@ jobs:
   build-redis-image:
     needs: setup
     runs-on: ubuntu-latest
-    if: ${{ contains(needs.setup.outputs.modules, 'redis') || needs.setup.outputs.rebuild_type == 'full' }}
+    if: ${{ contains(needs.setup.outputs.modules, 'redis') || needs.setup.outputs.rebuild_type == 'full' || needs.setup.outputs.rebuild_type == 'test' }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -404,9 +425,45 @@ jobs:
           # 验证Redis配置
           echo "✅ Redis镜像测试完成"
 
+  # 创建GitHub Release
+  create-release:
+    needs: [test-php-image, test-nginx-image, test-mariadb-image, test-redis-image]
+    runs-on: ubuntu-latest
+    if: ${{ success() && needs.setup.outputs.rebuild_type != 'test' }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置日期变量
+        id: set_date
+        run: |
+          echo "TODAY=$(date +'%Y%m%d')" >> $GITHUB_ENV
+          echo "TIMESTAMP=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+
+      - name: 创建GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ env.TIMESTAMP }}
+          release_name: 镜像更新 - ${{ env.TODAY }}
+          body: |
+            ## 镜像更新详情
+            - 构建模块: ${{ needs.setup.outputs.modules }}
+            - 重构类型: ${{ needs.setup.outputs.rebuild_type }}
+            - PHP版本: ${{ needs.setup.outputs.php_version }}
+            - Nginx版本: ${{ needs.setup.outputs.nginx_version }}
+            - MariaDB版本: ${{ needs.setup.outputs.mariadb_version }}
+            - Redis版本: ${{ needs.setup.outputs.redis_version }}
+            - Alpine版本: ${{ needs.setup.outputs.alpine_version }}
+          draft: false
+          prerelease: false
+
   # 清理和总结
   cleanup:
-    needs: [test-php-image, test-nginx-image, test-mariadb-image, test-redis-image]
+    needs: [test-php-image, test-nginx-image, test-mariadb-image, test-redis-image, create-release]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -420,8 +477,12 @@ jobs:
           echo "✅ 镜像构建工作流执行完成"
           echo "构建模块: ${{ needs.setup.outputs.modules }}"
           echo "重构类型: ${{ needs.setup.outputs.rebuild_type }}"
+          echo "测试模式: ${{ needs.setup.outputs.test_mode }}"
           echo "PHP版本: ${{ needs.setup.outputs.php_version }}"
           echo "Nginx版本: ${{ needs.setup.outputs.nginx_version }}"
           echo "MariaDB版本: ${{ needs.setup.outputs.mariadb_version }}"
           echo "Redis版本: ${{ needs.setup.outputs.redis_version }}"
           echo "Alpine版本: ${{ needs.setup.outputs.alpine_version }}"
+          if [ "${{ needs.setup.outputs.rebuild_type }}" != "test" ] && [ "${{ needs.create-release.result }}" = "success" ]; then
+            echo "✅ GitHub Release已创建"
+          fi
