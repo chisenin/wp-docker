@@ -5,6 +5,7 @@
 注意 : 详细指南文档已移至 `guides/` 目录，包含从介绍到部署的完整步骤说明。
 
 ## 项目结构
+```
 wp-docker/
 ├── .gitignore                     # Git 忽略规则
 ├── README.md                      # 项目说明文档
@@ -42,6 +43,7 @@ wp-docker/
 │   └── scripts/                   # 部署脚本目录
 │       └── auto_deploy.sh         # 自动化部署脚本（增强版）
 └── html/                          # WordPress 源码目录
+```
 ## 快速开始
 
 ### 实际工作流程说明
