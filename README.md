@@ -1,14 +1,10 @@
 # WordPress + Docker Compose 项目 (GitHub Actions 自动化版)
----
+
 本项目使用 Docker Compose 部署 WordPress 生产环境，结合官方数据库镜像与自定义应用镜像，并集成 GitHub Actions 实现 CI/CD 自动化，确保环境一致性、稳定性和部署效率。
 
-**注意**: 详细指南文档已移至 `guides/` 目录，包含从介绍到部署的完整步骤说明。
+注意 : 详细指南文档已移至 `guides/` 目录，包含从介绍到部署的完整步骤说明。
 
-**主要特性**: 动态版本锁定、共享Base镜像、配置即代码、混合镜像策略（官方+自定义）、自动版本监控与构建、自动化部署脚本、安全实践集成
----
 ## 项目结构
-
-```
 wp-docker/
 ├── .gitignore                     # Git 忽略规则
 ├── README.md                      # 项目说明文档
@@ -28,8 +24,8 @@ wp-docker/
 │   │   ├── base/                  # 共享 Alpine Base 镜像
 │   │   ├── php/                   # PHP-FPM Dockerfile
 │   │   ├── nginx/                 # Nginx Dockerfile
-│   │   ├── mariadb/               # MariaDB Dockerfile（已弃用，现使用官方镜像）
-│   │   └── redis/                 # Redis Dockerfile（已弃用，现使用官方镜像）
+│   │   ├── mariadb/               # MariaDB Dockerfile（战略保留：base 变更时强制重建）
+│   │   └── redis/                 # Redis Dockerfile（战略保留：base 变更时强制重建）
 │   ├── deploy_configs/            # 部署配置目录
 │   │   ├── php/                   # PHP 配置
 │   │   ├── nginx/                 # Nginx 配置
@@ -46,37 +42,35 @@ wp-docker/
 │   └── scripts/                   # 部署脚本目录
 │       └── auto_deploy.sh         # 自动化部署脚本（增强版）
 └── html/                          # WordPress 源码目录
-```
-
 ## 快速开始
 
 ### 实际工作流程说明
 
-**重要说明**：本项目采用 Windows 本地开发、GitHub Actions 构建、Linux 远程部署的工作流。
+重要说明 ：本项目采用 Windows 本地开发、GitHub Actions 构建、Linux 远程部署的工作流。
 
-- **本地 Windows 环境**：
+* 本地 Windows 环境 ：
+
   - 不需要 `.env` 和 `docker-compose.yml` 文件用于本地运行
   - 这些文件主要用于构建配置和 GitHub Actions 工作流
   - 本地开发主要关注代码修改和提交
-
-- **初始化项目**
-  ```bash
+* 初始化项目
   git clone <仓库地址> wp-docker
   cd wp-docker
-  ```
 
-- **代码开发与提交**
-  - 修改源代码和配置文件
-  - 提交到 GitHub，触发 GitHub Actions 构建
+* 代码开发与提交
+
+  * 修改源代码和配置文件
+  * 提交到 GitHub，触发 GitHub Actions 构建
 
 ### 配置文件说明
 
-- **核心配置文件**（`docker-compose.yml` 和 `.env.example`）：
-  - 这些文件在 Windows 本地环境中**不需要用于运行服务**
-  - 它们的主要用途是为 GitHub Actions 构建过程提供配置参考
-  - 生产环境的实际配置会由 `auto_deploy.sh` 脚本根据目标 Linux 服务器环境动态生成
+* 核心配置文件 （ `docker-compose.yml` 和 `.env.example` ）：
 
-- **服务配置文件**：
+  + 这些文件在 Windows 本地环境中 不需要用于运行服务
+  + 它们的主要用途是为 GitHub Actions 构建过程提供配置参考
+  + 生产环境的实际配置会由 `auto_deploy.sh` 脚本根据目标 Linux 服务器环境动态生成
+* 服务配置文件 ：
+
   - Nginx 配置位于 `build/deploy_configs/nginx/` 目录
   - PHP 配置位于 `build/deploy_configs/php/php.ini` 文件
   - MariaDB 和 Redis 配置：现使用官方镜像，配置通过环境变量传递
@@ -85,124 +79,174 @@ wp-docker/
 
 ### 生产环境
 
-1. **准备工作**
-   - 在 GitHub 仓库设置中配置 Docker Hub 凭据：`DOCKERHUB_USERNAME` 和 `DOCKERHUB_TOKEN`
-   - 将代码推送到 GitHub 仓库的 `main` 分支，触发 GitHub Actions 自动构建镜像
+0. 准备工作
 
-2. **使用自动部署脚本（推荐）**
-   ```bash
-   # 在生产服务器上
-   git clone <仓库地址> wp-docker
-   cd wp-docker
-   chmod +x deploy/scripts/auto_deploy.sh
-   ./deploy/scripts/auto_deploy.sh
-   ```
-   
-   脚本特性：
-   - 自动创建专用部署目录，避免在系统目录直接部署
-   - 提供交互式目录名称设置（默认：wordpress-docker）
-   - 使用自定义构建的Nginx镜像代替官方镜像
-   - 自动生成安全的密码和WordPress密钥
-   - 一键完成所有配置、下载和启动流程
+  * 在 GitHub 仓库设置中配置 Docker Hub 凭据： `DOCKERHUB_USERNAME` 和 `DOCKERHUB_TOKEN`
+  * 将代码推送到 GitHub 仓库的 `main` 分支，触发 GitHub Actions 自动构建镜像
+1. 使用自动部署脚本（推荐）
 
-3. **增强的自动部署脚本**
-   - 自动检测操作系统环境（支持CentOS、Debian、Ubuntu、Alpine）
-   - 智能收集系统参数并优化Docker资源配置
-   - 自动设置数据库备份（每日3点备份，保留7天）
-   - 磁盘空间监控与自动清理功能（80%使用率触发）
-   - 自动安装缺失依赖并创建必要目录结构
-   - 优化的Nginx和PHP配置，支持高并发环境
+在生产服务器上（推荐：从 GitHub Releases 下载最新部署脚本）
+1. 下载最新 auto_deploy.sh
+```
+curl -L -o auto_deploy.sh 
+https://github.com/chisenin/wp-docker/releases/latest/download/auto_deploy.sh
+```
+2. 添加执行权限并运行
+  ```
+  chmod +x auto_deploy.sh
+  ./auto_deploy.sh
+  ```
 
-4. **完成 WordPress 安装**
-    - 访问服务器 IP 地址完成安装向导
-    - 推荐安装并配置 Redis Object Cache 插件以启用缓存功能
+  脚本特性：
+
+  * 自动创建专用部署目录，避免在系统目录直接部署
+  * 提供交互式目录名称设置（默认：wordpress-docker）
+  * 使用自定义构建的Nginx镜像代替官方镜像
+  * 自动生成安全的密码和WordPress密钥
+  * 一键完成所有配置、下载和启动流程
+2. 增强的自动部署脚本
+
+  - 自动检测操作系统环境（支持CentOS、Debian、Ubuntu、Alpine）
+  - 智能收集系统参数并优化Docker资源配置
+  - 自动设置数据库备份（每日3点备份，保留7天）
+  - 磁盘空间监控与自动清理功能（80%使用率触发）
+  - 自动安装缺失依赖并创建必要目录结构
+  - 优化的Nginx和PHP配置，支持高并发环境
+3. 完成 WordPress 安装
+
+  * 访问服务器 IP 地址完成安装向导
+  * 推荐安装并配置 Redis Object Cache 插件以启用缓存功能
 
 ## 开发工作流
 
-1. **创建和管理分支**
-   - `main` 分支：永远保持稳定、可部署的状态
-   - 功能分支：每次开发新功能或修复 Bug，都从 `main` 分支创建一个新分支
-   - 分支命名示例：`feat/nginx-gzip`、`fix/php-upload-size`
+0) 创建和管理分支
 
-2. **编写有意义的 Commit Message**
-   遵循 Conventional Commits 规范：
-   ```bash
-   git add build/Dockerfiles/nginx/conf.d/default.conf
-   git commit -m "feat(nginx): 开启 Gzip 压缩以提高页面加载速度"
-   ```
+  * `main` 分支：永远保持稳定、可部署的状态
+  * 功能分支：每次开发新功能或修复 Bug，都从 `main` 分支创建一个新分支
+  * 分支命名示例： `feat/nginx-gzip`、 `fix/php-upload-size`
+1) 编写有意义的 Commit Message 遵循 Conventional Commits 规范：
 
-3. **Pull Request 和代码审查**
-   - 将功能分支推送到远程仓库
-   - 创建 Pull Request，目标分支为 `main`
-   - 邀请团队成员进行代码审查
-   - 审查通过后合并到 `main` 分支
+  ```
+  git add build/Dockerfiles/nginx/conf.d/default.conf
+  git commit -m "feat(nginx): 开启 Gzip 压缩以提高页面加载速度"
+  ```
+2) Pull Request 和代码审查
 
-4. **自动化构建和部署**
-   - 合并到 `main` 分支后，GitHub Actions 会自动触发：
-     - 构建多阶段 PHP 和 Nginx 镜像
-     - 推送镜像到 Docker Hub
-     - 更新版本锁定文件
-     - 测试镜像可用性
-   - 生产部署：在目标服务器上运行 `./deploy/scripts/auto_deploy.sh` 自动化脚本
+  * 将功能分支推送到远程仓库
+  * 创建 Pull Request，目标分支为 `main`
+  * 邀请团队成员进行代码审查
+  * 审查通过后合并到 `main` 分支
+3) 自动化构建和部署
+
+  * 合并到 `main` 分支后，GitHub Actions 会自动触发：
+
+  * 构建多阶段 PHP 和 Nginx 镜像
+  * 推送镜像到 Docker Hub
+  * 更新版本锁定文件
+  * 测试镜像可用性
+  * 生产部署：在目标服务器上运行 `./deploy/scripts/auto_deploy.sh` 自动化脚本
+
+## MariaDB / Redis 构建策略（渐进式收敛 + 强一致性保障）
+
+本项目采用 **智能渐进式镜像收敛策略**，在保证 **基础镜像安全更新快速下发** 的同时，最大化利用 **官方镜像的稳定性**。
+
+| 场景 | 构建行为 | 最终镜像来源 | 说明 |
+|------|----------|--------------|------|
+| **基础镜像（`wp-docker-base`）更新** | **强制重建** MariaDB / Redis 自定义镜像 | `wp-docker-mariadb:10.11-xxxx`<br>`wp-docker-redis:7.2-xxxx` | 确保所有服务使用**最新安全补丁**，避免因 base 变更导致不一致 |
+| **MariaDB / Redis 自身配置变更** | 构建自定义镜像 | `wp-docker-mariadb:10.11-xxxx` | 用于测试新配置（如性能优化、备份策略） |
+| **无任何变更** | **跳过构建** | `mariadb:10.11`（官方）<br>`redis:7.2`（官方） | 生产环境通过 `auto_deploy.sh` 自动使用官方镜像，减少维护成本 |
+
+#### 核心优势
+- **安全第一**：Alpine base 镜像打补丁后，**全栈同步更新**
+- **高效收敛**：无变更时不构建，**零开销**
+- **配置可控**：支持自定义配置逐步验证，未来可完全迁移至官方镜像
+- **部署透明**：`auto_deploy.sh` 智能选择可用镜像
+
+#### 工作流实现
+```yaml
+# check-modules 作业（关键逻辑）
+if base 模块变更:
+  REBUILD_MARIADB=true
+  REBUILD_REDIS=true
+```
+> 详见 `.github/workflows/build-images.yml`
+
+#### 部署脚本适配
+```bash
+# deploy/scripts/auto_deploy.sh
+if docker pull wp-docker-mariadb:${TAG}; then
+  MARIADB_IMAGE="wp-docker-mariadb:${TAG}"
+else
+  MARIADB_IMAGE="mariadb:${MARIADB_VERSION}"
+fi
+```
+> 自动优先使用自定义镜像，无则回退官方
+
+> **注意**：`build/Dockerfiles/mariadb/` 和 `redis/` 目录 **并非废弃**，而是 **战略性保留**，用于：
+> - 基础镜像变更时的强制同步
+> - 高级配置测试
+> - 未来可能的性能优化（如自定义编译参数）
 
 ## 注意事项
 
-- **安全实践**: 生产环境请确保使用 `deploy/scripts/auto_deploy.sh` 脚本生成安全的密码和密钥，不要使用默认值
-- **定期备份**: 定期备份数据库和重要文件，特别是 `html` 目录下的内容和数据库
-- **版本管理**: 遵循文档中的最佳实践进行环境管理，使用精确版本号而非 `latest` 标签，版本信息存储在 `build/Dockerfiles/*/*_version.txt` 文件中
-- **配置管理**: 
-  - Nginx 配置位于 `build/deploy_configs/nginx/` 目录
-  - PHP 配置位于 `build/deploy_configs/php/php.ini` 文件
-  - MariaDB 配置位于 `build/deploy_configs/mariadb/my.cnf` 文件
-  - Redis 配置位于 `build/deploy_configs/redis/redis.conf` 文件
-  - 所有配置均支持通过环境变量进行动态调整
-- **故障排除**: 如遇到镜像拉取失败，检查 `.env` 文件中的版本号是否正确或查看 GitHub Actions 构建日志
-- **环境变量**: 所有环境变量配置可参考 `.env.example` 文件
++ 安全实践 : 生产环境请确保使用 `deploy/scripts/auto_deploy.sh` 脚本生成安全的密码和密钥，不要使用默认值
++ 定期备份 : 定期备份数据库和重要文件，特别是 `html` 目录下的内容和数据库
++ 版本管理 : 遵循文档中的最佳实践进行环境管理，使用精确版本号而非 `latest` 标签，版本信息存储在 `build/Dockerfiles/*/*_version.txt` 文件中
++ 配置管理 :
+
+  * Nginx 配置位于 `build/deploy_configs/nginx/` 目录
+  * PHP 配置位于 `build/deploy_configs/php/php.ini` 文件
+  * MariaDB 配置位于 `build/deploy_configs/mariadb/my.cnf` 文件
+  * Redis 配置位于 `build/deploy_configs/redis/redis.conf` 文件
+  * 所有配置均支持通过环境变量进行动态调整
++ 故障排除 : 如遇到镜像拉取失败，检查 `.env` 文件中的版本号是否正确或查看 GitHub Actions 构建日志
++ 环境变量 : 所有环境变量配置可参考 `.env.example` 文件
 
 ## 已实现的高级功能
 
-1. **动态版本管理**
-   - 自动提取并使用精确的 PHP、Nginx、MariaDB 和 Redis 版本
-   - 避免使用不稳定的 `latest` 标签
-   - 版本信息存储在专用的版本锁定文件中
+0) 动态版本管理
 
-2. **多阶段构建优化**
-   - 使用共享 Alpine Base 镜像减少重复依赖下载
-   - 分离构建和运行环境，减小最终镜像体积
-   - 所有组件（PHP、Nginx、MariaDB、Redis）均采用多阶段构建
+  * 自动提取并使用精确的 PHP、Nginx、MariaDB 和 Redis 版本
+  * 避免使用不稳定的 `latest` 标签
+  * 版本信息存储在专用的版本锁定文件中
+1) 多阶段构建优化
 
-3. **全栈自定义配置**
-   - WordPress 专用的 MariaDB 数据库配置，优化查询性能
-   - 高性能 Redis 缓存配置，支持对象缓存和会话管理
-   - 针对 WordPress 优化的 PHP-FPM 配置，启用所有必要扩展
-   - 安全且高性能的 Nginx 配置，包含 Gzip、缓存控制和安全头
+  * 使用共享 Alpine Base 镜像减少重复依赖下载
+  * 分离构建和运行环境，减小最终镜像体积
+  * 所有组件（PHP、Nginx、MariaDB、Redis）均采用多阶段构建
+2) 全栈自定义配置
 
-4. **安全增强**
-   - 部署脚本自动生成 WordPress 安全密钥
-   - 生成不含特殊字符的随机用户名和强密码
-   - 容器内文件权限严格控制
-   - 自动禁止访问敏感文件和目录
-   - 支持 Redis 密码认证
+  * WordPress 专用的 MariaDB 数据库配置，优化查询性能
+  * 高性能 Redis 缓存配置，支持对象缓存和会话管理
+  * 针对 WordPress 优化的 PHP-FPM 配置，启用所有必要扩展
+  * 安全且高性能的 Nginx 配置，包含 Gzip、缓存控制和安全头
+3) 安全增强
 
-5. **自动版本监控与构建**
-   - GitHub Actions 工作流 `version-monitor-and-build.yml` 定期自动检查所有依赖版本更新
-   - 检测到新版本时自动触发构建和发布
-   - 支持自定义检查频率和通知配置
-   - 自动生成详细的版本更新日志
+  * 部署脚本自动生成 WordPress 安全密钥
+  * 生成不含特殊字符的随机用户名和强密码
+  * 容器内文件权限严格控制
+  * 自动禁止访问敏感文件和目录
+  * 支持 Redis 密码认证
+4) 自动版本监控与构建
 
-6. **高级自动化部署**
-   - 增强版 `auto_deploy.sh` 脚本集成完整部署和维护流程
-   - 环境自适应：自动检测并适配不同Linux发行版
-   - 系统资源智能优化：根据主机配置自动调整Docker资源参数
-   - 自动数据库备份：每日定时备份，智能保留策略
-   - 磁盘空间管理：监控使用率并自动清理Docker资源
-   - 自动安装缺失依赖并创建必要目录结构
+  - GitHub Actions 工作流 `version-monitor-and-build.yml` 定期自动检查所有依赖版本更新
+  - 检测到新版本时自动触发构建和发布
+  - 支持自定义检查频率和通知配置
+  - 自动生成详细的版本更新日志
+5) 高级自动化部署
 
-7. **性能优化**
-   - 数据库连接池和查询缓存配置
-   - Redis 内存优化和淘汰策略
-   - PHP OPcache 优化配置
-   - Nginx 静态文件缓存和压缩
+  - 增强版 `auto_deploy.sh` 脚本集成完整部署和维护流程
+  - 环境自适应：自动检测并适配不同Linux发行版
+  - 系统资源智能优化：根据主机配置自动调整Docker资源参数
+  - 自动数据库备份：每日定时备份，智能保留策略
+  - 磁盘空间管理：监控使用率并自动清理Docker资源
+  - 自动安装缺失依赖并创建必要目录结构
+6) 性能优化
+
+  * 数据库连接池和查询缓存配置
+  * Redis 内存优化和淘汰策略
+  * PHP OPcache 优化配置
+  * Nginx 静态文件缓存和压缩
 
 ## 未来优化方向
 
