@@ -9,7 +9,6 @@ on:
   repository_dispatch:
     types: [build-images]
   workflow_dispatch:
-    # 允许手动触发
     inputs:
       modules:
         description: '要构建的模块（base,php,nginx,mariadb,redis），多个用逗号分隔'
@@ -53,7 +52,6 @@ on:
         type: string
 
 jobs:
-  # 准备环境和设置构建参数
   setup:
     runs-on: ubuntu-latest
     outputs:
@@ -75,7 +73,6 @@ jobs:
       - name: 检查触发来源
         id: check-trigger
         run: |
-          # 检查是否来自自动部署（repository_dispatch）
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
             echo "is_auto_deploy=true" >> $GITHUB_OUTPUT
             echo "触发来源: 自动部署"
@@ -84,7 +81,6 @@ jobs:
             echo "触发来源: 手动触发"
           fi
           
-          # 检查是否包含auto_deploy.sh变更
           if [ -f "wp-docker/deploy/scripts/auto_deploy.sh" ]; then
             echo "has_auto_deploy_script=true" >> $GITHUB_OUTPUT
           else
@@ -94,7 +90,6 @@ jobs:
       - name: 准备构建参数
         id: prepare-params
         run: |
-          # 从client_payload或workflow_dispatch输入获取参数
           if [ -n "${{ github.event.client_payload.modules }}" ]; then
             MODULES="${{ github.event.client_payload.modules }}"
           else
@@ -107,7 +102,6 @@ jobs:
             REBUILD_TYPE="${{ github.event.inputs.rebuild_type }}"
           fi
           
-          # 获取测试模式
           if [ -n "${{ github.event.client_payload.test_mode }}" ]; then
             TEST_MODE="${{ github.event.client_payload.test_mode }}"
           else
@@ -132,23 +126,20 @@ jobs:
             ALPINE_VERSION="${{ github.event.inputs.alpine_version }}"
           fi
           
-          # 获取MariaDB版本
           if [ -n "${{ github.event.client_payload.mariadb_version }}" ]; then
             MARIADB_VERSION="${{ github.event.client_payload.mariadb_version }}"
           else
             MARIADB_VERSION="${{ github.event.inputs.mariadb_version }}"
           fi
           
-          # 获取Redis版本
           if [ -n "${{ github.event.client_payload.redis_version }}" ]; then
             REDIS_VERSION="${{ github.event.client_payload.redis_version }}"
           else
             REDIS_VERSION="${{ github.event.inputs.redis_version }}"
           fi
           
-          # 测试模式下强制构建所有功能模块
           if [ "$TEST_MODE" = "true" ] || [ "$REBUILD_TYPE" = "test" ]; then
-            echo "⚠️ 测试模式：构建所有功能模块"
+            echo "测试模式：构建所有功能模块"
             REBUILD_TYPE="test"
             MODULES="base,php,nginx,mariadb,redis"
           fi
@@ -163,7 +154,6 @@ jobs:
           echo "- Redis版本: $REDIS_VERSION"
           echo "- Alpine版本: $ALPINE_VERSION"
           
-          # 设置输出
           echo "php_version=$PHP_VERSION" >> $GITHUB_OUTPUT
           echo "nginx_version=$NGINX_VERSION" >> $GITHUB_OUTPUT
           echo "mariadb_version=$MARIADB_VERSION" >> $GITHUB_OUTPUT
@@ -173,7 +163,6 @@ jobs:
           echo "rebuild_type=$REBUILD_TYPE" >> $GITHUB_OUTPUT
           echo "test_mode=$TEST_MODE" >> $GITHUB_OUTPUT
           
-          # 保存版本信息
           mkdir -p build/Dockerfiles/php build/Dockerfiles/nginx build/Dockerfiles/mariadb build/Dockerfiles/redis build/Dockerfiles/base
           echo "$PHP_VERSION" > build/Dockerfiles/php/php_version.txt
           echo "$NGINX_VERSION" > build/Dockerfiles/nginx/nginx_version.txt
@@ -181,7 +170,6 @@ jobs:
           echo "$REDIS_VERSION" > build/Dockerfiles/redis/redis_version.txt
           echo "$ALPINE_VERSION" > build/Dockerfiles/base/alpine_version.txt
 
-  # 构建基础镜像
   build-base-image:
     needs: setup
     runs-on: ubuntu-latest
@@ -196,7 +184,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: 登录到Docker Hub
-        if: github.event_name != 'pull_request'  # 避免在PR时尝试登录
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -210,13 +198,12 @@ jobs:
           file: ./build/Dockerfiles/base/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
-          build-args:
+          build-args: |
             ALPINE_VERSION=${{ needs.setup.outputs.alpine_version }}
-          tags:
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:latest
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
 
-  # 检查功能模块是否需要重构
   check-modules:
     needs: [setup, build-base-image]
     runs-on: ubuntu-latest
@@ -237,14 +224,12 @@ jobs:
       - name: 检查模块是否需要重构
         id: module-check
         run: |
-          # 默认为不需要重构
           REBUILD_PHP="false"
           REBUILD_NGINX="false"
           REBUILD_MARIADB="false"
           REBUILD_REDIS="false"
           CHANGED_MODULES=""
           
-          # 全量重构模式或测试模式下所有模块都需要重构
           if [ "${{ needs.setup.outputs.rebuild_type }}" = "full" ] || [ "${{ needs.setup.outputs.rebuild_type }}" = "test" ]; then
             REBUILD_PHP="true"
             REBUILD_NGINX="true"
@@ -252,29 +237,24 @@ jobs:
             REBUILD_REDIS="true"
             CHANGED_MODULES="php,nginx,mariadb,redis"
           else
-            # 检查模块特定文件是否有变更
             if echo "${{ needs.setup.outputs.modules }}" | grep -q "php"; then
               REBUILD_PHP="true"
               CHANGED_MODULES="${CHANGED_MODULES},php"
             fi
-            
             if echo "${{ needs.setup.outputs.modules }}" | grep -q "nginx"; then
               REBUILD_NGINX="true"
               CHANGED_MODULES="${CHANGED_MODULES},nginx"
             fi
-            
             if echo "${{ needs.setup.outputs.modules }}" | grep -q "mariadb"; then
               REBUILD_MARIADB="true"
               CHANGED_MODULES="${CHANGED_MODULES},mariadb"
             fi
-            
             if echo "${{ needs.setup.outputs.modules }}" | grep -q "redis"; then
               REBUILD_REDIS="true"
               CHANGED_MODULES="${CHANGED_MODULES},redis"
             fi
           fi
           
-          # 移除开头的逗号
           CHANGED_MODULES=$(echo "$CHANGED_MODULES" | sed 's/^,//')
           
           echo "需要重构的模块: $CHANGED_MODULES"
@@ -284,9 +264,8 @@ jobs:
           echo "rebuild_redis=$REBUILD_REDIS" >> $GITHUB_OUTPUT
           echo "changed_modules=$CHANGED_MODULES" >> $GITHUB_OUTPUT
           
-          # 如果没有需要重构的功能模块但有基础镜像重构，设置为所有模块都需要重构
           if [ -z "$CHANGED_MODULES" ] && (echo "${{ needs.setup.outputs.modules }}" | grep -q "base" || [ "${{ needs.setup.outputs.rebuild_type }}" = "full" ]); then
-            echo "⚠️ 基础镜像变更，所有功能模块都需要重构"
+            echo "基础镜像变更，所有功能模块都需要重构"
             echo "rebuild_php=true" >> $GITHUB_OUTPUT
             echo "rebuild_nginx=true" >> $GITHUB_OUTPUT
             echo "rebuild_mariadb=true" >> $GITHUB_OUTPUT
@@ -294,7 +273,6 @@ jobs:
             echo "changed_modules=php,nginx,mariadb,redis" >> $GITHUB_OUTPUT
           fi
   
-  # 构建PHP镜像
   build-php-image:
     needs: [setup, build-base-image, check-modules]
     runs-on: ubuntu-latest
@@ -309,7 +287,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: 登录到Docker Hub
-        if: github.event_name != 'pull_request'  # 避免在PR时尝试登录
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -323,15 +301,14 @@ jobs:
           file: ./build/Dockerfiles/php/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
-          build-args:
+          build-args: |
             PHP_VERSION=${{ needs.setup.outputs.php_version }}
             BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
-          tags:
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}-${{ github.sha }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}-${{ github.sha }}
 
-  # 测试PHP镜像
   test-php-image:
     needs: build-php-image
     runs-on: ubuntu-latest
@@ -341,25 +318,20 @@ jobs:
 
       - name: 运行PHP镜像测试
         run: |
-          # 拉取构建的镜像
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest
-          
-          # 运行简单的测试命令
           docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest php -v
           docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest php -m | grep -E 'curl|gd|mbstring|mysqli|pdo_mysql|redis|zip'
           
-          # 验证WordPress所需的PHP扩展是否已安装
           EXTENSIONS=("curl" "gd" "mbstring" "mysqli" "pdo_mysql" "redis" "zip" "imagick")
           for ext in "${EXTENSIONS[@]}"; do
             if docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest php -m | grep -q "$ext"; then
-              echo "✅ PHP扩展 $ext 已安装"
+              echo "PHP扩展 $ext 已安装"
             else
-              echo "❌ PHP扩展 $ext 未安装"
+              echo "PHP扩展 $ext 未安装"
               exit 1
             fi
           done
 
-  # 构建Nginx镜像
   build-nginx-image:
     needs: [setup, build-base-image, check-modules]
     runs-on: ubuntu-latest
@@ -374,7 +346,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: 登录到Docker Hub
-        if: github.event_name != 'pull_request'  # 避免在PR时尝试登录
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -388,15 +360,14 @@ jobs:
           file: ./build/Dockerfiles/nginx/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
-          build-args:
+          build-args: |
             NGINX_VERSION=${{ needs.setup.outputs.nginx_version }}
             BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
-          tags:
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}-${{ github.sha }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}-${{ github.sha }}
 
-  # 测试Nginx镜像
   test-nginx-image:
     needs: build-nginx-image
     runs-on: ubuntu-latest
@@ -406,25 +377,11 @@ jobs:
 
       - name: 运行Nginx镜像测试
         run: |
-          # 拉取构建的镜像
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest
-          
-          # 运行简单的测试命令
           docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest nginx -v
-          
-          # 验证Nginx配置是否正确
           docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest nginx -t
-          
-          # 验证是否包含WordPress所需的配置
-          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest nginx -T | grep -q "php-fpm"
-          if [ $? -eq 0 ]; then
-            echo "✅ WordPress Nginx配置已正确包含"
-          else
-            echo "❌ WordPress Nginx配置未找到"
-            exit 1
-          fi
+          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest nginx -T | grep -q "php-fpm" && echo "WordPress Nginx配置已正确包含" || (echo "WordPress Nginx配置未找到" && exit 1)
 
-  # 构建MariaDB镜像
   build-mariadb-image:
     needs: [setup, check-modules]
     runs-on: ubuntu-latest
@@ -439,7 +396,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: 登录到Docker Hub
-        if: github.event_name != 'pull_request'  # 避免在PR时尝试登录
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -453,15 +410,14 @@ jobs:
           file: ./build/Dockerfiles/mariadb/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
-          build-args:
+          build-args: |
             MARIADB_VERSION=${{ needs.setup.outputs.mariadb_version }}
             BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
-          tags:
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}-${{ github.sha }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}-${{ github.sha }}
 
-  # 测试MariaDB镜像
   test-mariadb-image:
     needs: build-mariadb-image
     runs-on: ubuntu-latest
@@ -471,16 +427,10 @@ jobs:
 
       - name: 运行MariaDB镜像测试
         run: |
-          # 拉取构建的镜像
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest
-          
-          # 运行简单的测试命令
           docker run --rm --entrypoint=mysql ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest --version
-          
-          # 验证MariaDB配置
-          echo "✅ MariaDB镜像测试完成"
+          echo "MariaDB镜像测试完成"
 
-  # 构建Redis镜像
   build-redis-image:
     needs: [setup, check-modules]
     runs-on: ubuntu-latest
@@ -495,7 +445,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: 登录到Docker Hub
-        if: github.event_name != 'pull_request'  # 避免在PR时尝试登录
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -509,15 +459,14 @@ jobs:
           file: ./build/Dockerfiles/redis/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
-          build-args:
+          build-args: |
             REDIS_VERSION=${{ needs.setup.outputs.redis_version }}
             BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
-          tags:
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:latest
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}
-            - ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}-${{ github.sha }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}-${{ github.sha }}
 
-  # 测试Redis镜像
   test-redis-image:
     needs: build-redis-image
     runs-on: ubuntu-latest
@@ -527,16 +476,10 @@ jobs:
 
       - name: 运行Redis镜像测试
         run: |
-          # 拉取构建的镜像
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:latest
-          
-          # 运行简单的测试命令
           docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:latest redis-server --version
-          
-          # 验证Redis配置
-          echo "✅ Redis镜像测试完成"
+          echo "Redis镜像测试完成"
 
-  # 创建GitHub Release
   create-release:
     needs: [setup, check-modules, test-php-image, test-nginx-image, test-mariadb-image, test-redis-image]
     runs-on: ubuntu-latest
@@ -580,40 +523,37 @@ jobs:
           draft: false
           prerelease: false
 
-  # 清理和总结
   cleanup:
     needs: [setup, check-modules, test-php-image, test-nginx-image, test-mariadb-image, test-redis-image, create-release]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: 清理
-        run: |
-          # 清理构建过程中的临时文件
-          echo "清理构建环境..."
+        run: echo "清理构建环境..."
       
       - name: 总结
         run: |
-          echo "✅ 镜像构建工作流执行完成"
+          echo "镜像构建工作流执行完成"
           echo "构建参数："
-            echo "- 构建模块: ${{ needs.setup.outputs.modules }}"
-            echo "- 实际重构模块: ${{ needs.check-modules.outputs.changed_modules || '无' }}"
-            echo "- 重构类型: ${{ needs.setup.outputs.rebuild_type }}"
-            echo "- 测试模式: ${{ needs.setup.outputs.test_mode }}"
-            echo "- 自动部署: ${{ needs.setup.outputs.is_auto_deploy }}"
-            
-            echo "\n版本信息："
-            echo "- PHP版本: ${{ needs.setup.outputs.php_version }}"
-            echo "- Nginx版本: ${{ needs.setup.outputs.nginx_version }}"
-            echo "- MariaDB版本: ${{ needs.setup.outputs.mariadb_version }}"
-            echo "- Redis版本: ${{ needs.setup.outputs.redis_version }}"
-            echo "- Alpine版本: ${{ needs.setup.outputs.alpine_version }}"
-            
-            echo "\n发布信息："
-            if [ "${{ needs.setup.outputs.rebuild_type }}" != "test" ]; then
-              if [ "${{ needs.create-release.result }}" = "success" ]; then
-                echo "✅ GitHub Release已创建"
-              else
-                echo "⚠️ 未创建Release（可能因为没有需要重构的模块）"
-              fi
-              echo "💡 注：脚本更新的快速发布由version-monitor.yml工作流处理"
+          echo "  - 构建模块: ${{ needs.setup.outputs.modules }}"
+          echo "  - 实际重构模块: ${{ needs.check-modules.outputs.changed_modules || '无' }}"
+          echo "  - 重构类型: ${{ needs.setup.outputs.rebuild_type }}"
+          echo "  - 测试模式: ${{ needs.setup.outputs.test_mode }}"
+          echo "  - 自动部署: ${{ needs.setup.outputs.is_auto_deploy }}"
+          
+          echo "\n版本信息："
+          echo "  - PHP版本: ${{ needs.setup.outputs.php_version }}"
+          echo "  - Nginx版本: ${{ needs.setup.outputs.nginx_version }}"
+          echo "  - MariaDB版本: ${{ needs.setup.outputs.mariadb_version }}"
+          echo "  - Redis版本: ${{ needs.setup.outputs.redis_version }}"
+          echo "  - Alpine版本: ${{ needs.setup.outputs.alpine_version }}"
+          
+          echo "\n发布信息："
+          if [ "${{ needs.setup.outputs.rebuild_type }}" != "test" ]; then
+            if [ "${{ needs.create-release.result }}" = "success" ]; then
+              echo "GitHub Release已创建"
+            else
+              echo "未创建Release（可能因为没有需要重构的模块）"
             fi
+            echo "注：脚本更新的快速发布由version-monitor.yml工作流处理"
+          fi
