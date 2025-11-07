@@ -139,9 +139,11 @@ jobs:
           fi
           
           if [ "$TEST_MODE" = "true" ] || [ "$REBUILD_TYPE" = "test" ]; then
-            echo "测试模式：构建所有功能模块"
+            echo "测试模式：强制构建所有功能模块"
             REBUILD_TYPE="test"
             MODULES="base,php,nginx,mariadb,redis"
+            # 关键：强制所有模块重建
+            echo "rebuild_all_for_test=true" >> $GITHUB_OUTPUT
           fi
           
           echo "构建参数："
@@ -275,6 +277,21 @@ jobs:
             echo "changed_modules=$CHANGED_MODULES" >> $GITHUB_OUTPUT
           fi
 
+          # 新增：测试模式强制所有模块重建
+          if [ "${{ needs.setup.outputs.rebuild_all_for_test }}" = "true" ]; then
+            echo "测试模式：强制重建所有模块"
+            REBUILD_PHP="true"
+            REBUILD_NGINX="true"
+            REBUILD_MARIADB="true"
+            REBUILD_REDIS="true"
+            CHANGED_MODULES="php,nginx,mariadb,redis"
+            echo "rebuild_php=$REBUILD_PHP" >> $GITHUB_OUTPUT
+            echo "rebuild_nginx=$REBUILD_NGINX" >> $GITHUB_OUTPUT
+            echo "rebuild_mariadb=$REBUILD_MARIADB" >> $GITHUB_OUTPUT
+            echo "rebuild_redis=$REBUILD_REDIS" >> $GITHUB_OUTPUT
+            echo "changed_modules=$CHANGED_MODULES" >> $GITHUB_OUTPUT
+          fi
+          
   # ==================== PHP 三连 ====================
   build-php-image:
     needs: [setup, build-base-image, check-modules]
