@@ -324,7 +324,7 @@ jobs:
   push-php-image:
     needs: [test-php-image, setup]
     runs-on: ubuntu-latest
-    if: ${{ needs.test-php-image.result == 'success' }}
+    if: ${{ needs.test-php-image.result == 'success' && needs.setup.outputs.test_mode != 'true' }}
     steps:
       - name: 登录并推送PHP镜像
         uses: docker/login-action@v2
@@ -400,7 +400,7 @@ jobs:
   push-nginx-image:
     needs: [test-nginx-image, setup]
     runs-on: ubuntu-latest
-    if: ${{ needs.test-nginx-image.result == 'success' }}
+    if: ${{ needs.test-nginx-image.result == 'success' && needs.setup.outputs.test_mode != 'true' }}
     steps:
       - name: 登录并推送Nginx镜像
         uses: docker/login-action@v2
@@ -462,7 +462,7 @@ jobs:
   push-mariadb-image:
     needs: [test-mariadb-image, setup]
     runs-on: ubuntu-latest
-    if: ${{ needs.test-mariadb-image.result == 'success' }}
+    if: ${{ needs.test-mariadb-image.result == 'success' && needs.setup.outputs.test_mode != 'true' }}
     steps:
       - name: 登录并推送MariaDB镜像
         uses: docker/login-action@v2
@@ -524,7 +524,7 @@ jobs:
   push-redis-image:
     needs: [test-redis-image, setup]
     runs-on: ubuntu-latest
-    if: ${{ needs.test-redis-image.result == 'success' }}
+    if: ${{ needs.test-redis-image.result == 'success' && needs.setup.outputs.test_mode != 'true' }}
     steps:
       - name: 登录并推送Redis镜像
         uses: docker/login-action@v2
