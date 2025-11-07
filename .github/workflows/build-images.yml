@@ -164,6 +164,15 @@ jobs:
           echo "test_mode=$TEST_MODE" >> $GITHUB_OUTPUT
           
           mkdir -p build/Dockerfiles/php build/Dockerfiles/nginx build/Dockerfiles/mariadb build/Dockerfiles/redis build/Dockerfiles/base
+          # 假设源 Dockerfile 位于项目根目录下的 dockerfiles/ 文件夹中，进行复制
+          # 如果源路径不同，请调整
+          cp dockerfiles/base/Dockerfile build/Dockerfiles/base/Dockerfile || true
+          cp dockerfiles/php/Dockerfile build/Dockerfiles/php/Dockerfile || true
+          cp dockerfiles/nginx/Dockerfile build/Dockerfiles/nginx/Dockerfile || true
+          cp dockerfiles/nginx/conf.d/nginx.conf build/Dockerfiles/nginx/conf.d/nginx.conf || true  # 如果有配置文件
+          cp dockerfiles/mariadb/Dockerfile build/Dockerfiles/mariadb/Dockerfile || true
+          cp dockerfiles/redis/Dockerfile build/Dockerfiles/redis/Dockerfile || true
+          # 写入版本文件
           echo "$PHP_VERSION" > build/Dockerfiles/php/php_version.txt
           echo "$NGINX_VERSION" > build/Dockerfiles/nginx/nginx_version.txt
           echo "$MARIADB_VERSION" > build/Dockerfiles/mariadb/mariadb_version.txt
@@ -264,15 +273,21 @@ jobs:
           echo "rebuild_redis=$REBUILD_REDIS" >> $GITHUB_OUTPUT
           echo "changed_modules=$CHANGED_MODULES" >> $GITHUB_OUTPUT
           
-          if [ -z "$CHANGED_MODULES" ] && (echo "${{ needs.setup.outputs.modules }}" | grep -q "base" || [ "${{ needs.setup.outputs.rebuild_type }}" = "full" ]); then
+          # 改进逻辑：基础镜像变更时强制重建所有模块
+          if [[ "${{ needs.setup.outputs.rebuild_type }}" == "full" ]] || [[ "${{ needs.setup.outputs.rebuild_type }}" == "test" ]] || [[ "${{ contains(needs.setup.outputs.modules, 'base') }}" == "true" ]]; then
             echo "基础镜像变更，所有功能模块都需要重构"
-            echo "rebuild_php=true" >> $GITHUB_OUTPUT
-            echo "rebuild_nginx=true" >> $GITHUB_OUTPUT
-            echo "rebuild_mariadb=true" >> $GITHUB_OUTPUT
-            echo "rebuild_redis=true" >> $GITHUB_OUTPUT
-            echo "changed_modules=php,nginx,mariadb,redis" >> $GITHUB_OUTPUT
+            REBUILD_PHP="true"
+            REBUILD_NGINX="true"
+            REBUILD_MARIADB="true"
+            REBUILD_REDIS="true"
+            CHANGED_MODULES="php,nginx,mariadb,redis"
+            echo "rebuild_php=$REBUILD_PHP" >> $GITHUB_OUTPUT
+            echo "rebuild_nginx=$REBUILD_NGINX" >> $GITHUB_OUTPUT
+            echo "rebuild_mariadb=$REBUILD_MARIADB" >> $GITHUB_OUTPUT
+            echo "rebuild_redis=$REBUILD_REDIS" >> $GITHUB_OUTPUT
+            echo "changed_modules=$CHANGED_MODULES" >> $GITHUB_OUTPUT
           fi
-  
+
   build-php-image:
     needs: [setup, build-base-image, check-modules]
     runs-on: ubuntu-latest
@@ -378,9 +393,9 @@ jobs:
       - name: 运行Nginx镜像测试
         run: |
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest
-          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest nginx -v
-          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest nginx -t
-          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest nginx -T | grep -q "php-fpm" && echo "WordPress Nginx配置已正确包含" || (echo "WordPress Nginx配置未找到" && exit 1)
+          docker run --rm --entrypoint nginx ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest -v
+          docker run --rm --entrypoint nginx ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest -t
+          docker run --rm --entrypoint sh ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest -c "nginx -T | grep -q 'php-fpm' && echo 'WordPress Nginx配置已正确包含' || (echo 'WordPress Nginx配置未找到' && exit 1)"
 
   build-mariadb-image:
     needs: [setup, check-modules]
@@ -428,7 +443,7 @@ jobs:
       - name: 运行MariaDB镜像测试
         run: |
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest
-          docker run --rm --entrypoint=mysql ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest --version
+          docker run --rm --entrypoint mysql ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest --version
           echo "MariaDB镜像测试完成"
 
   build-redis-image:

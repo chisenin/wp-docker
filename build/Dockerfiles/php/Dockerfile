@@ -1,60 +1,123 @@
-# --- 构建阶段 ---
-# 使用ARG参数支持动态传入base镜像地址，默认为alpine:3.22作为回退
-ARG BASE_IMAGE=alpine:3.22
+# ============ 构建阶段 ============
+ARG PHP_VERSION=8.3
+ARG BASE_IMAGE=alpine:3.20
 FROM ${BASE_IMAGE} AS base
 
-FROM php:8.3-fpm-alpine3.22 AS builder
+# 动态 PHP 基础镜像
+FROM php:${PHP_VERSION}-fpm-alpine AS builder
 
-# 定义 ARG 以支持动态哈希传入（默认为空，回退时硬编码）
+# 构建参数
 ARG COMPOSER_HASH=""
 
-# 提取实际 PHP 版本（写入 /tmp/php_version，用于动态标签）
-RUN php -v | head -1 | cut -d' ' -f2 | cut -d'-' -f1 > /tmp/php_version || echo "8.3" > /tmp/php_version
-
+# 复制 Alpine 源（从 base 镜像）
 COPY --from=base /etc/apk/repositories /etc/apk/repositories
 
-# 更新包索引
-RUN apk update --no-cache
+# 安装构建依赖
+RUN apk add --no-cache --virtual .build-deps \
+        $PHPIZE_DEPS \
+        freetype-dev \
+        libpng-dev \
+        libjpeg-turbo-dev \
+        libwebp-dev \
+        icu-dev \
+        libzip-dev \
+        git \
+        autoconf \
+        g++ \
+        libtool \
+        make \
+    && apk add --no-cache \
+        libpng \
+        libjpeg-turbo \
+        freetype \
+        libwebp \
+        icu \
+        libzip \
+        zip \
+        unzip
 
-# 安装依赖和编译工具
+# 配置并安装 PHP 扩展
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
+    && docker-php-ext-install -j$(nproc) \
+        pdo_mysql \
+        mysqli \
+        gd \
+        exif \
+        intl \
+        zip \
+        opcache
+
+# 安装 Imagick（你测试了）
+RUN pecl install imagick \
+    && docker-php-ext-enable imagick
+
+# 安装 Composer（使用本地 composer_hash.txt 优先）
+COPY build/Dockerfiles/php/composer_hash.txt /tmp/composer_hash.txt 2>/dev/null || true
+RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" \
+    && EXPECTED_HASH=$(cat /tmp/composer_hash.txt 2>/dev/null || echo "$COMPOSER_HASH" || curl -s https://composer.github.io/installer.sig) \
+    && php -r " \
+        if (hash_file('sha384', 'composer-setup.php') === '$EXPECTED_HASH') { \
+            echo 'Installer verified'; \
+        } else { \
+            echo 'Installer corrupt'; unlink('composer-setup.php'); exit(1); \
+        }; echo PHP_EOL;" \
+    && php composer-setup.php --install-dir=/usr/local/bin --filename=composer \
+    && php -r "unlink('composer-setup.php');" \
+    && rm -f /tmp/composer_hash.txt
+
+# 写入 PHP 版本（用于标签）
+RUN php -v | head -1 | awk '{print $2}' | cut -d'+' -f1 > /tmp/php_version
+
+# 清理
+RUN apk del .build-deps && rm -rf /var/cache/apk/* /tmp/*
+
+# ============ 最终运行阶段 ============
+FROM php:${PHP_VERSION}-fpm-alpine AS final
+
+# 复制 Alpine 源
+COPY --from=base /etc/apk/repositories /etc/apk/repositories
+
+# 安装运行时依赖（关键！gd/imagick 依赖）
 RUN apk add --no-cache \
-        libzip-dev freetype-dev libpng-dev libjpeg-turbo-dev icu-dev libwebp-dev git \
-        zip unzip autoconf g++ libtool
+        libpng \
+        libjpeg-turbo \
+        freetype \
+        libwebp \
+        icu \
+        libzip \
+        imagemagick
 
-# 配置 GD 扩展
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp
-
-# 安装 PHP 扩展
-RUN docker-php-ext-install -j$(nproc) pdo_mysql mysqli gd exif intl zip opcache
-
-# 安装 Composer（使用动态 COMPOSER_HASH 参数验证安装器；如果为空，使用硬编码回退）
-RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
-    EXPECTED_HASH=$( [ -n "$COMPOSER_HASH" ] && echo "$COMPOSER_HASH" || curl -s https://composer.github.io/installer.sig ) && \
-    php -r "if (hash_file('sha384', 'composer-setup.php') === '$EXPECTED_HASH') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); exit(1); }; echo PHP_EOL;" && \
-    php composer-setup.php --install-dir=/usr/local/bin --filename=composer && \
-    php -r "unlink('composer-setup.php');"
-
-# 清理缓存（增强鲁棒性，忽略空目录错误）
-RUN rm -rf /var/cache/apk/* 2>/dev/null || true
-
-# --- 最终运行阶段 ---
-FROM php:8.3-fpm-alpine3.22 AS final
-
-COPY --from=base /etc/apk/repositories /etc/apk/repositories
-
-# 从 builder 阶段复制编译好的扩展、工具和版本文件
+# 从 builder 复制扩展和工具
 COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
 COPY --from=builder /usr/local/bin/composer /usr/local/bin/composer
 COPY --from=builder /tmp/php_version /tmp/php_version
 
-RUN docker-php-ext-enable pdo_mysql mysqli gd exif intl zip opcache && rm -rf /var/cache/apk/* 2>/dev/null || true
+# 启用扩展
+RUN docker-php-ext-enable \
+        pdo_mysql \
+        mysqli \
+        gd \
+        exif \
+        intl \
+        zip \
+        opcache \
+        imagick
 
+# 复制配置文件
 COPY build/deploy_configs/php/php.ini /usr/local/etc/php/php.ini
 
-# 创建日志目录并设置权限
-RUN mkdir -p /var/log/php && \
-    touch /var/log/php/error.log && \
-    chown -R www-data:www-data /var/log/php /var/www/html && \
-    chmod -R 755 /var/log/php /var/www/html
+# 创建日志目录
+RUN mkdir -p /var/log/php /var/www/html \
+    && touch /var/log/php/error.log \
+    && chown -R www-data:www-data /var/log/php /var/www/html \
+    && chmod -R 755 /var/log/php /var/www/html
 
+# 工作目录
 WORKDIR /var/www/html
+
+# 暴露端口
+EXPOSE 9000
+
+# 健康检查（可选）
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD php-fpm -t || exit 1
