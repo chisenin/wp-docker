@@ -164,21 +164,13 @@ jobs:
           echo "test_mode=$TEST_MODE" >> $GITHUB_OUTPUT
           
           mkdir -p build/Dockerfiles/php build/Dockerfiles/nginx build/Dockerfiles/mariadb build/Dockerfiles/redis build/Dockerfiles/base
-          # 假设源 Dockerfile 位于项目根目录下的 dockerfiles/ 文件夹中，进行复制
-          # 如果源路径不同，请调整
-          cp dockerfiles/base/Dockerfile build/Dockerfiles/base/Dockerfile || true
-          cp dockerfiles/php/Dockerfile build/Dockerfiles/php/Dockerfile || true
-          cp dockerfiles/nginx/Dockerfile build/Dockerfiles/nginx/Dockerfile || true
-          cp dockerfiles/nginx/conf.d/nginx.conf build/Dockerfiles/nginx/conf.d/nginx.conf || true  # 如果有配置文件
-          cp dockerfiles/mariadb/Dockerfile build/Dockerfiles/mariadb/Dockerfile || true
-          cp dockerfiles/redis/Dockerfile build/Dockerfiles/redis/Dockerfile || true
-          # 写入版本文件
           echo "$PHP_VERSION" > build/Dockerfiles/php/php_version.txt
           echo "$NGINX_VERSION" > build/Dockerfiles/nginx/nginx_version.txt
           echo "$MARIADB_VERSION" > build/Dockerfiles/mariadb/mariadb_version.txt
           echo "$REDIS_VERSION" > build/Dockerfiles/redis/redis_version.txt
           echo "$ALPINE_VERSION" > build/Dockerfiles/base/alpine_version.txt
 
+  # ==================== BASE IMAGE (必须先推) ====================
   build-base-image:
     needs: setup
     runs-on: ubuntu-latest
@@ -186,19 +178,15 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: 登录到Docker Hub
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          logout: true
 
       - name: 构建并推送基础镜像
         uses: docker/build-push-action@v5
@@ -273,7 +261,6 @@ jobs:
           echo "rebuild_redis=$REBUILD_REDIS" >> $GITHUB_OUTPUT
           echo "changed_modules=$CHANGED_MODULES" >> $GITHUB_OUTPUT
           
-          # 改进逻辑：基础镜像变更时强制重建所有模块
           if [[ "${{ needs.setup.outputs.rebuild_type }}" == "full" ]] || [[ "${{ needs.setup.outputs.rebuild_type }}" == "test" ]] || [[ "${{ contains(needs.setup.outputs.modules, 'base') }}" == "true" ]]; then
             echo "基础镜像变更，所有功能模块都需要重构"
             REBUILD_PHP="true"
@@ -288,26 +275,62 @@ jobs:
             echo "changed_modules=$CHANGED_MODULES" >> $GITHUB_OUTPUT
           fi
 
+  # ==================== PHP 三连 ====================
   build-php-image:
     needs: [setup, build-base-image, check-modules]
     runs-on: ubuntu-latest
     if: ${{ needs.check-modules.outputs.rebuild_php == 'true' }}
+    outputs:
+      image_tag: wp-docker-php:test
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 登录到Docker Hub
-        if: github.event_name != 'pull_request'
+      - name: 构建PHP镜像（仅加载）
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./build/Dockerfiles/php/Dockerfile
+          push: false
+          load: true
+          platforms: linux/amd64
+          build-args: |
+            PHP_VERSION=${{ needs.setup.outputs.php_version }}
+            BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+          tags: wp-docker-php:test
+
+  test-php-image:
+    needs: build-php-image
+    runs-on: ubuntu-latest
+    steps:
+      - name: 测试本地PHP镜像
+        run: |
+          echo "=== 测试本地 PHP 镜像 ==="
+          docker run --rm wp-docker-php:test php -v
+          
+          EXTENSIONS=("curl" "gd" "mbstring" "mysqli" "pdo_mysql" "redis" "zip" "imagick")
+          for ext in "${EXTENSIONS[@]}"; do
+            if docker run --rm wp-docker-php:test php -m | grep -q "^$ext$"; then
+              echo "扩展 $ext 已安装"
+            else
+              echo "扩展 $ext 未安装"
+              exit 1
+            fi
+          done
+
+  push-php-image:
+    needs: [test-php-image, setup]
+    runs-on: ubuntu-latest
+    if: ${{ needs.test-php-image.result == 'success' }}
+    steps:
+      - name: 登录并推送PHP镜像
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          logout: true
 
       - name: 构建并推送PHP镜像
         uses: docker/build-push-action@v5
@@ -324,49 +347,66 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}
             ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:${{ needs.setup.outputs.php_version }}-${{ github.sha }}
 
-  test-php-image:
-    needs: build-php-image
-    runs-on: ubuntu-latest
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 运行PHP镜像测试
-        run: |
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest
-          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest php -v
-          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest php -m | grep -E 'curl|gd|mbstring|mysqli|pdo_mysql|redis|zip'
-          
-          EXTENSIONS=("curl" "gd" "mbstring" "mysqli" "pdo_mysql" "redis" "zip" "imagick")
-          for ext in "${EXTENSIONS[@]}"; do
-            if docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-php:latest php -m | grep -q "$ext"; then
-              echo "PHP扩展 $ext 已安装"
-            else
-              echo "PHP扩展 $ext 未安装"
-              exit 1
-            fi
-          done
-
+  # ==================== NGINX 三连 ====================
   build-nginx-image:
     needs: [setup, build-base-image, check-modules]
     runs-on: ubuntu-latest
     if: ${{ needs.check-modules.outputs.rebuild_nginx == 'true' }}
+    outputs:
+      image_tag: wp-docker-nginx:test
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 登录到Docker Hub
-        if: github.event_name != 'pull_request'
+      - name: 构建Nginx镜像（仅加载）
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./build/Dockerfiles/nginx/Dockerfile
+          push: false
+          load: true
+          platforms: linux/amd64
+          build-args: |
+            NGINX_VERSION=${{ needs.setup.outputs.nginx_version }}
+            BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+          tags: wp-docker-nginx:test
+
+  test-nginx-image:
+    needs: build-nginx-image
+    runs-on: ubuntu-latest
+    steps:
+      - name: 测试本地Nginx镜像
+        run: |
+          echo "=== 测试本地 Nginx 镜像 ==="
+          docker run --rm wp-docker-nginx:test nginx -v
+          
+          if docker run --rm wp-docker-nginx:test nginx -t; then
+            echo "Nginx 配置语法正确"
+          else
+            echo "Nginx 配置语法错误"
+            exit 1
+          fi
+          
+          if docker run --rm wp-docker-nginx:test sh -c "nginx -T | grep -q 'fastcgi_pass.*9000'"; then
+            echo "PHP-FPM 配置存在"
+          else
+            echo "缺失 PHP-FPM 配置"
+            exit 1
+          fi
+
+  push-nginx-image:
+    needs: [test-nginx-image, setup]
+    runs-on: ubuntu-latest
+    if: ${{ needs.test-nginx-image.result == 'success' }}
+    steps:
+      - name: 登录并推送Nginx镜像
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          logout: true
 
       - name: 构建并推送Nginx镜像
         uses: docker/build-push-action@v5
@@ -383,40 +423,52 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}
             ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:${{ needs.setup.outputs.nginx_version }}-${{ github.sha }}
 
-  test-nginx-image:
-    needs: build-nginx-image
-    runs-on: ubuntu-latest
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 运行Nginx镜像测试
-        run: |
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest
-          docker run --rm --entrypoint nginx ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest -v
-          docker run --rm --entrypoint nginx ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest -t
-          docker run --rm --entrypoint sh ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-nginx:latest -c "nginx -T | grep -q 'php-fpm' && echo 'WordPress Nginx配置已正确包含' || (echo 'WordPress Nginx配置未找到' && exit 1)"
-
+  # ==================== MARIADB 三连 ====================
   build-mariadb-image:
     needs: [setup, check-modules]
     runs-on: ubuntu-latest
     if: ${{ needs.check-modules.outputs.rebuild_mariadb == 'true' }}
+    outputs:
+      image_tag: wp-docker-mariadb:test
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 登录到Docker Hub
-        if: github.event_name != 'pull_request'
+      - name: 构建MariaDB镜像（仅加载）
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./build/Dockerfiles/mariadb/Dockerfile
+          push: false
+          load: true
+          platforms: linux/amd64
+          build-args: |
+            MARIADB_VERSION=${{ needs.setup.outputs.mariadb_version }}
+            BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+          tags: wp-docker-mariadb:test
+
+  test-mariadb-image:
+    needs: build-mariadb-image
+    runs-on: ubuntu-latest
+    steps:
+      - name: 测试本地MariaDB镜像
+        run: |
+          echo "=== 测试本地 MariaDB 镜像 ==="
+          docker run --rm wp-docker-mariadb:test mysql --version
+
+  push-mariadb-image:
+    needs: [test-mariadb-image, setup]
+    runs-on: ubuntu-latest
+    if: ${{ needs.test-mariadb-image.result == 'success' }}
+    steps:
+      - name: 登录并推送MariaDB镜像
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          logout: true
 
       - name: 构建并推送MariaDB镜像
         uses: docker/build-push-action@v5
@@ -433,39 +485,52 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}
             ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:${{ needs.setup.outputs.mariadb_version }}-${{ github.sha }}
 
-  test-mariadb-image:
-    needs: build-mariadb-image
-    runs-on: ubuntu-latest
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 运行MariaDB镜像测试
-        run: |
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest
-          docker run --rm --entrypoint mysql ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-mariadb:latest --version
-          echo "MariaDB镜像测试完成"
-
+  # ==================== REDIS 三连 ====================
   build-redis-image:
     needs: [setup, check-modules]
     runs-on: ubuntu-latest
     if: ${{ needs.check-modules.outputs.rebuild_redis == 'true' }}
+    outputs:
+      image_tag: wp-docker-redis:test
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 登录到Docker Hub
-        if: github.event_name != 'pull_request'
+      - name: 构建Redis镜像（仅加载）
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./build/Dockerfiles/redis/Dockerfile
+          push: false
+          load: true
+          platforms: linux/amd64
+          build-args: |
+            REDIS_VERSION=${{ needs.setup.outputs.redis_version }}
+            BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-base:${{ needs.setup.outputs.alpine_version }}
+          tags: wp-docker-redis:test
+
+  test-redis-image:
+    needs: build-redis-image
+    runs-on: ubuntu-latest
+    steps:
+      - name: 测试本地Redis镜像
+        run: |
+          echo "=== 测试本地 Redis 镜像 ==="
+          docker run --rm wp-docker-redis:test redis-server --version
+
+  push-redis-image:
+    needs: [test-redis-image, setup]
+    runs-on: ubuntu-latest
+    if: ${{ needs.test-redis-image.result == 'success' }}
+    steps:
+      - name: 登录并推送Redis镜像
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          logout: true
 
       - name: 构建并推送Redis镜像
         uses: docker/build-push-action@v5
@@ -482,19 +547,7 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}
             ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:${{ needs.setup.outputs.redis_version }}-${{ github.sha }}
 
-  test-redis-image:
-    needs: build-redis-image
-    runs-on: ubuntu-latest
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 运行Redis镜像测试
-        run: |
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:latest
-          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/wp-docker-redis:latest redis-server --version
-          echo "Redis镜像测试完成"
-
+  # ==================== 发布与清理 ====================
   create-release:
     needs: [setup, check-modules, test-php-image, test-nginx-image, test-mariadb-image, test-redis-image]
     runs-on: ubuntu-latest
