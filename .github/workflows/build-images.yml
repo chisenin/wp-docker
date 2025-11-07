@@ -194,7 +194,7 @@ jobs:
       - name: 构建并推送基础镜像
         uses: docker/build-push-action@v5
         with:
-          context: ./build/Dockerfiles/base
+          context: .
           file: ./build/Dockerfiles/base/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
@@ -297,7 +297,7 @@ jobs:
       - name: 构建并推送PHP镜像
         uses: docker/build-push-action@v5
         with:
-          context: ./build/Dockerfiles/php
+          context: .
           file: ./build/Dockerfiles/php/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
@@ -356,7 +356,7 @@ jobs:
       - name: 构建并推送Nginx镜像
         uses: docker/build-push-action@v5
         with:
-          context: ./build/Dockerfiles/nginx
+          context: .
           file: ./build/Dockerfiles/nginx/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
@@ -406,7 +406,7 @@ jobs:
       - name: 构建并推送MariaDB镜像
         uses: docker/build-push-action@v5
         with:
-          context: ./build/Dockerfiles/mariadb
+          context: .
           file: ./build/Dockerfiles/mariadb/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
@@ -455,7 +455,7 @@ jobs:
       - name: 构建并推送Redis镜像
         uses: docker/build-push-action@v5
         with:
-          context: ./build/Dockerfiles/redis
+          context: .
           file: ./build/Dockerfiles/redis/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
