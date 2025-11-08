@@ -205,7 +205,6 @@ https://github.com/chisenin/wp-docker/releases/latest/download/auto_deploy.sh
 
   bash
 
-<<<<<<< HEAD
   ```
   mkdir -p ~/wp && cd ~/wp
   curl -L -o .env https://github.com/chisenin/wp-docker/releases/latest/download/.env
@@ -255,9 +254,3 @@ https://github.com/chisenin/wp-docker/releases/latest/download/auto_deploy.sh
   - 负载均衡/蓝绿部署。
   - 集成 check_versions.sh 到 Actions。
   - 多架构/安全扫描。
-=======
-- 实现 HTTPS 证书自动获取和更新
-- 完善监控和告警体系
-- 添加负载均衡支持
-- 实现蓝绿部署功能
->>>>>>> c74805e0cfc63c40a9094bd020783828dafbea7c
