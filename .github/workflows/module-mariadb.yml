@@ -1,0 +1,36 @@
+# .github/workflows/module-mariadb.yml
+name: Module - MariaDB (Official)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mariadb_version:
+        required: true
+  workflow_call:
+    inputs:
+      mariadb_version:
+        required: true
+
+jobs:
+  pull-and-save:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: chisenin/wp-mariadb
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Pull Official MariaDB
+        run: |
+          docker pull mariadb:${{ inputs.mariadb_version }}
+
+      - name: Retag and Push
+        run: |
+          docker tag mariadb:${{ inputs.mariadb_version }} \
+            ${{ env.IMAGE_NAME }}:${{ inputs.mariadb_version }}
+          docker push ${{ env.IMAGE_NAME }}:${{ inputs.mariadb_version }}
+          docker tag ${{ env.IMAGE_NAME }}:${{ inputs.mariadb_version }} \
+            ${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.IMAGE_NAME }}:latest

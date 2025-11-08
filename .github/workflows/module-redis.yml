@@ -1,0 +1,36 @@
+# .github/workflows/module-redis.yml
+name: Module - Redis (Official)
+
+on:
+  workflow_dispatch:
+    inputs:
+      redis_version:
+        required: true
+  workflow_call:
+    inputs:
+      redis_version:
+        required: true
+
+jobs:
+  pull-and-save:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: chisenin/wp-redis
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Pull Official Redis
+        run: |
+          docker pull redis:${{ inputs.redis_version }}-alpine
+
+      - name: Retag and Push
+        run: |
+          docker tag redis:${{ inputs.redis_version }}-alpine \
+            ${{ env.IMAGE_NAME }}:${{ inputs.redis_version }}
+          docker push ${{ env.IMAGE_NAME }}:${{ inputs.redis_version }}
+          docker tag ${{ env.IMAGE_NAME }}:${{ inputs.redis_version }} \
+            ${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.IMAGE_NAME }}:latest

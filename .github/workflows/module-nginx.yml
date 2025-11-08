@@ -1,0 +1,58 @@
+# .github/workflows/module-nginx.yml
+name: Module - Nginx
+
+on:
+  workflow_dispatch:
+    inputs:
+      nginx_version:
+        required: true
+      use_official:
+        default: 'false'
+  workflow_call:
+    inputs:
+      nginx_version:
+        required: true
+      use_official:
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: chisenin/wp-nginx
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Custom Nginx
+        if: inputs.use_official != 'true'
+        run: |
+          docker build \
+            --build-arg NGINX_VERSION=${{ inputs.nginx_version }} \
+            -t ${{ env.IMAGE_NAME }}:${{ inputs.nginx_version }} \
+            -f build/Dockerfiles/nginx/Dockerfile .
+
+      - name: Pull & Retag Official Nginx
+        if: inputs.use_official == 'true'
+        run: |
+          docker pull nginx:${{ inputs.nginx_version }}-alpine
+          docker tag nginx:${{ inputs.nginx_version }}-alpine \
+            ${{ env.IMAGE_NAME }}:${{ inputs.nginx_version }}
+
+      - name: Test Nginx
+        run: |
+          docker run --rm -d -p 8080:80 --name test-nginx \
+            ${{ env.IMAGE_NAME }}:${{ inputs.nginx_version }}
+          sleep 3
+          curl -f http://localhost:8080 || exit 1
+          docker stop test-nginx
+
+      - name: Push
+        run: |
+          docker push ${{ env.IMAGE_NAME }}:${{ inputs.nginx_version }}
+          docker tag ${{ env.IMAGE_NAME }}:${{ inputs.nginx_version }} \
+            ${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.IMAGE_NAME }}:latest

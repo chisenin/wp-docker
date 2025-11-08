@@ -1,0 +1,61 @@
+# .github/workflows/module-base.yml
+name: Module - Base Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      use_official:
+        description: 'Use official Alpine? (true/false)'
+        required: true
+        default: 'false'
+  workflow_call:
+    inputs:
+      use_official:
+        required: true
+        type: string
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: chisenin/wp-base
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(cat build/Dockerfiles/base/base_version.txt | xargs)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Custom Base (if not using official)
+        if: inputs.use_official != 'true'
+        run: |
+          docker build \
+            -t ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} \
+            -f build/Dockerfiles/base/Dockerfile \
+            build/Dockerfiles/base/
+
+      - name: Pull & Retag Official Alpine
+        if: inputs.use_official == 'true'
+        run: |
+          docker pull alpine:${{ steps.version.outputs.version }}
+          docker tag alpine:${{ steps.version.outputs.version }} \
+            ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+
+      - name: Test Base Image
+        run: |
+          docker run --rm ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} cat /etc/os-release
+
+      - name: Push to Docker Hub
+        run: |
+          docker push ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+          docker tag ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} \
+            ${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.IMAGE_NAME }}:latest

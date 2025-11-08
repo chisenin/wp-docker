@@ -1,0 +1,30 @@
+# .github/workflows/orchestrate-all.yml
+name: Orchestrate All Modules
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'  # 每天 3 点
+
+jobs:
+  call-modules:
+    strategy:
+      matrix:
+        include:
+          - module: base
+            version: "3.19"
+            use_official: "true"
+          - module: php
+            version: "8.3.12"
+            use_official: "false"
+          - module: nginx
+            version: "1.26.0"
+            use_official: "false"
+          - module: mariadb
+            version: "10.11.6"
+          - module: redis
+            version: "7.2.4"
+    uses: ./.github/workflows/module-${{ matrix.module }}.yml
+    with:
+      ${{ matrix.version && format('{0}_version', matrix.module) }}: ${{ matrix.version }}
+      use_official: ${{ matrix.use_official || 'true' }}

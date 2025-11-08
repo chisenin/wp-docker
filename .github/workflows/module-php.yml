@@ -1,0 +1,59 @@
+# .github/workflows/module-php.yml
+name: Module - PHP-FPM
+
+on:
+  workflow_dispatch:
+    inputs:
+      php_version:
+        description: 'PHP Version (e.g. 8.3.12)'
+        required: true
+      use_official:
+        description: 'Use official PHP image?'
+        default: 'false'
+  workflow_call:
+    inputs:
+      php_version:
+        required: true
+      use_official:
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: chisenin/wp-php
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Custom PHP-FPM
+        if: inputs.use_official != 'true'
+        run: |
+          docker build \
+            --build-arg PHP_VERSION=${{ inputs.php_version }} \
+            -t ${{ env.IMAGE_NAME }}:${{ inputs.php_version }}-fpm \
+            -f build/Dockerfiles/php/Dockerfile .
+
+      - name: Pull & Retag Official PHP
+        if: inputs.use_official == 'true'
+        run: |
+          docker pull php:${{ inputs.php_version }}-fpm-alpine
+          docker tag php:${{ inputs.php_version }}-fpm-alpine \
+            ${{ env.IMAGE_NAME }}:${{ inputs.php_version }}-fpm
+
+      - name: Test PHP
+        run: |
+          docker run --rm ${{ env.IMAGE_NAME }}:${{ inputs.php_version }}-fpm} php -v
+
+      - name: Push
+        run: |
+          docker push ${{ env.IMAGE_NAME }}:${{ inputs.php_version }}-fpm
+          docker tag ${{ env.IMAGE_NAME }}:${{ inputs.php_version }}-fpm \
+            ${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.IMAGE_NAME }}:latest
